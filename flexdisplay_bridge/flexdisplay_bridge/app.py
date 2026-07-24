@@ -17,7 +17,7 @@ from .renderer import DashboardRenderer
 from .store import DeviceStore
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
-SUPPORTED_COMMANDS = {"refresh", "next", "restart", "install"}
+SUPPORTED_COMMANDS = {"refresh", "next", "previous", "overview", "restart", "install"}
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 
 
@@ -118,6 +118,22 @@ def _device_id(value: str | None) -> str:
     return selected
 
 
+def _valid_command(command: str) -> bool:
+    return command in SUPPORTED_COMMANDS or bool(re.fullmatch(r"page-[1-9][0-9]?", command))
+
+
+def _auto_rotate_due(record: dict[str, Any], seconds: int) -> bool:
+    if seconds <= 0:
+        return False
+    changed_at = record.get("dashboard_page_changed_at")
+    if not isinstance(changed_at, str):
+        return False
+    try:
+        return (datetime.now(UTC) - datetime.fromisoformat(changed_at)).total_seconds() >= seconds
+    except ValueError:
+        return False
+
+
 def create_app(config: BridgeConfig | None = None) -> FastAPI:
     settings = config or load_config()
     store = DeviceStore(settings.state_path)
@@ -180,7 +196,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def command(device_id: str, command: str, request: Request) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
-        if command not in SUPPORTED_COMMANDS:
+        if not _valid_command(command):
             raise HTTPException(status_code=400, detail="Unsupported command")
         if command == "install" and (not settings.firmware.version or not settings.firmware.url):
             raise HTTPException(status_code=409, detail="No firmware release is configured")
@@ -236,16 +252,36 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if commands:
             record = store.get(device_id) or record
         entity_states, ha_error = ha.fetch(profile.entities)
-        pages = build_dashboard_pages(entity_states, record)
+        dashboard_profile = settings.profile(profile)
+        pages = build_dashboard_pages(
+            entity_states,
+            record,
+            dashboard_profile.pages if dashboard_profile else (),
+        )
         page_index = int(record.get("dashboard_page_index") or 0) % len(pages)
         if "next" in commands:
             page_index = (page_index + 1) % len(pages)
+        elif "previous" in commands:
+            page_index = (page_index - 1) % len(pages)
+        elif "overview" in commands:
+            page_index = 0
+        else:
+            requested_page = next(
+                (command for command in commands if command.startswith("page-")),
+                None,
+            )
+            if requested_page:
+                page_index = (int(requested_page.removeprefix("page-")) - 1) % len(pages)
+            elif dashboard_profile and _auto_rotate_due(record, dashboard_profile.auto_rotate_seconds):
+                page_index = (page_index + 1) % len(pages)
         page = pages[page_index]
         record = store.set_dashboard_page(
             device_id,
             page_index,
             len(pages),
             page.title,
+            [candidate.title for candidate in pages],
+            profile.profile,
         ) or record
         image = renderer.render(
             title=page.title,

@@ -22,7 +22,9 @@ class FlexDisplayButtonDescription(ButtonEntityDescription):
 
 DESCRIPTIONS = (
     FlexDisplayButtonDescription(key="refresh", translation_key="refresh", command="refresh"),
+    FlexDisplayButtonDescription(key="previous", translation_key="previous", command="previous"),
     FlexDisplayButtonDescription(key="next", translation_key="next", command="next"),
+    FlexDisplayButtonDescription(key="overview", translation_key="overview", command="overview"),
     FlexDisplayButtonDescription(key="restart", translation_key="restart", command="restart"),
 )
 

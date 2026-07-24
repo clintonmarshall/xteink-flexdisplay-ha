@@ -103,15 +103,24 @@ class DeviceStore:
         index: int,
         count: int,
         title: str,
+        titles: list[str] | None = None,
+        profile: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             record = self._state["devices"].get(device_id)
             if not record:
                 return None
+            changed = record.get("dashboard_page_index") != index
             record["dashboard_page_index"] = index
             record["dashboard_page_number"] = index + 1
             record["dashboard_page_count"] = count
             record["dashboard_page_title"] = title
+            if titles is not None:
+                record["dashboard_pages"] = titles
+            if profile is not None:
+                record["dashboard_profile"] = profile
+            if changed or not record.get("dashboard_page_changed_at"):
+                record["dashboard_page_changed_at"] = utc_now()
             self._save()
             return deepcopy(record)
 

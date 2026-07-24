@@ -17,19 +17,39 @@ Options:
 - `firmware_size`: exact firmware file size in bytes.
 - `firmware_minimum_battery`: minimum charge percentage for an unplugged update.
 
-## Dashboard pages
+## Dashboard profiles
 
-The Bridge automatically creates four readable pages from each device's
-configured entities:
+Without a configured profile, the Bridge generates eight readable pages from
+each device's entities. For explicit control, add named profiles under
+`dashboard.profiles` in `config.yaml`, set `dashboard.default_profile`, and
+assign a profile to each device:
 
-- **Overview** — the first four configured values.
-- **Climate** — temperature and humidity values.
-- **Energy** — battery, solar, and power values.
-- **Device Status** — FlexDisplay battery, Wi-Fi, uptime, and SD-card state.
+```yaml
+dashboard:
+  default_profile: home
+  profiles:
+    home:
+      auto_rotate_seconds: 0
+      pages:
+        - title: Overview
+          entities:
+            - sensor.outdoor_temperature
+            - sensor.home_battery
+        - title: Device Health
+          entities:
+            - device.battery
+            - device.uptime
+            - device.storage
+            - device.memory
 
-Each page uses at most four large tiles. Press **Next screen** on the
-FlexDisplay device in Home Assistant to advance to the next page. The current
-page title and page number are exposed as Home Assistant sensors.
+devices:
+  X4-123456:
+    profile: home
+```
+
+Each page uses at most four large tiles. Home Assistant exposes Previous
+screen, Next screen, Return to overview, and a direct Dashboard page selector.
+Set `auto_rotate_seconds` to zero to disable rotation.
 
 The device downloads to SD, verifies the configured size and SHA-256 digest,
 then uses the existing dual-partition firmware installer. Firmware `0.6.0`
