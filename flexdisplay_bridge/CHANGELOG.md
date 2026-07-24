@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0
+
+- Expanded the built-in dashboard set from four to eight readable pages.
+- Added dedicated Temperatures, Humidity, Batteries, Power, Device Health, and
+  Connectivity pages.
+
 ## 0.4.1
 
 - Added DejaVu scalable fonts to the Home Assistant App image so the large

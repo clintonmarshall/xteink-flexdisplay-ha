@@ -373,7 +373,7 @@ class DashboardRenderer:
                 value = entity.state
                 if entity.unit and entity.unit not in value:
                     value = f"{value} {entity.unit}"
-                value_font = _fit(draw, value, cell_width - 20, max(52, width // 9), True, 30)
+                value_font = _fit(draw, value, cell_width - 20, max(52, width // 9), True, 22)
                 value_width = draw.textbbox((0, 0), value, font=value_font)[2]
                 value_height = draw.textbbox((0, 0), value, font=value_font)[3]
                 value_y = bottom - value_height - 26

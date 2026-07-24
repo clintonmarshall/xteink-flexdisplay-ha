@@ -95,18 +95,18 @@ def test_next_command_advances_readable_dashboard_pages(tmp_path: Path) -> None:
     with TestClient(create_app(config)) as client:
         first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert first.headers["x-flexdisplay-page"] == "1"
-        assert first.headers["x-flexdisplay-page-count"] == "4"
+        assert first.headers["x-flexdisplay-page-count"] == "8"
         assert first.headers["x-flexdisplay-page-title"] == "OVERVIEW"
 
         client.post("/api/v1/devices/X4-DEMO01/commands/next")
         second = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert second.headers["x-flexdisplay-commands"] == "next"
         assert second.headers["x-flexdisplay-page"] == "2"
-        assert second.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        assert second.headers["x-flexdisplay-page-title"] == "TEMPERATURES"
         record = client.get("/api/v1/devices/X4-DEMO01").json()
-        assert record["dashboard_page_title"] == "CLIMATE"
+        assert record["dashboard_page_title"] == "TEMPERATURES"
         assert record["dashboard_page_number"] == 2
-        assert record["dashboard_page_count"] == 4
+        assert record["dashboard_page_count"] == 8
 
 
 def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> None:
@@ -236,5 +236,14 @@ def test_dashboard_pages_group_home_assistant_values() -> None:
         entities,
         {"battery_percent": 76, "rssi": -54, "uptime_seconds": 3600, "sd_ready": True},
     )
-    assert [page.title for page in pages] == ["OVERVIEW", "CLIMATE", "ENERGY", "DEVICE STATUS"]
+    assert [page.title for page in pages] == [
+        "OVERVIEW",
+        "TEMPERATURES",
+        "HUMIDITY",
+        "BATTERIES",
+        "POWER",
+        "ENERGY",
+        "DEVICE HEALTH",
+        "CONNECTIVITY",
+    ]
     assert all(len(page.entities) <= 4 for page in pages)
