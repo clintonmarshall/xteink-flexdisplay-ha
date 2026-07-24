@@ -97,6 +97,24 @@ class DeviceStore:
             record["dispatched_commands"] = []
             self._save()
 
+    def set_dashboard_page(
+        self,
+        device_id: str,
+        index: int,
+        count: int,
+        title: str,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            record["dashboard_page_index"] = index
+            record["dashboard_page_number"] = index + 1
+            record["dashboard_page_count"] = count
+            record["dashboard_page_title"] = title
+            self._save()
+            return deepcopy(record)
+
     def record_button_events(self, device_id: str, events: list[dict[str, Any]]) -> dict[str, Any] | None:
         """Append newly received physical-button events and update summaries."""
         if not events:

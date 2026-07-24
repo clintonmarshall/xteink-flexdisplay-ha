@@ -50,6 +50,12 @@ def _number(value: str) -> float | None:
 
 def _icon_kind(entity: EntityState) -> str:
     identity = f"{entity.entity_id} {entity.label}".lower()
+    if "wifi" in identity or "wi-fi" in identity or "signal" in identity:
+        return "wifi"
+    if "storage" in identity or "sd card" in identity:
+        return "storage"
+    if "uptime" in identity or "time" in identity:
+        return "clock"
     if "humidity" in identity or "moisture" in identity:
         return "humidity"
     if "temperature" in identity or "_temp" in identity:
@@ -75,6 +81,40 @@ def _draw_icon(
     cx = (left + right) // 2
     cy = (top + bottom) // 2
     stroke = max(2, width // 15)
+
+    if kind == "wifi":
+        _draw_wifi(draw, left, top, min(width, height))
+        return
+
+    if kind == "storage":
+        inset = max(5, width // 9)
+        draw.rounded_rectangle(
+            (left + inset, top + inset // 2, right - inset, bottom - inset // 2),
+            radius=stroke,
+            outline=0,
+            width=stroke,
+        )
+        draw.polygon(
+            [
+                (left + width * 2 // 3, top + inset // 2),
+                (right - inset, top + inset // 2),
+                (right - inset, top + height // 3),
+            ],
+            fill=0,
+        )
+        draw.line(
+            (left + width // 3, bottom - height // 4, right - width // 3, bottom - height // 4),
+            fill=0,
+            width=stroke,
+        )
+        return
+
+    if kind == "clock":
+        radius = min(width, height) * 2 // 5
+        draw.ellipse((cx - radius, cy - radius, cx + radius, cy + radius), outline=0, width=stroke)
+        draw.line((cx, cy, cx, cy - radius * 2 // 3), fill=0, width=stroke)
+        draw.line((cx, cy, cx + radius // 2, cy + radius // 3), fill=0, width=stroke)
+        return
 
     if kind == "temperature":
         bulb_r = max(5, width // 7)
@@ -207,6 +247,8 @@ class DashboardRenderer:
         width: int,
         height: int,
         entities: Iterable[EntityState],
+        page_index: int = 0,
+        page_count: int = 1,
         ha_error: str = "",
     ) -> bytes:
         width = max(240, min(1200, width))
@@ -219,11 +261,12 @@ class DashboardRenderer:
         footer_height = max(42, height // 18)
 
         draw.rectangle((0, 0, width, header_height), fill=0)
-        title_font = _fit(draw, title, int(width * 0.64), max(25, width // 17), True, 18)
+        title_font = _fit(draw, title, int(width * 0.68), max(30, width // 14), True, 22)
         draw.text((margin, 12), title, fill=255, font=title_font)
         identity = str(device.get("name") or device.get("device_id") or "FlexDisplay")
-        identity_font = _fit(draw, identity, int(width * 0.64), max(14, width // 31), False, 12)
-        draw.text((margin, header_height - 27), identity, fill=255, font=identity_font)
+        page_label = f"{identity}  •  {page_index + 1}/{max(1, page_count)}"
+        identity_font = _fit(draw, page_label, int(width * 0.68), max(15, width // 29), False, 12)
+        draw.text((margin, header_height - 28), page_label, fill=255, font=identity_font)
 
         now = datetime.now().astimezone()
         time_font = _font(max(22, width // 20), True)
@@ -235,7 +278,7 @@ class DashboardRenderer:
         draw.text((width - margin - time_width, 10), time_text, fill=255, font=time_font)
         draw.text((width - margin - date_width, header_height - 27), date_text, fill=255, font=date_font)
 
-        values = list(entities)[:8]
+        values = list(entities)[:4]
         grid_top = header_height + gap
         footer_top = height - footer_height
         grid_bottom = footer_top - gap
@@ -262,9 +305,9 @@ class DashboardRenderer:
                     width=2,
                 )
 
-                icon_size = min(max(36, cell_width // 5), max(36, card_height // 3))
-                icon_left = left + 12
-                icon_top = top + 12
+                icon_size = min(max(58, cell_width // 3), max(58, card_height // 3))
+                icon_left = left + (cell_width - icon_size) // 2
+                icon_top = top + 18
                 _draw_icon(
                     draw,
                     _icon_kind(entity),
@@ -272,18 +315,20 @@ class DashboardRenderer:
                     entity.state,
                 )
 
-                label_left = icon_left + icon_size + 10
-                label_width = right - label_left - 10
-                label_font = _fit(draw, entity.label, label_width, max(16, width // 29), True, 12)
-                draw.text((label_left, top + 15), entity.label, fill=0, font=label_font)
+                label_width = cell_width - 24
+                label_font = _fit(draw, entity.label, label_width, max(23, width // 20), True, 17)
+                label_bbox = draw.textbbox((0, 0), entity.label, font=label_font)
+                label_text_width = label_bbox[2] - label_bbox[0]
+                label_y = icon_top + icon_size + 12
+                draw.text((left + (cell_width - label_text_width) // 2, label_y), entity.label, fill=0, font=label_font)
 
                 value = entity.state
                 if entity.unit and entity.unit not in value:
                     value = f"{value} {entity.unit}"
-                value_font = _fit(draw, value, cell_width - 24, max(31, width // 15), True, 20)
+                value_font = _fit(draw, value, cell_width - 20, max(52, width // 9), True, 30)
                 value_width = draw.textbbox((0, 0), value, font=value_font)[2]
                 value_height = draw.textbbox((0, 0), value, font=value_font)[3]
-                value_y = bottom - value_height - 17
+                value_y = bottom - value_height - 26
                 draw.text((left + (cell_width - value_width) // 2, value_y), value, fill=0, font=value_font)
         else:
             box_top = grid_top + 28

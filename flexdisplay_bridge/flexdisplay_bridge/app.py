@@ -10,6 +10,7 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 
 from . import __version__
 from .config import BridgeConfig, DeviceConfig, load_config
+from .dashboards import build_dashboard_pages
 from .home_assistant import HomeAssistantClient
 from .mqtt_service import MqttService
 from .renderer import DashboardRenderer
@@ -235,12 +236,25 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if commands:
             record = store.get(device_id) or record
         entity_states, ha_error = ha.fetch(profile.entities)
+        pages = build_dashboard_pages(entity_states, record)
+        page_index = int(record.get("dashboard_page_index") or 0) % len(pages)
+        if "next" in commands:
+            page_index = (page_index + 1) % len(pages)
+        page = pages[page_index]
+        record = store.set_dashboard_page(
+            device_id,
+            page_index,
+            len(pages),
+            page.title,
+        ) or record
         image = renderer.render(
-            title=settings.title,
+            title=page.title,
             device={**record, "name": profile.name},
             width=width,
             height=height,
-            entities=entity_states,
+            entities=page.entities,
+            page_index=page_index,
+            page_count=len(pages),
             ha_error=ha_error,
         )
         digest = hashlib.sha256(image).hexdigest()
@@ -254,6 +268,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["ETag"] = f'"{digest}"'
         response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
+        response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
+        response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))
+        response.headers["X-FlexDisplay-Page-Title"] = page.title
         if settings.firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
         if "install" in commands:

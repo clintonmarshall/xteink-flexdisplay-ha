@@ -61,6 +61,18 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("mode"),
     ),
     FlexDisplaySensorDescription(
+        key="dashboard_page_title",
+        translation_key="dashboard_page",
+        value_fn=lambda record: record.get("dashboard_page_title") or "Overview",
+    ),
+    FlexDisplaySensorDescription(
+        key="dashboard_page_number",
+        translation_key="dashboard_page_number",
+        value_fn=lambda record: (
+            f"{record.get('dashboard_page_number', 1)}/{record.get('dashboard_page_count', 1)}"
+        ),
+    ),
+    FlexDisplaySensorDescription(
         key="pending_commands",
         translation_key="pending_commands",
         value_fn=lambda record: ", ".join(record.get("pending_commands") or []) or "none",

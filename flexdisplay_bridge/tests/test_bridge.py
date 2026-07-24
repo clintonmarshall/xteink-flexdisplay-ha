@@ -8,9 +8,11 @@ from flexdisplay_bridge.app import create_app
 from flexdisplay_bridge.config import (
     BridgeConfig,
     DeviceConfig,
+    EntityConfig,
     FirmwareConfig,
     HomeAssistantConfig,
 )
+from flexdisplay_bridge.dashboards import build_dashboard_pages
 from flexdisplay_bridge.home_assistant import EntityState
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from PIL import Image
@@ -74,6 +76,37 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["last_command_result"] == "refresh:complete"
         assert record["dispatched_commands"] == []
+
+
+def test_next_command_advances_readable_dashboard_pages(tmp_path: Path) -> None:
+    entities = (
+        EntityConfig("sensor.inside_temperature", "Inside Temperature", "°C"),
+        EntityConfig("sensor.movie_temperature", "Movie Room Temperature", "°C"),
+        EntityConfig("sensor.movie_humidity", "Movie Room Humidity", "%"),
+        EntityConfig("sensor.home_battery", "Home Battery", "%"),
+        EntityConfig("sensor.site_power", "Site Power", "kW"),
+        EntityConfig("sensor.solar_power", "Solar Power", "kW"),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        devices={"X4-DEMO01": DeviceConfig(name="Test X4", entities=entities)},
+    )
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert first.headers["x-flexdisplay-page"] == "1"
+        assert first.headers["x-flexdisplay-page-count"] == "4"
+        assert first.headers["x-flexdisplay-page-title"] == "OVERVIEW"
+
+        client.post("/api/v1/devices/X4-DEMO01/commands/next")
+        second = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert second.headers["x-flexdisplay-commands"] == "next"
+        assert second.headers["x-flexdisplay-page"] == "2"
+        assert second.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["dashboard_page_title"] == "CLIMATE"
+        assert record["dashboard_page_number"] == 2
+        assert record["dashboard_page_count"] == 4
 
 
 def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> None:
@@ -186,3 +219,22 @@ def test_entity_icons_are_selected_from_semantics() -> None:
     assert _icon_kind(EntityState("sensor.solar_power", "Solar", "1.2", "kW", True)) == "solar"
     assert _icon_kind(EntityState("sensor.home_battery", "Battery", "80", "%", True)) == "battery"
     assert _icon_kind(EntityState("sensor.site_power", "Site", "4.2", "kW", True)) == "power"
+    assert _icon_kind(EntityState("device.wifi", "Wi-Fi Signal", "-60", "dBm", True)) == "wifi"
+    assert _icon_kind(EntityState("device.storage", "SD Card", "Ready", "", True)) == "storage"
+    assert _icon_kind(EntityState("device.uptime", "Uptime", "2 h", "", True)) == "clock"
+
+
+def test_dashboard_pages_group_home_assistant_values() -> None:
+    entities = [
+        EntityState("sensor.inside_temperature", "Inside Temperature", "22", "°C", True),
+        EntityState("sensor.movie_humidity", "Movie Room Humidity", "40", "%", True),
+        EntityState("sensor.home_battery", "Home Battery", "83", "%", True),
+        EntityState("sensor.site_power", "Site Power", "6.5", "kW", True),
+        EntityState("sensor.solar_power", "Solar Power", "1.0", "kW", True),
+    ]
+    pages = build_dashboard_pages(
+        entities,
+        {"battery_percent": 76, "rssi": -54, "uptime_seconds": 3600, "sd_ready": True},
+    )
+    assert [page.title for page in pages] == ["OVERVIEW", "CLIMATE", "ENERGY", "DEVICE STATUS"]
+    assert all(len(page.entities) <= 4 for page in pages)
