@@ -52,12 +52,22 @@ class MqttConfig:
 
 
 @dataclass(frozen=True)
+class FirmwareConfig:
+    version: str = ""
+    url: str = ""
+    sha256: str = ""
+    size: int = 0
+    minimum_battery_percent: int = 40
+
+
+@dataclass(frozen=True)
 class BridgeConfig:
     title: str = "HOME ASSISTANT"
     state_path: Path = Path("/data/flexdisplay-state.json")
     api_key: str = ""
     home_assistant: HomeAssistantConfig = HomeAssistantConfig()
     mqtt: MqttConfig = MqttConfig()
+    firmware: FirmwareConfig = FirmwareConfig()
     default_entities: tuple[EntityConfig, ...] = ()
     devices: dict[str, DeviceConfig] = field(default_factory=dict)
 
@@ -128,6 +138,26 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         topic_prefix=str(mqtt_raw.get("topic_prefix") or "flexdisplay").strip("/"),
     )
 
+    firmware_raw = raw.get("firmware") or {}
+    firmware = FirmwareConfig(
+        version=os.getenv("FLEXDISPLAY_FIRMWARE_VERSION", str(firmware_raw.get("version") or "")),
+        url=os.getenv("FLEXDISPLAY_FIRMWARE_URL", str(firmware_raw.get("url") or "")),
+        sha256=os.getenv("FLEXDISPLAY_FIRMWARE_SHA256", str(firmware_raw.get("sha256") or "")).lower(),
+        size=max(0, int(os.getenv("FLEXDISPLAY_FIRMWARE_SIZE", firmware_raw.get("size", 0)))),
+        minimum_battery_percent=max(
+            20,
+            min(
+                100,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY",
+                        firmware_raw.get("minimum_battery_percent", 40),
+                    )
+                ),
+            ),
+        ),
+    )
+
     defaults = tuple(_entity(item) for item in raw.get("dashboard", {}).get("entities", []))
     devices = {
         str(device_id): _device(str(device_id), value or {}, defaults)
@@ -146,6 +176,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         api_key=os.getenv(api_key_env, str(raw.get("server", {}).get("api_key") or "")),
         home_assistant=ha,
         mqtt=mqtt,
+        firmware=firmware,
         default_entities=defaults,
         devices=devices,
     )

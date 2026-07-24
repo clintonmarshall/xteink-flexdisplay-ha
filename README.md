@@ -8,7 +8,8 @@ This repository provides:
 - the **FlexDisplay Bridge** Home Assistant App, which renders device-sized
   dashboard images and records fleet telemetry;
 - the **FlexDisplay** HACS integration, which creates Home Assistant devices,
-  sensors, and refresh buttons.
+  sensors, queued controls, connectivity state, firmware-update entities, and
+  physical-button events.
 
 It intentionally contains no device firmware, factory backups, credentials,
 device identities, or private network configuration.
@@ -77,7 +78,23 @@ For each device known to the bridge, the integration exposes:
 - last check-in;
 - firmware version;
 - active FlexDisplay mode;
-- refresh button.
+- awake, sleeping, or offline state;
+- pending command and last command result;
+- online connectivity;
+- refresh, next-screen, and restart buttons;
+- firmware update availability and installation.
+- USB and SD-card state, battery voltage, uptime, memory, and wake reason;
+- last physical button, press count, and a native Physical Button event entity.
+
+Firmware `0.6.0` or newer is required for queued controls and OTA updates.
+Install `0.6.0` once over USB; subsequent application updates can be staged
+through Home Assistant when the device checks in. Keep the device on USB power
+for the first OTA test.
+
+Firmware `0.7.0`, Bridge `0.3.0`, and integration `0.3.0` are required for
+physical-button events and extended telemetry. Events are delivered within
+seconds in live/USB-powered mode or buffered until the next check-in while the
+device sleeps.
 
 Devices first discovered after integration setup may require a FlexDisplay
 integration reload before their entities appear.

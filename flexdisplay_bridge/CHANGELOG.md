@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.3.0
+
+- Added buffered physical-button event ingestion and recent event history.
+- Added USB, SD, uptime, heap, wake-reason, and button summary telemetry.
+- Added a per-device events endpoint for integrations and diagnostics.
+
+## 0.2.0
+
+- Added queued refresh, next-screen, restart, and firmware-install commands.
+- Added firmware release metadata and battery-gated OTA delivery headers.
+- Added online, pending-command, dispatched-command, and result state.
+
 ## 0.1.1
 
 - Replaced the compact entity list with a high-contrast two-column card layout.

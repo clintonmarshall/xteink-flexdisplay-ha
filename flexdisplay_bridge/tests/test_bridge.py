@@ -4,12 +4,16 @@ import io
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from PIL import Image
-
 from flexdisplay_bridge.app import create_app
-from flexdisplay_bridge.config import BridgeConfig, DeviceConfig, HomeAssistantConfig
+from flexdisplay_bridge.config import (
+    BridgeConfig,
+    DeviceConfig,
+    FirmwareConfig,
+    HomeAssistantConfig,
+)
 from flexdisplay_bridge.home_assistant import EntityState
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
+from PIL import Image
 
 
 def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
@@ -58,6 +62,90 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["pending_commands"] == []
         assert record["render_revision"] == 1
+        assert record["dispatched_commands"] == ["refresh"]
+
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Command-Result": "refresh:complete",
+            },
+        )
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["last_command_result"] == "refresh:complete"
+        assert record["dispatched_commands"] == []
+
+
+def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-USB-Connected": "true",
+                "X-FlexDisplay-Uptime-Seconds": "123",
+                "X-FlexDisplay-Free-Heap": "118936",
+                "X-FlexDisplay-Min-Free-Heap": "110000",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-Wake-Reason": "power_button",
+                "X-FlexDisplay-Button-Events": "1,left,pressed,120000;2,confirm,pressed,121000",
+            },
+        )
+        assert response.status_code == 200
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["usb_connected"] is True
+        assert record["uptime_seconds"] == 123
+        assert record["free_heap"] == 118936
+        assert record["sd_ready"] is True
+        assert record["wake_reason"] == "power_button"
+        assert record["last_button"] == "confirm"
+        assert record["button_press_count"] == 2
+        assert len(record["recent_button_events"]) == 2
+
+        # A retried check-in must not double count buffered events.
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Button-Events": "1,left,pressed,120000;2,confirm,pressed,121000",
+            },
+        )
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["button_press_count"] == 2
+        assert len(client.get("/api/v1/devices/X4-DEMO01/events").json()["events"]) == 2
+
+
+def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="0.6.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        minimum_battery_percent=45,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.5.0",
+            },
+        )
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["latest_firmware"] == "0.6.0"
+        assert record["update_available"] is True
+
+        queued = client.post("/api/v1/devices/X4-DEMO01/commands/install")
+        assert queued.status_code == 200
+        screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert screen.headers["x-flexdisplay-commands"] == "install"
+        assert screen.headers["x-flexdisplay-latest-firmware"] == "0.6.0"
+        assert screen.headers["x-flexdisplay-firmware-url"] == firmware.url
+        assert screen.headers["x-flexdisplay-firmware-sha256"] == firmware.sha256
+        assert screen.headers["x-flexdisplay-firmware-size"] == str(firmware.size)
+        assert screen.headers["x-flexdisplay-firmware-min-battery"] == "45"
 
 
 def test_invalid_device_id_is_rejected(tmp_path: Path) -> None:

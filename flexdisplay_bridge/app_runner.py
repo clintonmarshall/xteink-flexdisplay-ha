@@ -4,11 +4,10 @@ from __future__ import annotations
 
 import json
 import os
-from pathlib import Path
 import shutil
+from pathlib import Path
 
 import uvicorn
-
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
@@ -33,6 +32,13 @@ def main() -> None:
     os.environ["FLEXDISPLAY_MQTT_USERNAME"] = option(options, "mqtt_username", "flexdisplay")
     os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = option(options, "mqtt_password")
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
+    os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = option(options, "firmware_version")
+    os.environ["FLEXDISPLAY_FIRMWARE_URL"] = option(options, "firmware_url")
+    os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = option(options, "firmware_sha256")
+    os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = option(options, "firmware_size", 0)
+    os.environ["FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY"] = option(
+        options, "firmware_minimum_battery", 40
+    )
 
     if not CONFIG_PATH.exists():
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

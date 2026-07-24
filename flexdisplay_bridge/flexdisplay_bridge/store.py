@@ -79,11 +79,62 @@ class DeviceStore:
             commands = list(record.get("pending_commands", []))
             record["pending_commands"] = []
             if commands:
-                record["last_completed_commands"] = commands
-                record["command_completed_at"] = utc_now()
+                record["dispatched_commands"] = commands
+                record["command_dispatched_at"] = utc_now()
                 record["render_revision"] = int(record.get("render_revision", 0)) + 1
                 self._save()
             return commands
+
+    def acknowledge(self, device_id: str, result: str) -> None:
+        if not result:
+            return
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return
+            record["last_command_result"] = result[:160]
+            record["command_completed_at"] = utc_now()
+            record["dispatched_commands"] = []
+            self._save()
+
+    def record_button_events(self, device_id: str, events: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Append newly received physical-button events and update summaries."""
+        if not events:
+            return self.get(device_id)
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            recent = record.setdefault("recent_button_events", [])
+            known = {
+                (
+                    int(event.get("sequence") or 0),
+                    str(event.get("button") or ""),
+                    int(event.get("uptime_ms") or 0),
+                )
+                for event in recent
+            }
+            changed = False
+            for event in events:
+                identity = (
+                    int(event.get("sequence") or 0),
+                    str(event.get("button") or ""),
+                    int(event.get("uptime_ms") or 0),
+                )
+                if identity in known:
+                    continue
+                received = {**event, "received_at": utc_now()}
+                recent.append(received)
+                known.add(identity)
+                record["last_button"] = received["button"]
+                record["last_button_action"] = received["action"]
+                record["last_button_at"] = received["received_at"]
+                record["button_press_count"] = int(record.get("button_press_count", 0)) + 1
+                changed = True
+            if changed:
+                record["recent_button_events"] = recent[-32:]
+                self._save()
+            return deepcopy(record)
 
     def get(self, device_id: str) -> dict[str, Any] | None:
         with self._lock:
