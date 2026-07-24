@@ -11,6 +11,15 @@ import uvicorn
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
+DEFAULT_FIRMWARE = {
+    "firmware_version": "1.4.1-flexdisplay.0.7.0",
+    "firmware_url": (
+        "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+        "releases/download/v0.3.0/firmware.bin"
+    ),
+    "firmware_sha256": "18082f56b8150d068d4cf71d9783fd1f070c35aea3777a455d9dcc0184caebf0",
+    "firmware_size": 5_472_064,
+}
 
 
 def option(options: dict, name: str, default: object = "") -> str:
@@ -18,6 +27,14 @@ def option(options: dict, name: str, default: object = "") -> str:
     value = options.get(name, default)
     if isinstance(value, bool):
         return "true" if value else "false"
+    return str(value)
+
+
+def firmware_option(options: dict, name: str) -> str:
+    """Use the packaged release when an existing install has a blank option."""
+    value = options.get(name)
+    if value is None or value == "" or (name == "firmware_size" and int(value) <= 0):
+        value = DEFAULT_FIRMWARE[name]
     return str(value)
 
 
@@ -32,10 +49,10 @@ def main() -> None:
     os.environ["FLEXDISPLAY_MQTT_USERNAME"] = option(options, "mqtt_username", "flexdisplay")
     os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = option(options, "mqtt_password")
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
-    os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = option(options, "firmware_version")
-    os.environ["FLEXDISPLAY_FIRMWARE_URL"] = option(options, "firmware_url")
-    os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = option(options, "firmware_sha256")
-    os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = option(options, "firmware_size", 0)
+    os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = firmware_option(options, "firmware_version")
+    os.environ["FLEXDISPLAY_FIRMWARE_URL"] = firmware_option(options, "firmware_url")
+    os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = firmware_option(options, "firmware_sha256")
+    os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = firmware_option(options, "firmware_size")
     os.environ["FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY"] = option(
         options, "firmware_minimum_battery", 40
     )
