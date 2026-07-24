@@ -7,6 +7,8 @@ from fastapi.testclient import TestClient
 from flexdisplay_bridge.app import create_app
 from flexdisplay_bridge.config import (
     BridgeConfig,
+    DashboardPageConfig,
+    DashboardProfileConfig,
     DeviceConfig,
     EntityConfig,
     FirmwareConfig,
@@ -107,6 +109,50 @@ def test_next_command_advances_readable_dashboard_pages(tmp_path: Path) -> None:
         assert record["dashboard_page_title"] == "TEMPERATURES"
         assert record["dashboard_page_number"] == 2
         assert record["dashboard_page_count"] == 8
+
+
+def test_profile_navigation_and_page_selection(tmp_path: Path) -> None:
+    entities = (
+        EntityConfig("sensor.room_temperature", "Room", "°C"),
+        EntityConfig("sensor.solar_power", "Solar", "kW"),
+    )
+    profile = DashboardProfileConfig(
+        name="wall",
+        pages=(
+            DashboardPageConfig("CLIMATE", (entities[0],)),
+            DashboardPageConfig("ENERGY", (entities[1],)),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        profiles={"wall": profile},
+        devices={
+            "X4-DEMO01": DeviceConfig(
+                name="Test X4",
+                entities=entities,
+                profile="wall",
+            )
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert first.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["dashboard_pages"] == ["CLIMATE", "ENERGY"]
+        assert record["dashboard_profile"] == "wall"
+
+        client.post("/api/v1/devices/X4-DEMO01/commands/previous")
+        previous = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert previous.headers["x-flexdisplay-page-title"] == "ENERGY"
+
+        client.post("/api/v1/devices/X4-DEMO01/commands/overview")
+        overview = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert overview.headers["x-flexdisplay-page-title"] == "CLIMATE"
+
+        client.post("/api/v1/devices/X4-DEMO01/commands/page-2")
+        selected = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert selected.headers["x-flexdisplay-page-title"] == "ENERGY"
 
 
 def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> None:

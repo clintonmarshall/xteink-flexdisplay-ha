@@ -12,13 +12,13 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.7.0",
+    "firmware_version": "1.4.1-flexdisplay.0.8.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/v0.3.0/firmware.bin"
+        "releases/download/v0.6.0/firmware.bin"
     ),
-    "firmware_sha256": "18082f56b8150d068d4cf71d9783fd1f070c35aea3777a455d9dcc0184caebf0",
-    "firmware_size": 5_472_064,
+    "firmware_sha256": "250ab8a2b7fa5d1687716f0873834a4a8c95beb789dbe0c888699b133eca868d",
+    "firmware_size": 5_472_160,
 }
 
 

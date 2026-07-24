@@ -5,4 +5,4 @@ CONF_API_KEY = "api_key"
 DEFAULT_URL = "http://localhost:8099"
 EVENT_TYPE = f"{DOMAIN}_event"
 BUTTON_EVENT_TYPES = ("back", "confirm", "left", "right", "up", "down", "power")
-PLATFORMS = ["sensor", "binary_sensor", "button", "event", "update"]
+PLATFORMS = ["sensor", "binary_sensor", "button", "event", "select", "update"]

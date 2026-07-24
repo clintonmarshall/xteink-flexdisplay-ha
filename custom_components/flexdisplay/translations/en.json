@@ -97,8 +97,19 @@
       "next": {
         "name": "Next screen"
       },
+      "previous": {
+        "name": "Previous screen"
+      },
+      "overview": {
+        "name": "Return to overview"
+      },
       "restart": {
         "name": "Restart"
+      }
+    },
+    "select": {
+      "dashboard_page": {
+        "name": "Dashboard page"
       }
     },
     "update": {

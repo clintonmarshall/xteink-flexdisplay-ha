@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0
+
+- Added configurable dashboard profiles with per-device assignment.
+- Added previous, overview, and direct page-selection controls.
+- Added optional automatic profile rotation.
+- Bundled the verified shared X3/X4 FlexDisplay 0.8.0 application image metadata.
+
 ## 0.5.0
 
 - Expanded the built-in dashboard set from four to eight readable pages.

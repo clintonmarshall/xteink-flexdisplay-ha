@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .config import DashboardPageConfig
 from .home_assistant import EntityState
 
 
@@ -97,8 +98,31 @@ def _connectivity_page(device: dict[str, Any]) -> DashboardPage:
 def build_dashboard_pages(
     entities: list[EntityState],
     device: dict[str, Any],
+    configured_pages: tuple[DashboardPageConfig, ...] = (),
 ) -> tuple[DashboardPage, ...]:
     """Create readable built-in pages from the configured Home Assistant values."""
+    if configured_pages:
+        device_entities = _health_page(device).entities + _connectivity_page(device).entities
+        by_id = {entity.entity_id: entity for entity in (*entities, *device_entities)}
+        return tuple(
+            DashboardPage(
+                page.title,
+                tuple(
+                    by_id.get(
+                        configured.entity_id,
+                        EntityState(
+                            configured.entity_id,
+                            configured.label,
+                            "--",
+                            configured.unit,
+                            False,
+                        ),
+                    )
+                    for configured in page.entities
+                )[:4],
+            )
+            for page in configured_pages
+        )
     pages = [DashboardPage("OVERVIEW", tuple(entities[:4]))]
     temperatures = tuple(entity for entity in entities if _temperature(entity))[:4]
     humidity = tuple(entity for entity in entities if _humidity(entity))[:4]

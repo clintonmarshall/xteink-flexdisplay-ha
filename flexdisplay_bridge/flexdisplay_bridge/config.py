@@ -23,6 +23,19 @@ class EntityConfig:
 
 
 @dataclass(frozen=True)
+class DashboardPageConfig:
+    title: str
+    entities: tuple[EntityConfig, ...] = ()
+
+
+@dataclass(frozen=True)
+class DashboardProfileConfig:
+    name: str
+    pages: tuple[DashboardPageConfig, ...] = ()
+    auto_rotate_seconds: int = 0
+
+
+@dataclass(frozen=True)
 class DeviceConfig:
     name: str
     model: str = ""
@@ -30,6 +43,7 @@ class DeviceConfig:
     height: int = 800
     refresh_interval_seconds: int = 900
     entities: tuple[EntityConfig, ...] = ()
+    profile: str = "default"
 
 
 @dataclass(frozen=True)
@@ -69,19 +83,31 @@ class BridgeConfig:
     mqtt: MqttConfig = MqttConfig()
     firmware: FirmwareConfig = FirmwareConfig()
     default_entities: tuple[EntityConfig, ...] = ()
+    default_profile: str = "default"
+    profiles: dict[str, DashboardProfileConfig] = field(default_factory=dict)
     devices: dict[str, DeviceConfig] = field(default_factory=dict)
 
     def device(self, device_id: str, width: int, height: int, model: str = "") -> DeviceConfig:
         configured = self.devices.get(device_id)
         if configured:
             return configured
+        selected_profile = self.profiles.get(self.default_profile)
+        profile_entities = tuple(
+            entity
+            for page in (selected_profile.pages if selected_profile else ())
+            for entity in page.entities
+        )
         return DeviceConfig(
             name=device_id,
             model=model,
             width=width,
             height=height,
-            entities=self.default_entities,
+            entities=_merge_entities(self.default_entities, profile_entities),
+            profile=self.default_profile,
         )
+
+    def profile(self, device: DeviceConfig) -> DashboardProfileConfig | None:
+        return self.profiles.get(device.profile) or self.profiles.get(self.default_profile)
 
 
 def _entity(value: dict[str, Any]) -> EntityConfig:
@@ -92,8 +118,53 @@ def _entity(value: dict[str, Any]) -> EntityConfig:
     )
 
 
-def _device(device_id: str, value: dict[str, Any], defaults: tuple[EntityConfig, ...]) -> DeviceConfig:
-    entities = tuple(_entity(item) for item in value.get("entities", [])) or defaults
+def _page_entity(value: Any) -> EntityConfig:
+    if isinstance(value, str):
+        return EntityConfig(value, value)
+    if isinstance(value, dict):
+        return _entity(value)
+    raise ValueError("Dashboard page entities must be entity IDs or mappings")
+
+
+def _profile(name: str, value: dict[str, Any]) -> DashboardProfileConfig:
+    pages = tuple(
+        DashboardPageConfig(
+            title=str(page.get("title") or f"PAGE {index + 1}").upper(),
+            entities=tuple(_page_entity(item) for item in page.get("entities", [])),
+        )
+        for index, page in enumerate(value.get("pages", []))
+        if isinstance(page, dict)
+    )
+    return DashboardProfileConfig(
+        name=name,
+        pages=pages,
+        auto_rotate_seconds=max(0, min(86400, int(value.get("auto_rotate_seconds", 0)))),
+    )
+
+
+def _merge_entities(*groups: tuple[EntityConfig, ...]) -> tuple[EntityConfig, ...]:
+    merged: dict[str, EntityConfig] = {}
+    for group in groups:
+        for entity in group:
+            merged[entity.entity_id] = entity
+    return tuple(merged.values())
+
+
+def _device(
+    device_id: str,
+    value: dict[str, Any],
+    defaults: tuple[EntityConfig, ...],
+    profiles: dict[str, DashboardProfileConfig],
+    default_profile: str,
+) -> DeviceConfig:
+    profile_name = str(value.get("profile") or default_profile)
+    profile_entities = tuple(
+        entity
+        for page in (profiles.get(profile_name) or DashboardProfileConfig(profile_name)).pages
+        for entity in page.entities
+    )
+    explicit = tuple(_entity(item) for item in value.get("entities", []))
+    entities = _merge_entities(defaults, profile_entities, explicit)
     model = str(value.get("model") or ("X4" if device_id.startswith("X4-") else "X3"))
     default_width, default_height = ((480, 800) if model.upper() == "X4" else (528, 792))
     return DeviceConfig(
@@ -103,6 +174,7 @@ def _device(device_id: str, value: dict[str, Any], defaults: tuple[EntityConfig,
         height=int(value.get("height", default_height)),
         refresh_interval_seconds=max(60, min(86400, int(value.get("refresh_interval_seconds", 900)))),
         entities=entities,
+        profile=profile_name,
     )
 
 
@@ -158,9 +230,21 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         ),
     )
 
-    defaults = tuple(_entity(item) for item in raw.get("dashboard", {}).get("entities", []))
+    dashboard_raw = raw.get("dashboard") or {}
+    defaults = tuple(_entity(item) for item in dashboard_raw.get("entities", []))
+    default_profile = str(dashboard_raw.get("default_profile") or "default")
+    profiles = {
+        str(name): _profile(str(name), value or {})
+        for name, value in (dashboard_raw.get("profiles") or {}).items()
+    }
     devices = {
-        str(device_id): _device(str(device_id), value or {}, defaults)
+        str(device_id): _device(
+            str(device_id),
+            value or {},
+            defaults,
+            profiles,
+            default_profile,
+        )
         for device_id, value in (raw.get("devices") or {}).items()
     }
     state_path = Path(
@@ -178,5 +262,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         mqtt=mqtt,
         firmware=firmware,
         default_entities=defaults,
+        default_profile=default_profile,
+        profiles=profiles,
         devices=devices,
     )

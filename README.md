@@ -81,7 +81,8 @@ For each device known to the bridge, the integration exposes:
 - awake, sleeping, or offline state;
 - pending command and last command result;
 - online connectivity;
-- refresh, next-screen, and restart buttons;
+- refresh, previous-screen, next-screen, overview, and restart buttons;
+- direct dashboard-page selection;
 - firmware update availability and installation.
 - USB and SD-card state, battery voltage, uptime, memory, and wake reason;
 - last physical button, press count, and a native Physical Button event entity.
@@ -95,6 +96,10 @@ Firmware `0.7.0`, Bridge `0.3.0`, and integration `0.3.0` are required for
 physical-button events and extended telemetry. Events are delivered within
 seconds in live/USB-powered mode or buffered until the next check-in while the
 device sleeps.
+
+Firmware `0.8.0`, Bridge `0.6.0`, and integration `0.6.0` add configurable
+per-device dashboard profiles, page selection, previous/overview navigation,
+and optional automatic page rotation.
 
 Devices first discovered after integration setup may require a FlexDisplay
 integration reload before their entities appear.
