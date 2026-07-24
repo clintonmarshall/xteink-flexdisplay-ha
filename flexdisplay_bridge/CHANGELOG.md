@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Bundled the verified FlexDisplay 0.7.0 OTA release metadata.
+- Added a backward-compatible fallback when an existing installation has
+  blank or missing firmware options.
+
 ## 0.3.0
 
 - Added buffered physical-button event ingestion and recent event history.
