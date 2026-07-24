@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from contextlib import asynccontextmanager
+from datetime import UTC, datetime
 from typing import Any
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
@@ -15,6 +16,46 @@ from .renderer import DashboardRenderer
 from .store import DeviceStore
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
+SUPPORTED_COMMANDS = {"refresh", "next", "restart", "install"}
+SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
+
+
+def _firmware_version(value: str) -> tuple[int, int, int]:
+    match = re.search(r"flexdisplay[.-](\d+)\.(\d+)\.(\d+)", value)
+    if not match:
+        match = re.search(r"(\d+)\.(\d+)\.(\d+)", value)
+    return tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
+
+
+def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str, Any]:
+    result = dict(record)
+    last_seen = result.get("last_seen")
+    online = False
+    power_state = "offline"
+    if isinstance(last_seen, str):
+        try:
+            seen = datetime.fromisoformat(last_seen)
+            age = (datetime.now(UTC) - seen).total_seconds()
+            profile = settings.device(
+                str(result.get("device_id") or ""),
+                int(result.get("width") or 480),
+                int(result.get("height") or 800),
+                str(result.get("model") or ""),
+            )
+            online_window = max(180, int(profile.refresh_interval_seconds * 1.5) + 60)
+            online = age <= online_window
+            power_state = "awake" if age <= 90 else ("sleeping" if online else "offline")
+        except ValueError:
+            pass
+    result["online"] = online
+    result["power_state"] = power_state
+    result["latest_firmware"] = settings.firmware.version or result.get("firmware", "")
+    result["update_available"] = bool(
+        settings.firmware.version
+        and settings.firmware.url
+        and _firmware_version(settings.firmware.version) > _firmware_version(str(result.get("firmware") or ""))
+    )
+    return result
 
 
 def _integer(value: str | None, default: int, minimum: int, maximum: int) -> int:
@@ -23,6 +64,43 @@ def _integer(value: str | None, default: int, minimum: int, maximum: int) -> int
     except ValueError:
         parsed = default
     return max(minimum, min(maximum, parsed))
+
+
+def _optional_integer(value: str | None, minimum: int, maximum: int) -> int | None:
+    if value in (None, ""):
+        return None
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except ValueError:
+        return None
+
+
+def _boolean(value: str | None) -> bool | None:
+    if value is None:
+        return None
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _button_events(value: str | None) -> list[dict[str, Any]]:
+    result: list[dict[str, Any]] = []
+    for encoded in (value or "").split(";"):
+        parts = encoded.split(",")
+        if len(parts) != 4 or parts[1] not in SUPPORTED_BUTTONS or parts[2] != "pressed":
+            continue
+        try:
+            sequence = max(0, int(parts[0]))
+            uptime_ms = max(0, int(parts[3]))
+        except ValueError:
+            continue
+        result.append(
+            {
+                "sequence": sequence,
+                "button": parts[1],
+                "action": parts[2],
+                "uptime_ms": uptime_ms,
+            }
+        )
+    return result[:16]
 
 
 def _number(value: str | None) -> float | None:
@@ -46,7 +124,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     renderer = DashboardRenderer()
 
     def queue_from_mqtt(device_id: str, command: str) -> None:
-        if DEVICE_ID_PATTERN.fullmatch(device_id) and command in {"refresh", "next"}:
+        if DEVICE_ID_PATTERN.fullmatch(device_id) and command in SUPPORTED_COMMANDS:
             store.queue_command(device_id, command)
 
     mqtt = MqttService(settings.mqtt, queue_from_mqtt)
@@ -75,7 +153,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/devices")
     def devices() -> dict[str, Any]:
-        return {"devices": store.all()}
+        return {"devices": [_decorate_device(record, settings) for record in store.all()]}
 
     @app.get("/api/v1/devices/{device_id}")
     def device(device_id: str) -> dict[str, Any]:
@@ -83,7 +161,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.get(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return record
+        return _decorate_device(record, settings)
+
+    @app.get("/api/v1/devices/{device_id}/events")
+    def device_events(device_id: str) -> dict[str, Any]:
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {"events": record.get("recent_button_events", [])}
 
     def authorize(request: Request) -> None:
         if settings.api_key and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key:
@@ -93,8 +179,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def command(device_id: str, command: str, request: Request) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
-        if command not in {"refresh", "next"}:
+        if command not in SUPPORTED_COMMANDS:
             raise HTTPException(status_code=400, detail="Unsupported command")
+        if command == "install" and (not settings.firmware.version or not settings.firmware.url):
+            raise HTTPException(status_code=409, detail="No firmware release is configured")
         record = store.queue_command(selected, command)
         return {"queued": command, "device": record}
 
@@ -110,6 +198,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
         x_flexdisplay_mode: str | None = Header(default=None),
+        x_flexdisplay_command_result: str | None = Header(default=None),
+        x_flexdisplay_usb_connected: str | None = Header(default=None),
+        x_flexdisplay_uptime_seconds: str | None = Header(default=None),
+        x_flexdisplay_free_heap: str | None = Header(default=None),
+        x_flexdisplay_min_free_heap: str | None = Header(default=None),
+        x_flexdisplay_sd_ready: str | None = Header(default=None),
+        x_flexdisplay_wake_reason: str | None = Header(default=None),
+        x_flexdisplay_button_events: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -124,8 +220,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "battery_voltage": _number(x_flexdisplay_battery_voltage),
             "rssi": _number(x_flexdisplay_rssi),
             "mode": x_flexdisplay_mode or "home_assistant",
+            "usb_connected": _boolean(x_flexdisplay_usb_connected),
+            "uptime_seconds": _optional_integer(x_flexdisplay_uptime_seconds, 0, 31_536_000),
+            "free_heap": _optional_integer(x_flexdisplay_free_heap, 0, 1_000_000),
+            "min_free_heap": _optional_integer(x_flexdisplay_min_free_heap, 0, 1_000_000),
+            "sd_ready": _boolean(x_flexdisplay_sd_ready),
+            "wake_reason": x_flexdisplay_wake_reason or None,
         }
         record = store.touch(device_id, telemetry)
+        record = store.record_button_events(device_id, _button_events(x_flexdisplay_button_events)) or record
+        store.acknowledge(device_id, x_flexdisplay_command_result or "")
         profile: DeviceConfig = settings.device(device_id, width, height, model)
         commands = store.consume_commands(device_id)
         if commands:
@@ -150,6 +254,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["ETag"] = f'"{digest}"'
         response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
+        if settings.firmware.version:
+            response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
+        if "install" in commands:
+            response.headers["X-FlexDisplay-Firmware-URL"] = settings.firmware.url
+            response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
+            response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
+            response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
+                settings.firmware.minimum_battery_percent
+            )
         return Response(content=image, media_type="image/png", headers=dict(response.headers))
 
     return app

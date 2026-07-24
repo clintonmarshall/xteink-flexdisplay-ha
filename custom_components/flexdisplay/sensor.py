@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
-from typing import Any, Callable
+from typing import Any
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorEntity, SensorEntityDescription
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorEntity,
+    SensorEntityDescription,
+    SensorStateClass,
+)
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
 from homeassistant.core import HomeAssistant
@@ -54,6 +59,71 @@ DESCRIPTIONS = (
         key="mode",
         translation_key="mode",
         value_fn=lambda record: record.get("mode"),
+    ),
+    FlexDisplaySensorDescription(
+        key="pending_commands",
+        translation_key="pending_commands",
+        value_fn=lambda record: ", ".join(record.get("pending_commands") or []) or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_command_result",
+        translation_key="last_command_result",
+        value_fn=lambda record: record.get("last_command_result") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="power_state",
+        translation_key="power_state",
+        value_fn=lambda record: record.get("power_state") or "offline",
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_voltage",
+        translation_key="battery_voltage",
+        device_class=SensorDeviceClass.VOLTAGE,
+        native_unit_of_measurement="V",
+        value_fn=lambda record: record.get("battery_voltage"),
+    ),
+    FlexDisplaySensorDescription(
+        key="uptime_seconds",
+        translation_key="uptime",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement="s",
+        value_fn=lambda record: record.get("uptime_seconds"),
+    ),
+    FlexDisplaySensorDescription(
+        key="free_heap",
+        translation_key="free_heap",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement="B",
+        value_fn=lambda record: record.get("free_heap"),
+    ),
+    FlexDisplaySensorDescription(
+        key="min_free_heap",
+        translation_key="minimum_free_heap",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement="B",
+        value_fn=lambda record: record.get("min_free_heap"),
+    ),
+    FlexDisplaySensorDescription(
+        key="wake_reason",
+        translation_key="wake_reason",
+        value_fn=lambda record: record.get("wake_reason") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_button",
+        translation_key="last_button",
+        value_fn=lambda record: record.get("last_button") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_button_at",
+        translation_key="last_button_at",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda record: parse_datetime(record.get("last_button_at", "")),
+    ),
+    FlexDisplaySensorDescription(
+        key="button_press_count",
+        translation_key="button_press_count",
+        state_class=SensorStateClass.TOTAL_INCREASING,
+        value_fn=lambda record: record.get("button_press_count", 0),
     ),
 )
 

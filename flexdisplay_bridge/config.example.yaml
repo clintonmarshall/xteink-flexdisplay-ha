@@ -21,6 +21,14 @@ mqtt:
   discovery_prefix: homeassistant
   topic_prefix: flexdisplay
 
+firmware:
+  # Application image used by queued Home Assistant OTA installs.
+  version: ""
+  url: ""
+  sha256: ""
+  size: 0
+  minimum_battery_percent: 40
+
 dashboard:
   title: HOME ASSISTANT
   # Add entity IDs that exist in your Home Assistant. For example:

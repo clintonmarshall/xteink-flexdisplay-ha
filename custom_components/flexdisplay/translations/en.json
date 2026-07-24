@@ -33,11 +33,71 @@
       },
       "mode": {
         "name": "Mode"
+      },
+      "pending_commands": {
+        "name": "Pending commands"
+      },
+      "last_command_result": {
+        "name": "Last command result"
+      },
+      "power_state": {
+        "name": "Power state"
+      },
+      "battery_voltage": {
+        "name": "Battery voltage"
+      },
+      "uptime": {
+        "name": "Uptime"
+      },
+      "free_heap": {
+        "name": "Free memory"
+      },
+      "minimum_free_heap": {
+        "name": "Minimum free memory"
+      },
+      "wake_reason": {
+        "name": "Wake reason"
+      },
+      "last_button": {
+        "name": "Last physical button"
+      },
+      "last_button_at": {
+        "name": "Last button time"
+      },
+      "button_press_count": {
+        "name": "Button press count"
+      }
+    },
+    "binary_sensor": {
+      "online": {
+        "name": "Online"
+      },
+      "usb_connected": {
+        "name": "USB connected"
+      },
+      "sd_ready": {
+        "name": "SD card ready"
+      }
+    },
+    "event": {
+      "physical_button": {
+        "name": "Physical button"
       }
     },
     "button": {
       "refresh": {
         "name": "Refresh"
+      },
+      "next": {
+        "name": "Next screen"
+      },
+      "restart": {
+        "name": "Restart"
+      }
+    },
+    "update": {
+      "firmware": {
+        "name": "Firmware"
       }
     }
   }

@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+import math
+from collections.abc import Iterable
 from datetime import datetime
 from io import BytesIO
-import math
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 from PIL import Image, ImageDraw, ImageFont
 

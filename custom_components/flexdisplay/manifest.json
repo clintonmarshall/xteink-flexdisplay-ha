@@ -3,10 +3,10 @@
   "name": "FlexDisplay",
   "codeowners": ["@clintonmarshall"],
   "config_flow": true,
-  "documentation": "https://github.com/clintonmarshall/xteink-flexdisplay-ha",
+  "documentation": "https://github.com/clintonmarshall/xteink-flexdisplay",
   "integration_type": "hub",
   "iot_class": "local_polling",
-  "issue_tracker": "https://github.com/clintonmarshall/xteink-flexdisplay-ha/issues",
+  "issue_tracker": "https://github.com/clintonmarshall/xteink-flexdisplay/issues",
   "requirements": [],
-  "version": "0.1.0"
+  "version": "0.3.0"
 }
