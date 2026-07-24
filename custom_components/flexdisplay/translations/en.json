@@ -34,6 +34,12 @@
       "mode": {
         "name": "Mode"
       },
+      "dashboard_page": {
+        "name": "Dashboard page"
+      },
+      "dashboard_page_number": {
+        "name": "Dashboard page number"
+      },
       "pending_commands": {
         "name": "Pending commands"
       },

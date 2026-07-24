@@ -17,6 +17,20 @@ Options:
 - `firmware_size`: exact firmware file size in bytes.
 - `firmware_minimum_battery`: minimum charge percentage for an unplugged update.
 
+## Dashboard pages
+
+The Bridge automatically creates four readable pages from each device's
+configured entities:
+
+- **Overview** — the first four configured values.
+- **Climate** — temperature and humidity values.
+- **Energy** — battery, solar, and power values.
+- **Device Status** — FlexDisplay battery, Wi-Fi, uptime, and SD-card state.
+
+Each page uses at most four large tiles. Press **Next screen** on the
+FlexDisplay device in Home Assistant to advance to the next page. The current
+page title and page number are exposed as Home Assistant sensors.
+
 The device downloads to SD, verifies the configured size and SHA-256 digest,
 then uses the existing dual-partition firmware installer. Firmware `0.6.0`
 must first be installed over USB before queued OTA commands are understood.

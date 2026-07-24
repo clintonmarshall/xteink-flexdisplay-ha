@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- Added Overview, Climate, Energy, and Device Status dashboard pages.
+- Made the Home Assistant Next Screen button advance a persistent page index.
+- Increased dashboard value, label, and icon sizes for X3/X4 readability.
+- Added current dashboard page and page-number sensors.
+
 ## 0.3.1
 
 - Bundled the verified FlexDisplay 0.7.0 OTA release metadata.
