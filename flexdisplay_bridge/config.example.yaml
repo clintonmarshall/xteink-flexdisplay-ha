@@ -1,0 +1,41 @@
+server:
+  # Set FLEXDISPLAY_BRIDGE_API_KEY to protect command endpoints.
+  api_key_env: FLEXDISPLAY_BRIDGE_API_KEY
+
+storage:
+  state_path: /data/flexdisplay-state.json
+
+home_assistant:
+  base_url: http://homeassistant.local:8123
+  token_env: FLEXDISPLAY_HA_TOKEN
+  verify_tls: false
+  timeout_seconds: 10
+
+mqtt:
+  # Enable after the bridge can render a screen successfully.
+  enabled: false
+  host: core-mosquitto
+  port: 1883
+  username: flexdisplay
+  password_env: FLEXDISPLAY_MQTT_PASSWORD
+  discovery_prefix: homeassistant
+  topic_prefix: flexdisplay
+
+dashboard:
+  title: HOME ASSISTANT
+  # Add entity IDs that exist in your Home Assistant. For example:
+  # entities:
+  #   - entity_id: weather.home
+  #     label: Weather
+  #   - entity_id: sensor.outdoor_temperature
+  #     label: Outside
+  #     unit: "°C"
+  entities: []
+
+devices:
+  X4-DEMO01:
+    name: Example X4
+    model: X4
+    width: 480
+    height: 800
+    refresh_interval_seconds: 300

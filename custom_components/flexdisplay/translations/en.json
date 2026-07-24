@@ -1,0 +1,44 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect to FlexDisplay Bridge",
+        "description": "Enter the local URL of your FlexDisplay Bridge.",
+        "data": {
+          "url": "Bridge URL",
+          "api_key": "Bridge API key"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Unable to connect to the FlexDisplay Bridge."
+    },
+    "abort": {
+      "already_configured": "This FlexDisplay Bridge is already configured."
+    }
+  },
+  "entity": {
+    "sensor": {
+      "battery": {
+        "name": "Battery"
+      },
+      "wifi_signal": {
+        "name": "Wi-Fi signal"
+      },
+      "last_seen": {
+        "name": "Last seen"
+      },
+      "firmware": {
+        "name": "Firmware"
+      },
+      "mode": {
+        "name": "Mode"
+      }
+    },
+    "button": {
+      "refresh": {
+        "name": "Refresh"
+      }
+    }
+  }
+}

@@ -1,0 +1,34 @@
+name: FlexDisplay Bridge
+version: "0.1.0"
+slug: flexdisplay_bridge
+description: Render Home Assistant dashboards and manage XTEINK X3/X4 FlexDisplay devices
+url: https://github.com/clintonmarshall/xteink-flexdisplay-ha
+arch:
+  - aarch64
+  - amd64
+startup: application
+boot: auto
+init: false
+homeassistant_api: true
+ports:
+  8099/tcp: 8099
+ports_description:
+  8099/tcp: FlexDisplay image and management API
+map:
+  - addon_config:rw
+options:
+  dashboard_title: HOME ASSISTANT
+  mqtt_enabled: false
+  mqtt_host: core-mosquitto
+  mqtt_port: 1883
+  mqtt_username: flexdisplay
+  mqtt_password: ""
+  bridge_api_key: ""
+schema:
+  dashboard_title: str
+  mqtt_enabled: bool
+  mqtt_host: str
+  mqtt_port: port
+  mqtt_username: str
+  mqtt_password: password
+  bridge_api_key: password

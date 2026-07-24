@@ -1,0 +1,8 @@
+.DS_Store
+.pytest_cache/
+.venv/
+__pycache__/
+*.egg-info/
+*.pyc
+config.yaml.local
+data/
