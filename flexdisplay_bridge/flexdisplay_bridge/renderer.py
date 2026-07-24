@@ -16,6 +16,8 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.I
     candidates = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf" if bold
         else "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSans-Bold.ttf" if bold
+        else "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/System/Library/Fonts/Supplemental/Arial Bold.ttf" if bold
         else "/System/Library/Fonts/Supplemental/Arial.ttf",
         "/System/Library/Fonts/Helvetica.ttc",
@@ -39,6 +41,40 @@ def _fit(
         if draw.textbbox((0, 0), text, font=selected)[2] <= maximum_width:
             return selected
     return _font(minimum_size, bold)
+
+
+def _wrap_label(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    maximum_width: int,
+    start_size: int,
+    minimum_size: int = 17,
+) -> tuple[ImageFont.FreeTypeFont | ImageFont.ImageFont, list[str]]:
+    words = text.split()
+    for size in range(start_size, minimum_size - 1, -1):
+        selected = _font(size, True)
+        if draw.textbbox((0, 0), text, font=selected)[2] <= maximum_width:
+            return selected, [text]
+        candidates = [
+            (" ".join(words[:split]), " ".join(words[split:]))
+            for split in range(1, len(words))
+        ]
+        fitting = [
+            lines
+            for lines in candidates
+            if max(draw.textbbox((0, 0), line, font=selected)[2] for line in lines)
+            <= maximum_width
+        ]
+        if fitting:
+            lines = min(
+                fitting,
+                key=lambda pair: abs(
+                    draw.textbbox((0, 0), pair[0], font=selected)[2]
+                    - draw.textbbox((0, 0), pair[1], font=selected)[2]
+                ),
+            )
+            return selected, list(lines)
+    return _font(minimum_size, True), [text]
 
 
 def _number(value: str) -> float | None:
@@ -316,11 +352,23 @@ class DashboardRenderer:
                 )
 
                 label_width = cell_width - 24
-                label_font = _fit(draw, entity.label, label_width, max(23, width // 20), True, 17)
-                label_bbox = draw.textbbox((0, 0), entity.label, font=label_font)
-                label_text_width = label_bbox[2] - label_bbox[0]
+                label_font, label_lines = _wrap_label(
+                    draw,
+                    entity.label,
+                    label_width,
+                    max(23, width // 20),
+                )
                 label_y = icon_top + icon_size + 12
-                draw.text((left + (cell_width - label_text_width) // 2, label_y), entity.label, fill=0, font=label_font)
+                for line in label_lines:
+                    label_bbox = draw.textbbox((0, 0), line, font=label_font)
+                    label_text_width = label_bbox[2] - label_bbox[0]
+                    draw.text(
+                        (left + (cell_width - label_text_width) // 2, label_y),
+                        line,
+                        fill=0,
+                        font=label_font,
+                    )
+                    label_y += label_bbox[3] - label_bbox[1] + 4
 
                 value = entity.state
                 if entity.unit and entity.unit not in value:
