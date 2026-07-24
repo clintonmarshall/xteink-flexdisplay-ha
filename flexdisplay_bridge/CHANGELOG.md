@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.1
+
+- Added DejaVu scalable fonts to the Home Assistant App image so the large
+  dashboard typography renders correctly in production.
+
 ## 0.4.0
 
 - Added Overview, Climate, Energy, and Device Status dashboard pages.
