@@ -6,7 +6,8 @@
 - Added per-device name, area, dashboard profile, assigned mode, refresh
   interval, and auto-start policy.
 - Added provisioning response headers for FlexDisplay 0.10.0.
-- Bundled FlexDisplay 0.10.0 application-image metadata.
+- Bundled credential-free FlexDisplay 0.10.0 application-image metadata for
+  safe public OTA distribution.
 
 ## 0.6.0
 
