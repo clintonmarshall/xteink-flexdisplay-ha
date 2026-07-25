@@ -108,6 +108,9 @@ class FirmwareConfig:
     sha256: str = ""
     size: int = 0
     minimum_battery_percent: int = 40
+    canary_required: bool = True
+    require_usb_for_canary: bool = True
+    max_parallel: int = 1
 
 
 @dataclass(frozen=True)
@@ -303,6 +306,26 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
                     os.getenv(
                         "FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY",
                         firmware_raw.get("minimum_battery_percent", 40),
+                    )
+                ),
+            ),
+        ),
+        canary_required=_env_bool(
+            "FLEXDISPLAY_FIRMWARE_CANARY_REQUIRED",
+            bool(firmware_raw.get("canary_required", True)),
+        ),
+        require_usb_for_canary=_env_bool(
+            "FLEXDISPLAY_FIRMWARE_REQUIRE_USB_FOR_CANARY",
+            bool(firmware_raw.get("require_usb_for_canary", True)),
+        ),
+        max_parallel=max(
+            1,
+            min(
+                10,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_MAX_PARALLEL",
+                        firmware_raw.get("max_parallel", 1),
                     )
                 ),
             ),

@@ -125,6 +125,11 @@ remote control and editable per-device fleet policy. Sleeping devices receive
 commands at their next timer or physical-button wake; a radio wake is not
 possible while the ESP32-C3 is in deep sleep.
 
+Firmware `0.13.0`, Bridge `0.10.0`, and integration `0.10.0` add safer
+canary-first firmware rollout. Commands carry durable IDs, results remain on
+the SD card until explicitly acknowledged, and fleet installation is blocked
+until a USB-powered canary boots and verifies the target release.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

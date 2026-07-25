@@ -111,6 +111,10 @@ class DeviceStore:
                 },
             )
             pending = record.setdefault("pending_commands", [])
+            if not pending:
+                sequence = int(self._state.get("command_sequence", 0)) + 1
+                self._state["command_sequence"] = sequence
+                record["pending_command_id"] = f"{device_id}-{sequence:08x}"
             if command not in pending:
                 pending.append(command)
             record["command_queued_at"] = utc_now()
@@ -126,6 +130,7 @@ class DeviceStore:
             record["pending_commands"] = []
             if commands:
                 record["dispatched_commands"] = commands
+                record["dispatched_command_id"] = record.pop("pending_command_id", None)
                 record["command_dispatched_at"] = utc_now()
                 record["render_revision"] = int(record.get("render_revision", 0)) + 1
                 self._save()
@@ -138,21 +143,153 @@ class DeviceStore:
             if not record:
                 return None
             record["pending_commands"] = []
+            record.pop("pending_command_id", None)
             record["commands_cancelled_at"] = utc_now()
             self._save()
             return deepcopy(record)
 
-    def acknowledge(self, device_id: str, result: str) -> None:
+    def acknowledge(self, device_id: str, result: str, command_id: str = "") -> bool:
         if not result:
-            return
+            return False
         with self._lock:
             record = self._state["devices"].get(device_id)
             if not record:
-                return
+                return False
+            dispatched_id = str(record.get("dispatched_command_id") or "")
+            if command_id:
+                if (
+                    not dispatched_id
+                    and command_id == record.get("last_command_id")
+                    and result[:160] == record.get("last_command_result")
+                ):
+                    return True
+                if not dispatched_id or command_id != dispatched_id:
+                    record["last_stale_command_result"] = result[:160]
+                    record["last_stale_command_id"] = command_id[:96]
+                    record["stale_command_result_at"] = utc_now()
+                    self._save()
+                    return False
             record["last_command_result"] = result[:160]
+            record["last_command_id"] = (command_id or dispatched_id)[:96]
             record["command_completed_at"] = utc_now()
             record["dispatched_commands"] = []
+            record.pop("dispatched_command_id", None)
+            history = record.setdefault("command_history", [])
+            history.append(
+                {
+                    "command_id": record["last_command_id"],
+                    "result": record["last_command_result"],
+                    "completed_at": record["command_completed_at"],
+                }
+            )
+            record["command_history"] = history[-16:]
+            self._update_firmware_rollout(record, result)
             self._save()
+            return True
+
+    def firmware_rollout(self) -> dict[str, Any]:
+        with self._lock:
+            return deepcopy(self._state.get("firmware_rollout") or {})
+
+    def active_firmware_installs(self) -> int:
+        with self._lock:
+            return sum(
+                1
+                for record in self._state["devices"].values()
+                if "install" in (record.get("pending_commands") or [])
+                or "install" in (record.get("dispatched_commands") or [])
+            )
+
+    def queue_firmware_install(
+        self,
+        device_id: str,
+        target_version: str,
+        *,
+        canary_required: bool,
+        max_parallel: int,
+    ) -> dict[str, Any]:
+        """Queue an install while enforcing a persistent canary and concurrency gate."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                raise ValueError("Device has not checked in")
+
+            rollout = self._state.get("firmware_rollout") or {}
+            if rollout.get("target_version") != target_version:
+                rollout = {
+                    "target_version": target_version,
+                    "status": "awaiting_canary" if canary_required else "fleet_active",
+                    "started_at": utc_now(),
+                    "updated_devices": [],
+                }
+                self._state["firmware_rollout"] = rollout
+
+            already_active = (
+                "install" in (record.get("pending_commands") or [])
+                or "install" in (record.get("dispatched_commands") or [])
+            )
+            if already_active:
+                return deepcopy(record)
+
+            active = self.active_firmware_installs()
+            if active >= max_parallel:
+                raise ValueError(f"Maximum of {max_parallel} concurrent firmware install(s) reached")
+
+            if canary_required:
+                status = str(rollout.get("status") or "awaiting_canary")
+                canary_id = str(rollout.get("canary_device_id") or "")
+                if status == "failed":
+                    raise ValueError("Firmware rollout failed; configure a new release before continuing")
+                if status in {"awaiting_canary", "canary_active"}:
+                    if canary_id and canary_id != device_id:
+                        raise ValueError(f"Waiting for canary {canary_id} to boot and acknowledge")
+                    rollout["canary_device_id"] = device_id
+                    rollout["status"] = "canary_active"
+                    rollout["canary_started_at"] = rollout.get("canary_started_at") or utc_now()
+
+            queued = self.queue_command(device_id, "install")
+            rollout["last_queued_device_id"] = device_id
+            rollout["last_queued_at"] = utc_now()
+            record = self._state["devices"][device_id]
+            is_canary = rollout.get("canary_device_id") == device_id
+            record["firmware_update_role"] = "canary" if is_canary else "fleet"
+            record["firmware_update_target"] = target_version
+            record["firmware_update_status"] = "queued"
+            if not is_canary and rollout.get("status") == "canary_verified":
+                rollout["status"] = "fleet_active"
+            self._save()
+            del queued
+            return deepcopy(record)
+
+    def _update_firmware_rollout(self, record: dict[str, Any], result: str) -> None:
+        if not result.startswith("install:"):
+            return
+        rollout = self._state.get("firmware_rollout")
+        if not rollout:
+            return
+        device_id = str(record.get("device_id") or "")
+        target = str(rollout.get("target_version") or "")
+        running = str(record.get("firmware") or "")
+        successful = result in {"install:complete", "install:boot-confirmed"} and running == target
+        if successful:
+            record["firmware_update_status"] = "verified"
+            updated = rollout.setdefault("updated_devices", [])
+            if device_id not in updated:
+                updated.append(device_id)
+            if rollout.get("canary_device_id") == device_id:
+                rollout["status"] = "canary_verified"
+                rollout["canary_verified_at"] = utc_now()
+            elif rollout.get("status") == "fleet_active":
+                rollout["last_verified_at"] = utc_now()
+            rollout["last_verified_device_id"] = device_id
+            return
+
+        record["firmware_update_status"] = "failed"
+        record["firmware_update_error"] = result
+        rollout["last_failed_device_id"] = device_id
+        rollout["last_failure"] = result
+        rollout["last_failed_at"] = utc_now()
+        rollout["status"] = "failed"
 
     def set_dashboard_page(
         self,

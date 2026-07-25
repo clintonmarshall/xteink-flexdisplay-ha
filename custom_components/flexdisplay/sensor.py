@@ -83,6 +83,16 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("last_command_result") or "none",
     ),
     FlexDisplaySensorDescription(
+        key="firmware_rollout_status",
+        translation_key="firmware_rollout_status",
+        value_fn=lambda record: record.get("firmware_rollout_status") or "not_started",
+    ),
+    FlexDisplaySensorDescription(
+        key="firmware_update_status",
+        translation_key="firmware_update_status",
+        value_fn=lambda record: record.get("firmware_update_status") or "idle",
+    ),
+    FlexDisplaySensorDescription(
         key="power_state",
         translation_key="power_state",
         value_fn=lambda record: record.get("power_state") or "offline",

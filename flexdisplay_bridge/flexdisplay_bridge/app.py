@@ -33,6 +33,8 @@ SUPPORTED_COMMANDS = {
 }
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
+OTA_PARTITION_SIZE = 0x640000
+MINIMUM_FIRMWARE_SIZE = 64 * 1024
 
 
 def _firmware_version(value: str) -> tuple[int, int, int]:
@@ -42,7 +44,81 @@ def _firmware_version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
 
 
-def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str, Any]:
+def _firmware_metadata_error(settings: BridgeConfig) -> str:
+    firmware = settings.firmware
+    if not firmware.version or not firmware.url:
+        return "No firmware release is configured"
+    if not firmware.url.startswith(("https://", "http://")):
+        return "Firmware URL must use HTTP or HTTPS"
+    if not re.fullmatch(r"[0-9a-f]{64}", firmware.sha256):
+        return "Firmware SHA-256 must contain 64 lowercase hexadecimal characters"
+    if firmware.size < MINIMUM_FIRMWARE_SIZE or firmware.size > OTA_PARTITION_SIZE:
+        return "Firmware size is outside the OTA application partition safety limits"
+    return ""
+
+
+def _firmware_install_blockers(
+    record: dict[str, Any],
+    settings: BridgeConfig,
+    store: DeviceStore,
+) -> list[str]:
+    firmware = settings.firmware
+    error = _firmware_metadata_error(settings)
+    blockers = [error] if error else []
+    if error:
+        return blockers
+    if _firmware_version(firmware.version) <= _firmware_version(str(record.get("firmware") or "")):
+        blockers.append("Device already runs this release or a newer release")
+    if record.get("sd_ready") is not True:
+        blockers.append("Device SD card is not ready")
+    usb_connected = record.get("usb_connected") is True
+    battery = record.get("battery_percent")
+    if not usb_connected and (
+        battery is None or float(battery) < firmware.minimum_battery_percent
+    ):
+        blockers.append(
+            f"Connect USB or charge the device to {firmware.minimum_battery_percent}%"
+        )
+    if record.get("pending_commands") and "install" not in record["pending_commands"]:
+        blockers.append("Another command is pending")
+    if record.get("dispatched_commands") and "install" not in record["dispatched_commands"]:
+        blockers.append("Waiting for the previous command acknowledgement")
+
+    rollout = store.firmware_rollout()
+    if rollout.get("target_version") == firmware.version:
+        status = str(rollout.get("status") or "")
+        canary_id = str(rollout.get("canary_device_id") or "")
+        if status == "failed":
+            failed_id = str(rollout.get("last_failed_device_id") or "a fleet device")
+            blockers.append(
+                f"Rollout paused after failure on {failed_id}; configure a new release before continuing"
+            )
+        elif (
+            firmware.canary_required
+            and status in {"awaiting_canary", "canary_active"}
+            and canary_id
+            and canary_id != record.get("device_id")
+        ):
+            blockers.append(f"Waiting for canary {canary_id} to boot and acknowledge")
+    elif firmware.canary_required and firmware.require_usb_for_canary and not usb_connected:
+        blockers.append("The first canary installation requires USB power")
+
+    already_active = (
+        "install" in (record.get("pending_commands") or [])
+        or "install" in (record.get("dispatched_commands") or [])
+    )
+    if not already_active and store.active_firmware_installs() >= firmware.max_parallel:
+        blockers.append(
+            f"Maximum of {firmware.max_parallel} concurrent firmware install(s) reached"
+        )
+    return blockers
+
+
+def _decorate_device(
+    record: dict[str, Any],
+    settings: BridgeConfig,
+    store: DeviceStore | None = None,
+) -> dict[str, Any]:
     result = dict(record)
     last_seen = result.get("last_seen")
     online = False
@@ -115,6 +191,17 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
         and settings.firmware.url
         and _firmware_version(settings.firmware.version) > _firmware_version(str(result.get("firmware") or ""))
     )
+    if store:
+        blockers = _firmware_install_blockers(result, settings, store)
+        rollout = store.firmware_rollout()
+        result["firmware_install_blockers"] = blockers
+        result["firmware_install_ready"] = result["update_available"] and not blockers
+        result["firmware_rollout_status"] = rollout.get("status") or "not_started"
+        result["firmware_canary_device_id"] = rollout.get("canary_device_id")
+        result["firmware_canary_verified"] = (
+            rollout.get("target_version") == settings.firmware.version
+            and rollout.get("status") == "canary_verified"
+        )
     return result
 
 
@@ -375,7 +462,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/devices")
     def devices() -> dict[str, Any]:
-        return {"devices": [_decorate_device(record, settings) for record in store.all()]}
+        return {"devices": [_decorate_device(record, settings, store) for record in store.all()]}
 
     @app.get("/api/v1/devices/{device_id}")
     def device(device_id: str) -> dict[str, Any]:
@@ -383,7 +470,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.get(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _decorate_device(record, settings)
+        return _decorate_device(record, settings, store)
 
     @app.get("/api/v1/devices/{device_id}/events")
     def device_events(device_id: str) -> dict[str, Any]:
@@ -403,9 +490,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         selected = _device_id(device_id)
         if not _valid_command(command):
             raise HTTPException(status_code=400, detail="Unsupported command")
-        if command == "install" and (not settings.firmware.version or not settings.firmware.url):
-            raise HTTPException(status_code=409, detail="No firmware release is configured")
-        record = store.queue_command(selected, command)
+        if command == "install":
+            current = store.get(selected)
+            if not current:
+                raise HTTPException(status_code=404, detail="Device has not checked in")
+            blockers = _firmware_install_blockers(current, settings, store)
+            if blockers:
+                raise HTTPException(status_code=409, detail="; ".join(blockers))
+            try:
+                record = store.queue_firmware_install(
+                    selected,
+                    settings.firmware.version,
+                    canary_required=settings.firmware.canary_required,
+                    max_parallel=settings.firmware.max_parallel,
+                )
+            except ValueError as err:
+                raise HTTPException(status_code=409, detail=str(err)) from err
+        else:
+            record = store.queue_command(selected, command)
         return {"queued": command, "device": record}
 
     @app.delete("/api/v1/devices/{device_id}/commands")
@@ -415,7 +517,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.clear_commands(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return {"cancelled": True, "device": _decorate_device(record, settings)}
+        return {"cancelled": True, "device": _decorate_device(record, settings, store)}
 
     @app.put("/api/v1/devices/{device_id}/provision")
     def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
@@ -490,7 +592,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="No provisioning fields supplied")
         record = store.provision(selected, assignment)
         store.queue_command(selected, "refresh")
-        return {"device": _decorate_device(record, settings)}
+        return {"device": _decorate_device(record, settings, store)}
 
     @app.get("/api/v1/screen")
     def screen(
@@ -505,6 +607,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_rssi: str | None = Header(default=None),
         x_flexdisplay_mode: str | None = Header(default=None),
         x_flexdisplay_command_result: str | None = Header(default=None),
+        x_flexdisplay_command_id: str | None = Header(default=None),
         x_flexdisplay_usb_connected: str | None = Header(default=None),
         x_flexdisplay_uptime_seconds: str | None = Header(default=None),
         x_flexdisplay_free_heap: str | None = Header(default=None),
@@ -561,11 +664,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 },
             )
         record = store.record_button_events(device_id, _button_events(x_flexdisplay_button_events)) or record
-        store.acknowledge(device_id, x_flexdisplay_command_result or "")
+        command_acknowledged = store.acknowledge(
+            device_id,
+            x_flexdisplay_command_result or "",
+            x_flexdisplay_command_id or "",
+        )
         profile: DeviceConfig = _effective_device(configured, record)
         commands = store.consume_commands(device_id)
         if commands:
             record = store.get(device_id) or record
+        command_id = str(record.get("dispatched_command_id") or "") if commands else ""
         entity_states, ha_error = ha.fetch(profile.entities)
         dashboard_profile = settings.profile(profile)
         pages = build_dashboard_pages(
@@ -659,6 +767,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Auto-Start"] = "true" if profile.auto_start else "false"
             response.headers["X-FlexDisplay-Live-Mode"] = "true" if profile.live_mode else "false"
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
+        if command_id:
+            response.headers["X-FlexDisplay-Command-ID"] = command_id
+        if x_flexdisplay_command_result:
+            response.headers["X-FlexDisplay-Command-Acknowledged"] = (
+                "true" if command_acknowledged else "false"
+            )
         response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
         response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))
         response.headers["X-FlexDisplay-Page-Title"] = page.title

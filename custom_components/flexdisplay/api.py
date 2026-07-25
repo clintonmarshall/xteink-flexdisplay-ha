@@ -28,8 +28,16 @@ class FlexDisplayApiClient:
                 json=json,
                 timeout=10,
             ) as response:
-                response.raise_for_status()
+                if response.status >= 400:
+                    try:
+                        payload = await response.json()
+                        detail = str(payload.get("detail") or response.reason)
+                    except (ValueError, AttributeError):
+                        detail = response.reason
+                    raise FlexDisplayApiError(detail)
                 return await response.json()
+        except FlexDisplayApiError:
+            raise
         except (ClientError, ClientResponseError, TimeoutError, ValueError) as err:
             raise FlexDisplayApiError(str(err)) from err
 

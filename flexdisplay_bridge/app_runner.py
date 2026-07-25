@@ -12,13 +12,13 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.12.0",
+    "firmware_version": "1.4.1-flexdisplay.0.13.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/v0.9.0/firmware.bin"
+        "releases/download/v0.10.0/firmware.bin"
     ),
-    "firmware_sha256": "939d462cf4ea02520b6f225ad7a0292e72c7d41aa5c81f9ff31b3ad210310d9c",
-    "firmware_size": 5_483_056,
+    "firmware_sha256": "d9ecf8bb965ee0d0a9a661030286f7d9b14a561258bf832a18ceb218786b3225",
+    "firmware_size": 5_483_808,
 }
 
 
@@ -55,6 +55,15 @@ def main() -> None:
     os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = firmware_option(options, "firmware_size")
     os.environ["FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY"] = option(
         options, "firmware_minimum_battery", 40
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_CANARY_REQUIRED"] = option(
+        options, "firmware_canary_required", True
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_REQUIRE_USB_FOR_CANARY"] = option(
+        options, "firmware_require_usb_for_canary", True
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAX_PARALLEL"] = option(
+        options, "firmware_max_parallel", 1
     )
 
     if not CONFIG_PATH.exists():

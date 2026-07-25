@@ -46,6 +46,34 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
         dispatched = self.record.get("dispatched_commands") or []
         return "install" in pending or "install" in dispatched
 
+    @property
+    def release_summary(self) -> str | None:
+        """Explain the guarded rollout state in the update dialog."""
+        blockers = self.record.get("firmware_install_blockers") or []
+        if blockers:
+            return "Update paused: " + "; ".join(str(item) for item in blockers)
+        if self.record.get("firmware_update_role") == "canary":
+            return "Canary update: the fleet remains blocked until this device boots and acknowledges."
+        if self.record.get("firmware_canary_verified"):
+            return "Canary verified. This device is eligible for the staged fleet rollout."
+        return "The first eligible device becomes the USB-powered canary."
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Expose rollout and acknowledgement details."""
+        return {
+            "install_ready": self.record.get("firmware_install_ready", False),
+            "install_blockers": self.record.get("firmware_install_blockers") or [],
+            "rollout_status": self.record.get("firmware_rollout_status") or "not_started",
+            "canary_device_id": self.record.get("firmware_canary_device_id"),
+            "canary_verified": self.record.get("firmware_canary_verified", False),
+            "update_role": self.record.get("firmware_update_role"),
+            "update_status": self.record.get("firmware_update_status"),
+            "command_id": self.record.get("dispatched_command_id")
+            or self.record.get("pending_command_id"),
+            "last_command_id": self.record.get("last_command_id"),
+        }
+
     def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
         """Compare the FlexDisplay suffix instead of the CrossPoint base version."""
 

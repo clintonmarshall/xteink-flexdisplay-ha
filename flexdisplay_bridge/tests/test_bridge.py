@@ -215,21 +215,49 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
 
         screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert screen.headers["x-flexdisplay-commands"] == "refresh"
+        command_id = screen.headers["x-flexdisplay-command-id"]
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["pending_commands"] == []
         assert record["render_revision"] == 1
         assert record["dispatched_commands"] == ["refresh"]
 
-        client.get(
+        stale = client.get(
             "/api/v1/screen",
             headers={
                 "X-FlexDisplay-ID": "X4-DEMO01",
                 "X-FlexDisplay-Command-Result": "refresh:complete",
+                "X-FlexDisplay-Command-ID": "X4-DEMO01-stale",
             },
         )
+        assert stale.headers["x-flexdisplay-command-acknowledged"] == "false"
+        assert client.get("/api/v1/devices/X4-DEMO01").json()["dispatched_commands"] == [
+            "refresh"
+        ]
+
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Command-Result": "refresh:complete",
+                "X-FlexDisplay-Command-ID": command_id,
+            },
+        )
+        assert acknowledged.headers["x-flexdisplay-command-acknowledged"] == "true"
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["last_command_result"] == "refresh:complete"
+        assert record["last_command_id"] == command_id
         assert record["dispatched_commands"] == []
+        assert record["command_history"][-1]["result"] == "refresh:complete"
+        duplicate = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Command-Result": "refresh:complete",
+                "X-FlexDisplay-Command-ID": command_id,
+            },
+        )
+        assert duplicate.headers["x-flexdisplay-command-acknowledged"] == "true"
+        assert len(client.get("/api/v1/devices/X4-DEMO01").json()["command_history"]) == 1
 
 
 def test_remote_power_commands_and_queue_cancellation(tmp_path: Path) -> None:
@@ -397,6 +425,8 @@ def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
             headers={
                 "X-FlexDisplay-ID": "X4-DEMO01",
                 "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.5.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
             },
         )
         record = client.get("/api/v1/devices/X4-DEMO01").json()
@@ -412,6 +442,136 @@ def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
         assert screen.headers["x-flexdisplay-firmware-sha256"] == firmware.sha256
         assert screen.headers["x-flexdisplay-firmware-size"] == str(firmware.size)
         assert screen.headers["x-flexdisplay-firmware-min-battery"] == "45"
+
+
+def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="cd" * 32,
+        size=5_500_000,
+        minimum_battery_percent=45,
+        canary_required=True,
+        require_usb_for_canary=True,
+        max_parallel=1,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        for device_id in ("X3-CANARY", "X4-FLEET01", "X3-FLEET02"):
+            client.get(
+                "/api/v1/screen",
+                headers={
+                    "X-FlexDisplay-ID": device_id,
+                    "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                    "X-FlexDisplay-SD-Ready": "true",
+                    "X-FlexDisplay-USB-Connected": "true",
+                    "X-FlexDisplay-Battery-Percent": "90",
+                },
+            )
+
+        canary = client.post("/api/v1/devices/X3-CANARY/commands/install")
+        assert canary.status_code == 200
+        blocked = client.post("/api/v1/devices/X4-FLEET01/commands/install")
+        assert blocked.status_code == 409
+        assert "canary X3-CANARY" in blocked.json()["detail"]
+
+        delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-CANARY",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        command_id = delivery.headers["x-flexdisplay-command-id"]
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-CANARY",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+                "X-FlexDisplay-Command-ID": command_id,
+                "X-FlexDisplay-Command-Result": "install:complete",
+            },
+        )
+        assert acknowledged.headers["x-flexdisplay-command-acknowledged"] == "true"
+        canary_record = client.get("/api/v1/devices/X3-CANARY").json()
+        assert canary_record["firmware_canary_verified"] is True
+        assert canary_record["firmware_update_status"] == "verified"
+
+        fleet = client.post("/api/v1/devices/X4-FLEET01/commands/install")
+        assert fleet.status_code == 200
+        fleet_record = client.get("/api/v1/devices/X4-FLEET01").json()
+        assert fleet_record["firmware_update_role"] == "fleet"
+        assert fleet_record["firmware_rollout_status"] == "fleet_active"
+
+        failed_delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-FLEET01",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        failed_id = failed_delivery.headers["x-flexdisplay-command-id"]
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-FLEET01",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+                "X-FlexDisplay-Command-ID": failed_id,
+                "X-FlexDisplay-Command-Result": "install:download-failed",
+            },
+        )
+        paused = client.post("/api/v1/devices/X3-FLEET02/commands/install")
+        assert paused.status_code == 409
+        assert "Rollout paused after failure on X4-FLEET01" in paused.json()["detail"]
+
+
+def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Path) -> None:
+    invalid = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="not-a-sha",
+        size=5_500_000,
+    )
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "bad.json", firmware=invalid))) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-BAD001",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        rejected = client.post("/api/v1/devices/X3-BAD001/commands/install")
+        assert rejected.status_code == 409
+        assert "SHA-256" in rejected.json()["detail"]
+
+    valid = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="ef" * 32,
+        size=5_500_000,
+    )
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "sd.json", firmware=valid))) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-NOSD01",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        rejected = client.post("/api/v1/devices/X3-NOSD01/commands/install")
+        assert rejected.status_code == 409
+        assert "SD card" in rejected.json()["detail"]
 
 
 def test_invalid_device_id_is_rejected(tmp_path: Path) -> None:
