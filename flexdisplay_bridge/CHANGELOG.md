@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.6
+
+- Extend guarded USB recovery verification to an active fleet installation.
+- Preserve canary state while auditing and clearing a verified fleet command.
+
 ## 0.10.5
 
 - Redeliver unacknowledged durable commands with their existing command ID.

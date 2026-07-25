@@ -142,7 +142,7 @@ def _usb_recovery_blockers(
     store: DeviceStore,
     external_usb_evidence: dict[str, Any] | None = None,
 ) -> list[str]:
-    """Explain why an operator cannot reconcile a USB-recovered canary."""
+    """Explain why an operator cannot reconcile a USB-recovered device."""
     target = settings.firmware.version
     rollout = store.firmware_rollout()
     blockers: list[str] = []
@@ -150,10 +150,15 @@ def _usb_recovery_blockers(
         blockers.append("No target firmware release is configured")
     if rollout.get("target_version") != target:
         blockers.append("The active rollout does not match the configured target")
-    if rollout.get("status") != "canary_active":
-        blockers.append("The rollout is not waiting for an active canary")
-    if rollout.get("canary_device_id") != record.get("device_id"):
+    rollout_status = str(rollout.get("status") or "")
+    is_active_canary = (
+        rollout_status == "canary_active"
+        and rollout.get("canary_device_id") == record.get("device_id")
+    )
+    if rollout_status == "canary_active" and not is_active_canary:
         blockers.append("This device is not the active canary")
+    elif rollout_status not in {"canary_active", "canary_verified", "fleet_active"}:
+        blockers.append("The rollout is not accepting verified USB recoveries")
     if record.get("firmware") != target:
         blockers.append("The device is not reporting the exact target firmware")
     if record.get("usb_connected") is not True and not _valid_external_usb_evidence(
