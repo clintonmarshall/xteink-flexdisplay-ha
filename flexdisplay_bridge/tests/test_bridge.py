@@ -40,6 +40,10 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert response.status_code == 200
         assert response.headers["content-type"] == "image/png"
         assert response.headers["x-flexdisplay-refresh-interval"] == "900"
+        assert response.headers["x-flexdisplay-provisioned"] == "true"
+        assert response.headers["x-flexdisplay-device-name"] == "Test X4"
+        assert response.headers["x-flexdisplay-assigned-mode"] == "home_assistant"
+        assert response.headers["x-flexdisplay-auto-start"] == "true"
         with Image.open(io.BytesIO(response.content)) as image:
             assert image.size == (480, 800)
             assert image.mode == "1"
@@ -47,6 +51,77 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["battery_percent"] == 76
         assert record["rssi"] == -54
+        assert record["provisioned"] is True
+        assert record["assigned_name"] == "Test X4"
+
+
+def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) -> None:
+    profile = DashboardProfileConfig(name="wall")
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        profiles={"wall": profile},
+        default_profile="wall",
+    )
+    with TestClient(create_app(config)) as client:
+        screen = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-NEW001",
+                "X-FlexDisplay-Model": "XTEINK_X3",
+                "X-FlexDisplay-Width": "528",
+                "X-FlexDisplay-Height": "792",
+            },
+        )
+        assert screen.status_code == 200
+        assert screen.headers["x-flexdisplay-profile"] == "wall"
+        assert screen.headers["x-flexdisplay-assigned-mode"] == "home_assistant"
+        record = client.get("/api/v1/devices/X3-NEW001").json()
+        assert record["name"] == "X3-NEW001"
+        assert record["assigned_profile"] == "wall"
+        assert record["assigned_auto_start"] is True
+        assert record["available_profiles"] == ["wall"]
+
+
+def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="secret",
+        profiles={
+            "default": DashboardProfileConfig(name="default"),
+            "showroom": DashboardProfileConfig(name="showroom"),
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        unauthorized = client.put(
+            "/api/v1/devices/X4-DEMO01/provision",
+            json={"profile": "showroom"},
+        )
+        assert unauthorized.status_code == 401
+
+        provisioned = client.put(
+            "/api/v1/devices/X4-DEMO01/provision",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+            json={
+                "name": "Showroom Panel",
+                "area": "Showroom",
+                "profile": "showroom",
+                "mode": "home_assistant",
+                "refresh_interval_seconds": 300,
+            },
+        )
+        assert provisioned.status_code == 200
+        device = provisioned.json()["device"]
+        assert device["name"] == "Showroom Panel"
+        assert device["area"] == "Showroom"
+        assert device["assigned_profile"] == "showroom"
+        assert device["assigned_refresh_interval_seconds"] == 300
+
+        screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        assert screen.headers["x-flexdisplay-device-name"] == "Showroom Panel"
+        assert screen.headers["x-flexdisplay-area"] == "Showroom"
+        assert screen.headers["x-flexdisplay-profile"] == "showroom"
+        assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:

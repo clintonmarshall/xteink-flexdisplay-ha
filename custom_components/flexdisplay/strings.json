@@ -110,6 +110,12 @@
     "select": {
       "dashboard_page": {
         "name": "Dashboard page"
+      },
+      "dashboard_profile": {
+        "name": "Dashboard profile"
+      },
+      "assigned_mode": {
+        "name": "Assigned mode"
       }
     },
     "update": {

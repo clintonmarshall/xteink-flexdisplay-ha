@@ -4,5 +4,6 @@
 __pycache__/
 *.egg-info/
 *.pyc
+*.bin
 config.yaml.local
 data/

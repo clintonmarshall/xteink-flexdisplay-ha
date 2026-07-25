@@ -48,9 +48,16 @@ token is required in the App options.
 6. Enter `http://HOME_ASSISTANT_IP:8099`.
 7. If the Bridge App has an API key, enter the same key.
 
-## 3. Configure each X3/X4
+## 3. Provision each X3/X4
 
-Place this file on the device SD card at:
+FlexDisplay 0.10.0 fleet builds connect to their approved Wi-Fi and register
+with the Bridge automatically. The first response assigns the device name,
+area, dashboard profile, mode, refresh interval, and auto-start policy. No
+per-device SD-card file is required. Hold **Back** during startup to bypass
+auto-start and open the CrossPoint reader.
+
+For standard builds or advanced overrides, place this file on the device SD
+card at:
 
 ```text
 /.crosspoint/home-assistant.json
@@ -100,6 +107,10 @@ device sleeps.
 Firmware `0.8.0`, Bridge `0.6.0`, and integration `0.6.0` add configurable
 per-device dashboard profiles, page selection, previous/overview navigation,
 and optional automatic page rotation.
+
+Firmware `0.10.0`, Bridge `0.7.0`, and integration `0.7.0` add zero-touch
+registration, persistent device assignments, dashboard-profile selection, and
+assigned-mode selection.
 
 Devices first discovered after integration setup may require a FlexDisplay
 integration reload before their entities appear.

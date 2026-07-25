@@ -5,6 +5,13 @@ server:
 storage:
   state_path: /data/flexdisplay-state.json
 
+provisioning:
+  enabled: true
+  default_area: ""
+  default_mode: home_assistant
+  auto_start: true
+  refresh_interval_seconds: 900
+
 home_assistant:
   base_url: http://homeassistant.local:8123
   token_env: FLEXDISPLAY_HA_TOKEN
@@ -66,8 +73,11 @@ dashboard:
 devices:
   X4-DEMO01:
     name: Example X4
+    area: Office
     model: X4
     width: 480
     height: 800
     refresh_interval_seconds: 300
     profile: default
+    mode: home_assistant
+    auto_start: true

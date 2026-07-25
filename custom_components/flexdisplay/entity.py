@@ -36,5 +36,6 @@ class FlexDisplayEntity(CoordinatorEntity[FlexDisplayCoordinator]):
             model=str(record.get("model") or "XTEINK"),
             name=str(record.get("name") or self.device_id),
             serial_number=self.device_id,
+            suggested_area=str(record.get("area") or "") or None,
             sw_version=str(record.get("firmware") or "unknown"),
         )

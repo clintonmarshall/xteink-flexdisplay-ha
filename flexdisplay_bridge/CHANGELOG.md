@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.7.0
+
+- Added persistent zero-touch device provisioning.
+- Added per-device name, area, dashboard profile, assigned mode, refresh
+  interval, and auto-start policy.
+- Added provisioning response headers for FlexDisplay 0.10.0.
+- Bundled FlexDisplay 0.10.0 application-image metadata.
+
 ## 0.6.0
 
 - Added configurable dashboard profiles with per-device assignment.

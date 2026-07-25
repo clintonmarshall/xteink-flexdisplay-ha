@@ -42,6 +42,56 @@ class FlexDisplayPageSelect(FlexDisplayEntity, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayProfileSelect(FlexDisplayEntity, SelectEntity):
+    """Assign the dashboard profile used at the next device check-in."""
+
+    _attr_translation_key = "dashboard_profile"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_dashboard_profile_select"
+
+    @property
+    def options(self) -> list[str]:
+        return list(self.record.get("available_profiles") or ["default"])
+
+    @property
+    def current_option(self) -> str | None:
+        current = str(self.record.get("assigned_profile") or "")
+        return current if current in self.options else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unknown FlexDisplay profile: {option}")
+        await self.coordinator.client.provision(self.device_id, {"profile": option})
+        await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayModeSelect(FlexDisplayEntity, SelectEntity):
+    """Assign the mode applied at the next Home Assistant check-in."""
+
+    _attr_translation_key = "assigned_mode"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_assigned_mode_select"
+
+    @property
+    def options(self) -> list[str]:
+        return list(self.record.get("available_modes") or ["home_assistant"])
+
+    @property
+    def current_option(self) -> str | None:
+        current = str(self.record.get("assigned_mode") or "")
+        return current if current in self.options else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unknown FlexDisplay mode: {option}")
+        await self.coordinator.client.provision(self.device_id, {"mode": option})
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -51,7 +101,12 @@ async def async_setup_entry(
     del hass
     coordinator: FlexDisplayCoordinator = entry.runtime_data
     async_add_entities(
-        FlexDisplayPageSelect(coordinator, record["device_id"])
+        entity
         for record in coordinator.data
         if record.get("device_id")
+        for entity in (
+            FlexDisplayPageSelect(coordinator, record["device_id"]),
+            FlexDisplayProfileSelect(coordinator, record["device_id"]),
+            FlexDisplayModeSelect(coordinator, record["device_id"]),
+        )
     )

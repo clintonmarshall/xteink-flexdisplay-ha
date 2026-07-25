@@ -19,12 +19,13 @@ class FlexDisplayApiClient:
         self._base_url = base_url.rstrip("/")
         self._headers = {"X-FlexDisplay-Bridge-Key": api_key} if api_key else {}
 
-    async def _request(self, method: str, path: str) -> dict[str, Any]:
+    async def _request(self, method: str, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
         try:
             async with self._session.request(
                 method,
                 f"{self._base_url}{path}",
                 headers=self._headers,
+                json=json,
                 timeout=10,
             ) as response:
                 response.raise_for_status()
@@ -45,3 +46,7 @@ class FlexDisplayApiClient:
     async def command(self, device_id: str, command: str) -> None:
         """Queue a command for a device."""
         await self._request("POST", f"/api/v1/devices/{device_id}/commands/{command}")
+
+    async def provision(self, device_id: str, assignment: dict[str, Any]) -> None:
+        """Update the server-side assignment for a device."""
+        await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)

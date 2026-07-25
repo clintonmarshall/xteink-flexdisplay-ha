@@ -38,12 +38,24 @@ class DashboardProfileConfig:
 @dataclass(frozen=True)
 class DeviceConfig:
     name: str
+    area: str = ""
     model: str = ""
     width: int = 480
     height: int = 800
     refresh_interval_seconds: int = 900
     entities: tuple[EntityConfig, ...] = ()
     profile: str = "default"
+    mode: str = "home_assistant"
+    auto_start: bool = True
+
+
+@dataclass(frozen=True)
+class ProvisioningConfig:
+    enabled: bool = True
+    default_area: str = ""
+    default_mode: str = "home_assistant"
+    auto_start: bool = True
+    refresh_interval_seconds: int = 900
 
 
 @dataclass(frozen=True)
@@ -82,6 +94,7 @@ class BridgeConfig:
     home_assistant: HomeAssistantConfig = HomeAssistantConfig()
     mqtt: MqttConfig = MqttConfig()
     firmware: FirmwareConfig = FirmwareConfig()
+    provisioning: ProvisioningConfig = ProvisioningConfig()
     default_entities: tuple[EntityConfig, ...] = ()
     default_profile: str = "default"
     profiles: dict[str, DashboardProfileConfig] = field(default_factory=dict)
@@ -99,11 +112,15 @@ class BridgeConfig:
         )
         return DeviceConfig(
             name=device_id,
+            area=self.provisioning.default_area,
             model=model,
             width=width,
             height=height,
+            refresh_interval_seconds=self.provisioning.refresh_interval_seconds,
             entities=_merge_entities(self.default_entities, profile_entities),
             profile=self.default_profile,
+            mode=self.provisioning.default_mode,
+            auto_start=self.provisioning.auto_start,
         )
 
     def profile(self, device: DeviceConfig) -> DashboardProfileConfig | None:
@@ -169,12 +186,15 @@ def _device(
     default_width, default_height = ((480, 800) if model.upper() == "X4" else (528, 792))
     return DeviceConfig(
         name=str(value.get("name") or device_id),
+        area=str(value.get("area") or ""),
         model=model,
         width=int(value.get("width", default_width)),
         height=int(value.get("height", default_height)),
         refresh_interval_seconds=max(60, min(86400, int(value.get("refresh_interval_seconds", 900)))),
         entities=entities,
         profile=profile_name,
+        mode=str(value.get("mode") or "home_assistant"),
+        auto_start=bool(value.get("auto_start", True)),
     )
 
 
@@ -230,6 +250,18 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         ),
     )
 
+    provisioning_raw = raw.get("provisioning") or {}
+    provisioning = ProvisioningConfig(
+        enabled=bool(provisioning_raw.get("enabled", True)),
+        default_area=str(provisioning_raw.get("default_area") or ""),
+        default_mode=str(provisioning_raw.get("default_mode") or "home_assistant"),
+        auto_start=bool(provisioning_raw.get("auto_start", True)),
+        refresh_interval_seconds=max(
+            60,
+            min(86400, int(provisioning_raw.get("refresh_interval_seconds", 900))),
+        ),
+    )
+
     dashboard_raw = raw.get("dashboard") or {}
     defaults = tuple(_entity(item) for item in dashboard_raw.get("entities", []))
     default_profile = str(dashboard_raw.get("default_profile") or "default")
@@ -261,6 +293,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         home_assistant=ha,
         mqtt=mqtt,
         firmware=firmware,
+        provisioning=provisioning,
         default_entities=defaults,
         default_profile=default_profile,
         profiles=profiles,
