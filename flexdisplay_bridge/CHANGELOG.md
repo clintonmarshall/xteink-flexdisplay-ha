@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.8.0
+
+- Added intelligent sleep plans with active hours, low-battery throttling,
+  critical-battery shutdown, and USB stay-awake behavior.
+- Added unchanged-image hashing so devices skip unnecessary e-paper refreshes
+  and lengthen their next sleep.
+- Added sleep action, reason, duration, next-wake, and unchanged-image entities.
+- Added automatic Home Assistant entity discovery when a new fleet device
+  checks in after integration setup.
+- Bundled the credential-free FlexDisplay 0.11.0 application image metadata.
+
 ## 0.7.0
 
 - Added persistent zero-touch device provisioning.

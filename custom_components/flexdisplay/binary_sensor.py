@@ -15,7 +15,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity
+from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -43,6 +43,11 @@ DESCRIPTIONS = (
         translation_key="sd_ready",
         device_class=BinarySensorDeviceClass.CONNECTIVITY,
         value_fn=lambda record: bool(record.get("sd_ready")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="image_unchanged",
+        translation_key="image_unchanged",
+        value_fn=lambda record: bool(record.get("image_unchanged")),
     ),
 )
 
@@ -75,10 +80,11 @@ async def async_setup_entry(
 ) -> None:
     """Create online sensors for registered devices."""
     del hass
-    coordinator: FlexDisplayCoordinator = entry.runtime_data
-    async_add_entities(
-        FlexDisplayBinarySensor(coordinator, record["device_id"], description)
-        for record in coordinator.data
-        if record.get("device_id")
-        for description in DESCRIPTIONS
+    setup_dynamic_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator, device_id: (
+            FlexDisplayBinarySensor(coordinator, device_id, description)
+            for description in DESCRIPTIONS
+        ),
     )

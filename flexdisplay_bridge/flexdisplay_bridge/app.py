@@ -4,8 +4,9 @@ import hashlib
 import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 
@@ -48,9 +49,22 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
                 ),
                 result,
             )
-            online_window = max(180, int(profile.refresh_interval_seconds * 1.5) + 60)
+            planned_sleep = _integer(
+                str(result.get("sleep_seconds")) if result.get("sleep_seconds") is not None else None,
+                0,
+                0,
+                86400,
+            )
+            online_window = max(180, int(profile.refresh_interval_seconds * 1.5) + 60, planned_sleep + 300)
             online = age <= online_window
-            power_state = "awake" if age <= 90 else ("sleeping" if online else "offline")
+            sleep_action = str(result.get("sleep_action") or "")
+            if sleep_action == "power_off":
+                power_state = "powered_off"
+            elif sleep_action == "scheduled":
+                grace = 0 if result.get("wake_reason") == "scheduled_timer" else profile.manual_wake_grace_seconds
+                power_state = "awake" if age <= grace else ("sleeping" if online else "offline")
+            else:
+                power_state = "awake" if age <= 90 else ("sleeping" if online else "offline")
         except ValueError:
             pass
     result["online"] = online
@@ -71,6 +85,16 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
     result["assigned_mode"] = profile.mode
     result["assigned_auto_start"] = profile.auto_start
     result["assigned_refresh_interval_seconds"] = profile.refresh_interval_seconds
+    result["assigned_intelligent_sleep"] = profile.intelligent_sleep
+    result["assigned_active_start"] = profile.active_start
+    result["assigned_active_end"] = profile.active_end
+    result["assigned_timezone"] = profile.timezone
+    result["assigned_critical_battery_percent"] = profile.critical_battery_percent
+    result["assigned_low_battery_percent"] = profile.low_battery_percent
+    result["assigned_low_battery_multiplier"] = profile.low_battery_multiplier
+    result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
+    result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
+    result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
     result["available_profiles"] = list(settings.profiles)
     result["available_modes"] = sorted(SUPPORTED_MODES)
     result["update_available"] = bool(
@@ -96,6 +120,51 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             base.refresh_interval_seconds,
             60,
             86400,
+        ),
+        intelligent_sleep=bool(record.get("assigned_intelligent_sleep", base.intelligent_sleep)),
+        active_start=str(record.get("assigned_active_start") or base.active_start),
+        active_end=str(record.get("assigned_active_end") or base.active_end),
+        timezone=str(record.get("assigned_timezone") or base.timezone),
+        critical_battery_percent=_integer(
+            str(record.get("assigned_critical_battery_percent"))
+            if record.get("assigned_critical_battery_percent") is not None
+            else None,
+            base.critical_battery_percent,
+            5,
+            50,
+        ),
+        low_battery_percent=_integer(
+            str(record.get("assigned_low_battery_percent"))
+            if record.get("assigned_low_battery_percent") is not None
+            else None,
+            base.low_battery_percent,
+            10,
+            80,
+        ),
+        low_battery_multiplier=_integer(
+            str(record.get("assigned_low_battery_multiplier"))
+            if record.get("assigned_low_battery_multiplier") is not None
+            else None,
+            base.low_battery_multiplier,
+            1,
+            12,
+        ),
+        unchanged_image_multiplier=_integer(
+            str(record.get("assigned_unchanged_image_multiplier"))
+            if record.get("assigned_unchanged_image_multiplier") is not None
+            else None,
+            base.unchanged_image_multiplier,
+            1,
+            12,
+        ),
+        stay_awake_on_usb=bool(record.get("assigned_stay_awake_on_usb", base.stay_awake_on_usb)),
+        manual_wake_grace_seconds=_integer(
+            str(record.get("assigned_manual_wake_grace_seconds"))
+            if record.get("assigned_manual_wake_grace_seconds") is not None
+            else None,
+            base.manual_wake_grace_seconds,
+            0,
+            600,
         ),
     )
 
@@ -125,6 +194,73 @@ def _boolean(value: str | None) -> bool | None:
     if value is None:
         return None
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _clock_minutes(value: str, fallback: int) -> int:
+    try:
+        hour, minute = (int(part) for part in value.split(":", 1))
+    except (TypeError, ValueError):
+        return fallback
+    return hour * 60 + minute if 0 <= hour <= 23 and 0 <= minute <= 59 else fallback
+
+
+def _sleep_plan(
+    profile: DeviceConfig,
+    battery_percent: float | None,
+    usb_connected: bool,
+    image_unchanged: bool,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or datetime.now(UTC)
+    try:
+        zone = ZoneInfo(profile.timezone)
+    except ZoneInfoNotFoundError:
+        zone = ZoneInfo("UTC")
+    local = current.astimezone(zone)
+
+    def plan(action: str, seconds: int, reason: str) -> dict[str, Any]:
+        bounded = max(0, min(86400, int(seconds)))
+        return {
+            "sleep_action": action,
+            "sleep_seconds": bounded,
+            "sleep_reason": reason,
+            "next_wake_at": (
+                (current + timedelta(seconds=bounded)).isoformat(timespec="seconds")
+                if action == "scheduled" and bounded
+                else None
+            ),
+            "image_unchanged": image_unchanged,
+        }
+
+    if not profile.intelligent_sleep:
+        return plan("awake", 0, "disabled")
+    if usb_connected and profile.stay_awake_on_usb:
+        return plan("awake", 0, "usb_connected")
+    if battery_percent is not None and battery_percent <= profile.critical_battery_percent:
+        return plan("power_off", 0, "critical_battery")
+
+    start = _clock_minutes(profile.active_start, 6 * 60)
+    end = _clock_minutes(profile.active_end, 22 * 60)
+    minute = local.hour * 60 + local.minute
+    always_active = start == end
+    active = always_active or (start <= minute < end if start < end else minute >= start or minute < end)
+
+    if not active:
+        next_start = datetime.combine(local.date(), time(start // 60, start % 60), tzinfo=zone)
+        if next_start <= local:
+            next_start += timedelta(days=1)
+        seconds = max(60, int((next_start - local).total_seconds()))
+        return plan("scheduled", seconds, "outside_active_hours")
+
+    seconds = profile.refresh_interval_seconds
+    reason = "refresh_interval"
+    if battery_percent is not None and battery_percent <= profile.low_battery_percent:
+        seconds *= profile.low_battery_multiplier
+        reason = "low_battery"
+    if image_unchanged:
+        seconds *= profile.unchanged_image_multiplier
+        reason = "unchanged_image" if reason == "refresh_interval" else f"{reason}_unchanged"
+    return plan("scheduled", max(60, seconds), reason)
 
 
 def _button_events(value: str | None) -> list[dict[str, Any]]:
@@ -276,6 +412,38 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 60,
                 86400,
             )
+        if "intelligent_sleep" in payload:
+            assignment["assigned_intelligent_sleep"] = bool(payload["intelligent_sleep"])
+        if "active_start" in payload:
+            minutes = _clock_minutes(str(payload["active_start"]), -1)
+            if minutes < 0:
+                raise HTTPException(status_code=400, detail="active_start must be HH:MM")
+            assignment["assigned_active_start"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
+        if "active_end" in payload:
+            minutes = _clock_minutes(str(payload["active_end"]), -1)
+            if minutes < 0:
+                raise HTTPException(status_code=400, detail="active_end must be HH:MM")
+            assignment["assigned_active_end"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
+        if "timezone" in payload:
+            timezone = str(payload["timezone"])
+            try:
+                ZoneInfo(timezone)
+            except ZoneInfoNotFoundError as err:
+                raise HTTPException(status_code=400, detail="Unknown timezone") from err
+            assignment["assigned_timezone"] = timezone
+        for field, minimum, maximum in (
+            ("critical_battery_percent", 5, 50),
+            ("low_battery_percent", 10, 80),
+            ("low_battery_multiplier", 1, 12),
+            ("unchanged_image_multiplier", 1, 12),
+            ("manual_wake_grace_seconds", 0, 600),
+        ):
+            if field in payload:
+                assignment[f"assigned_{field}"] = _integer(
+                    str(payload[field]), 0, minimum, maximum
+                )
+        if "stay_awake_on_usb" in payload:
+            assignment["assigned_stay_awake_on_usb"] = bool(payload["stay_awake_on_usb"])
         if not assignment:
             raise HTTPException(status_code=400, detail="No provisioning fields supplied")
         record = store.provision(selected, assignment)
@@ -302,6 +470,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_sd_ready: str | None = Header(default=None),
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_button_events: str | None = Header(default=None),
+        x_flexdisplay_image_sha256: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -335,6 +504,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_mode": configured.mode,
                     "assigned_auto_start": configured.auto_start,
                     "assigned_refresh_interval_seconds": configured.refresh_interval_seconds,
+                    "assigned_intelligent_sleep": configured.intelligent_sleep,
+                    "assigned_active_start": configured.active_start,
+                    "assigned_active_end": configured.active_end,
+                    "assigned_timezone": configured.timezone,
+                    "assigned_critical_battery_percent": configured.critical_battery_percent,
+                    "assigned_low_battery_percent": configured.low_battery_percent,
+                    "assigned_low_battery_multiplier": configured.low_battery_multiplier,
+                    "assigned_unchanged_image_multiplier": configured.unchanged_image_multiplier,
+                    "assigned_stay_awake_on_usb": configured.stay_awake_on_usb,
+                    "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
                 },
             )
         record = store.record_button_events(device_id, _button_events(x_flexdisplay_button_events)) or record
@@ -386,6 +565,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             ha_error=ha_error,
         )
         digest = hashlib.sha256(image).hexdigest()
+        image_unchanged = bool(x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest)
+        sleep_plan = _sleep_plan(
+            profile,
+            _number(x_flexdisplay_battery_percent),
+            bool(_boolean(x_flexdisplay_usb_connected)),
+            image_unchanged,
+        )
+        record = store.touch(device_id, sleep_plan)
         state = {
             **record,
             "name": profile.name,
@@ -395,6 +582,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         mqtt.publish_device(device_id, profile, state)
         response.headers["ETag"] = f'"{digest}"'
         response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
+        response.headers["X-FlexDisplay-Image-SHA256"] = digest
+        response.headers["X-FlexDisplay-Image-Unchanged"] = "true" if image_unchanged else "false"
+        response.headers["X-FlexDisplay-Sleep-Action"] = sleep_plan["sleep_action"]
+        response.headers["X-FlexDisplay-Sleep-Seconds"] = str(sleep_plan["sleep_seconds"])
+        response.headers["X-FlexDisplay-Sleep-Reason"] = sleep_plan["sleep_reason"]
+        response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(profile.manual_wake_grace_seconds)
         if settings.provisioning.enabled:
             response.headers["X-FlexDisplay-Provisioned"] = "true"
             response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)

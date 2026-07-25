@@ -112,8 +112,9 @@ Firmware `0.10.0`, Bridge `0.7.0`, and integration `0.7.0` add zero-touch
 registration, persistent device assignments, dashboard-profile selection, and
 assigned-mode selection.
 
-Devices first discovered after integration setup may require a FlexDisplay
-integration reload before their entities appear.
+Firmware `0.11.0`, Bridge `0.8.0`, and integration `0.8.0` add intelligent
+scheduled sleep, active hours, battery-aware refresh throttling, unchanged-image
+suppression, and automatic entity creation for newly discovered fleet devices.
 
 ## Security
 

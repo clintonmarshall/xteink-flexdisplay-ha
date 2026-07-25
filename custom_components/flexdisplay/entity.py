@@ -2,11 +2,42 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable, Iterable
+
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FlexDisplayCoordinator
+
+EntityFactory = Callable[[FlexDisplayCoordinator, str], Iterable[Entity]]
+
+
+def setup_dynamic_entities(
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+    factory: EntityFactory,
+) -> None:
+    """Add entities now and whenever a new fleet device checks in."""
+    coordinator: FlexDisplayCoordinator = entry.runtime_data
+    known_device_ids: set[str] = set()
+
+    def add_new_devices() -> None:
+        entities: list[Entity] = []
+        for record in coordinator.data or []:
+            device_id = str(record.get("device_id") or "")
+            if not device_id or device_id in known_device_ids:
+                continue
+            known_device_ids.add(device_id)
+            entities.extend(factory(coordinator, device_id))
+        if entities:
+            async_add_entities(entities)
+
+    add_new_devices()
+    entry.async_on_unload(coordinator.async_add_listener(add_new_devices))
 
 
 class FlexDisplayEntity(CoordinatorEntity[FlexDisplayCoordinator]):

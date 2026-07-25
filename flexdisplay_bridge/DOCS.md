@@ -36,6 +36,26 @@ An explicit entry under `devices` can set `name`, `area`, `profile`, `mode`,
 persisted in the bridge state store. Home Assistant exposes the assigned
 dashboard profile and mode as select entities.
 
+## Intelligent sleep
+
+Firmware 0.11.0 asks the Bridge for a sleep plan after each Home Assistant
+screen request. The provisioning defaults above control that plan:
+
+- `active_start`, `active_end`, and `timezone` define the daily update window.
+- `critical_battery_percent` fully powers the device off until a manual wake.
+- `low_battery_percent` and `low_battery_multiplier` reduce update frequency.
+- `unchanged_image_multiplier` sleeps longer when the rendered image hash is
+  unchanged, and the firmware skips the e-paper refresh.
+- `stay_awake_on_usb` keeps controls responsive while external power is present.
+- `manual_wake_grace_seconds` leaves a manually woken device interactive before
+  returning it to scheduled sleep.
+
+The same keys can be overridden for an individual device under `devices`.
+Home Assistant reports the selected action, reason, duration, next wake time,
+and whether the last image was unchanged. A scheduled sleep intentionally
+differs from the reader's normal power-off action: it retains the X3/X4 power
+latch so the ESP32-C3 timer can wake the firmware.
+
 ## Dashboard profiles
 
 Without a configured profile, the Bridge generates eight readable pages from

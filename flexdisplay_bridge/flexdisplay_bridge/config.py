@@ -47,6 +47,16 @@ class DeviceConfig:
     profile: str = "default"
     mode: str = "home_assistant"
     auto_start: bool = True
+    intelligent_sleep: bool = True
+    active_start: str = "06:00"
+    active_end: str = "22:00"
+    timezone: str = "Australia/Melbourne"
+    critical_battery_percent: int = 15
+    low_battery_percent: int = 35
+    low_battery_multiplier: int = 4
+    unchanged_image_multiplier: int = 2
+    stay_awake_on_usb: bool = True
+    manual_wake_grace_seconds: int = 60
 
 
 @dataclass(frozen=True)
@@ -56,6 +66,16 @@ class ProvisioningConfig:
     default_mode: str = "home_assistant"
     auto_start: bool = True
     refresh_interval_seconds: int = 900
+    intelligent_sleep: bool = True
+    active_start: str = "06:00"
+    active_end: str = "22:00"
+    timezone: str = "Australia/Melbourne"
+    critical_battery_percent: int = 15
+    low_battery_percent: int = 35
+    low_battery_multiplier: int = 4
+    unchanged_image_multiplier: int = 2
+    stay_awake_on_usb: bool = True
+    manual_wake_grace_seconds: int = 60
 
 
 @dataclass(frozen=True)
@@ -121,6 +141,16 @@ class BridgeConfig:
             profile=self.default_profile,
             mode=self.provisioning.default_mode,
             auto_start=self.provisioning.auto_start,
+            intelligent_sleep=self.provisioning.intelligent_sleep,
+            active_start=self.provisioning.active_start,
+            active_end=self.provisioning.active_end,
+            timezone=self.provisioning.timezone,
+            critical_battery_percent=self.provisioning.critical_battery_percent,
+            low_battery_percent=self.provisioning.low_battery_percent,
+            low_battery_multiplier=self.provisioning.low_battery_multiplier,
+            unchanged_image_multiplier=self.provisioning.unchanged_image_multiplier,
+            stay_awake_on_usb=self.provisioning.stay_awake_on_usb,
+            manual_wake_grace_seconds=self.provisioning.manual_wake_grace_seconds,
         )
 
     def profile(self, device: DeviceConfig) -> DashboardProfileConfig | None:
@@ -167,6 +197,17 @@ def _merge_entities(*groups: tuple[EntityConfig, ...]) -> tuple[EntityConfig, ..
     return tuple(merged.values())
 
 
+def _clock(value: Any, default: str) -> str:
+    candidate = str(value or default)
+    try:
+        hour, minute = (int(part) for part in candidate.split(":", 1))
+    except (TypeError, ValueError):
+        return default
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        return default
+    return f"{hour:02d}:{minute:02d}"
+
+
 def _device(
     device_id: str,
     value: dict[str, Any],
@@ -195,6 +236,16 @@ def _device(
         profile=profile_name,
         mode=str(value.get("mode") or "home_assistant"),
         auto_start=bool(value.get("auto_start", True)),
+        intelligent_sleep=bool(value.get("intelligent_sleep", True)),
+        active_start=_clock(value.get("active_start"), "06:00"),
+        active_end=_clock(value.get("active_end"), "22:00"),
+        timezone=str(value.get("timezone") or "Australia/Melbourne"),
+        critical_battery_percent=max(5, min(50, int(value.get("critical_battery_percent", 15)))),
+        low_battery_percent=max(10, min(80, int(value.get("low_battery_percent", 35)))),
+        low_battery_multiplier=max(1, min(12, int(value.get("low_battery_multiplier", 4)))),
+        unchanged_image_multiplier=max(1, min(12, int(value.get("unchanged_image_multiplier", 2)))),
+        stay_awake_on_usb=bool(value.get("stay_awake_on_usb", True)),
+        manual_wake_grace_seconds=max(0, min(600, int(value.get("manual_wake_grace_seconds", 60)))),
     )
 
 
@@ -259,6 +310,26 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         refresh_interval_seconds=max(
             60,
             min(86400, int(provisioning_raw.get("refresh_interval_seconds", 900))),
+        ),
+        intelligent_sleep=bool(provisioning_raw.get("intelligent_sleep", True)),
+        active_start=_clock(provisioning_raw.get("active_start"), "06:00"),
+        active_end=_clock(provisioning_raw.get("active_end"), "22:00"),
+        timezone=str(provisioning_raw.get("timezone") or "Australia/Melbourne"),
+        critical_battery_percent=max(
+            5, min(50, int(provisioning_raw.get("critical_battery_percent", 15)))
+        ),
+        low_battery_percent=max(
+            10, min(80, int(provisioning_raw.get("low_battery_percent", 35)))
+        ),
+        low_battery_multiplier=max(
+            1, min(12, int(provisioning_raw.get("low_battery_multiplier", 4)))
+        ),
+        unchanged_image_multiplier=max(
+            1, min(12, int(provisioning_raw.get("unchanged_image_multiplier", 2)))
+        ),
+        stay_awake_on_usb=bool(provisioning_raw.get("stay_awake_on_usb", True)),
+        manual_wake_grace_seconds=max(
+            0, min(600, int(provisioning_raw.get("manual_wake_grace_seconds", 60)))
         ),
     )
 
