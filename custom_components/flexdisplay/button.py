@@ -73,6 +73,30 @@ class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
+    """Explicitly reconcile a canary that was recovered and verified over USB."""
+
+    _attr_translation_key = "verify_usb_recovery"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_verify_usb_recovery"
+
+    @property
+    def available(self) -> bool:
+        """Expose the action only while every Bridge safety condition passes."""
+        return super().available and bool(self.record.get("usb_recovery_verification_ready"))
+
+    async def async_press(self) -> None:
+        """Record an operator-confirmed USB recovery and release the canary gate."""
+        await self.coordinator.client.verify_usb_recovery(
+            self.device_id,
+            str(self.record.get("firmware_update_target") or ""),
+            str(self.record.get("dispatched_command_id") or ""),
+        )
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -89,5 +113,6 @@ async def async_setup_entry(
                 for description in DESCRIPTIONS
             ),
             FlexDisplayCancelCommandsButton(coordinator, device_id),
+            FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
         ),
     )

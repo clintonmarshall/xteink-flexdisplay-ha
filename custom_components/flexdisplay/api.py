@@ -59,6 +59,22 @@ class FlexDisplayApiClient:
         """Cancel commands that have not yet reached a device."""
         await self._request("DELETE", f"/api/v1/devices/{device_id}/commands")
 
+    async def verify_usb_recovery(
+        self,
+        device_id: str,
+        expected_target_version: str,
+        expected_command_id: str,
+    ) -> None:
+        """Reconcile a USB-recovered canary using the Bridge's guarded workflow."""
+        await self._request(
+            "POST",
+            f"/api/v1/devices/{device_id}/firmware/verify-usb-recovery",
+            json={
+                "expected_target_version": expected_target_version,
+                "expected_command_id": expected_command_id,
+            },
+        )
+
     async def provision(self, device_id: str, assignment: dict[str, Any]) -> None:
         """Update the server-side assignment for a device."""
         await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)

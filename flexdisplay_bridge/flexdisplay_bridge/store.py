@@ -221,6 +221,108 @@ class DeviceStore:
         with self._lock:
             return deepcopy(self._state.get("firmware_rollout") or {})
 
+    def verify_usb_recovery(
+        self,
+        device_id: str,
+        target_version: str,
+        expected_command_id: str,
+        *,
+        max_checkin_age_seconds: int = 600,
+    ) -> dict[str, Any]:
+        """Reconcile a physically verified USB recovery without forging a device ACK."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                raise ValueError("Device has not checked in")
+
+            rollout = self._state.get("firmware_rollout") or {}
+            dispatched = list(record.get("dispatched_commands") or [])
+            dispatched_id = str(record.get("dispatched_command_id") or "")
+            blockers: list[str] = []
+            if not target_version:
+                blockers.append("A target firmware version is required")
+            if rollout.get("target_version") != target_version:
+                blockers.append("The active rollout does not match the requested target")
+            if rollout.get("status") != "canary_active":
+                blockers.append("The rollout is not waiting for an active canary")
+            if rollout.get("canary_device_id") != device_id:
+                blockers.append("This device is not the active canary")
+            if record.get("firmware") != target_version:
+                blockers.append("The device is not reporting the exact target firmware")
+            if record.get("usb_connected") is not True:
+                blockers.append("The device is not reporting USB power")
+            if record.get("sd_ready") is not True:
+                blockers.append("The device SD card is not ready")
+            if record.get("pending_commands"):
+                blockers.append("The device has pending commands")
+            if dispatched != ["install"]:
+                blockers.append("The only dispatched command must be the stuck install")
+            if not expected_command_id or dispatched_id != expected_command_id:
+                blockers.append("The expected command ID does not match the stuck install")
+
+            last_seen = record.get("last_seen")
+            try:
+                seen = datetime.fromisoformat(str(last_seen))
+                checkin_age = (datetime.now(UTC) - seen).total_seconds()
+                if checkin_age < 0 or checkin_age > max_checkin_age_seconds:
+                    blockers.append("The device check-in is not recent enough")
+            except (TypeError, ValueError):
+                blockers.append("The device has no valid recent check-in")
+
+            if blockers:
+                raise ValueError("; ".join(blockers))
+
+            verified_at = utc_now()
+            evidence = {
+                "method": "usb_recovery",
+                "device_id": device_id,
+                "target_version": target_version,
+                "observed_firmware": str(record.get("firmware") or ""),
+                "observed_usb_connected": True,
+                "observed_sd_ready": True,
+                "observed_last_seen": last_seen,
+                "reconciled_command_id": dispatched_id,
+                "verified_at": verified_at,
+            }
+
+            record["dispatched_commands"] = []
+            record.pop("dispatched_command_id", None)
+            record["last_command_id"] = dispatched_id[:96]
+            record["last_command_result"] = "install:usb-recovery-verified"
+            record["command_completed_at"] = verified_at
+            record["firmware_update_status"] = "verified"
+            record["firmware_verification_method"] = "usb_recovery"
+            record["firmware_verified_at"] = verified_at
+            record["last_usb_recovery_verification"] = evidence
+            history = record.setdefault("command_history", [])
+            history.append(
+                {
+                    "command_id": dispatched_id[:96],
+                    "result": "install:usb-recovery-verified",
+                    "verification_method": "usb_recovery",
+                    "completed_at": verified_at,
+                }
+            )
+            record["command_history"] = history[-16:]
+            recovery_history = record.setdefault("usb_recovery_history", [])
+            recovery_history.append(evidence)
+            record["usb_recovery_history"] = recovery_history[-8:]
+
+            updated = rollout.setdefault("updated_devices", [])
+            if device_id not in updated:
+                updated.append(device_id)
+            rollout["status"] = "canary_verified"
+            rollout["canary_verified_at"] = verified_at
+            rollout["last_verified_at"] = verified_at
+            rollout["last_verified_device_id"] = device_id
+            rollout["last_verification_method"] = "usb_recovery"
+            rollout_history = rollout.setdefault("verification_history", [])
+            rollout_history.append(evidence)
+            rollout["verification_history"] = rollout_history[-16:]
+
+            self._save()
+            return deepcopy(record)
+
     def active_firmware_installs(self) -> int:
         with self._lock:
             return sum(

@@ -575,6 +575,118 @@ def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
         assert "Rollout paused after failure on X4-FLEET01" in paused.json()["detail"]
 
 
+def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        canary_required=True,
+        require_usb_for_canary=True,
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="bridge-secret",
+        firmware=firmware,
+    )
+    authorized = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-USB001",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        queued = client.post(
+            "/api/v1/devices/X4-USB001/commands/install",
+            headers=authorized,
+        )
+        assert queued.status_code == 200
+        delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-USB001",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        command_id = delivery.headers["x-flexdisplay-command-id"]
+
+        not_recovered = client.post(
+            "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
+            headers=authorized,
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": command_id,
+            },
+        )
+        assert not_recovered.status_code == 409
+        assert "exact target firmware" in not_recovered.json()["detail"]
+
+        recovered_checkin = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-USB001",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        assert recovered_checkin.status_code == 200
+        ready = client.get("/api/v1/devices/X4-USB001").json()
+        assert ready["usb_recovery_verification_ready"] is True
+
+        unauthenticated = client.post(
+            "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": command_id,
+            },
+        )
+        assert unauthenticated.status_code == 401
+
+        wrong_command = client.post(
+            "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
+            headers=authorized,
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": "X4-USB001-wrong",
+            },
+        )
+        assert wrong_command.status_code == 409
+        assert "command ID" in wrong_command.json()["detail"]
+
+        verified = client.post(
+            "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
+            headers=authorized,
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": command_id,
+            },
+        )
+        assert verified.status_code == 200
+        payload = verified.json()
+        assert payload["verified"] is True
+        assert payload["verification_method"] == "usb_recovery"
+        assert payload["audit"]["reconciled_command_id"] == command_id
+        assert payload["audit"]["observed_firmware"] == firmware.version
+
+        record = client.get("/api/v1/devices/X4-USB001").json()
+        assert record["firmware_update_status"] == "verified"
+        assert record["firmware_verification_method"] == "usb_recovery"
+        assert record["firmware_rollout_status"] == "canary_verified"
+        assert record["firmware_canary_verified"] is True
+        assert record["dispatched_commands"] == []
+        assert record.get("dispatched_command_id") is None
+        assert record["last_command_result"] == "install:usb-recovery-verified"
+        assert record["usb_recovery_verification_ready"] is False
+        assert record["usb_recovery_history"][-1]["reconciled_command_id"] == command_id
+
+
 def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Path) -> None:
     invalid = FirmwareConfig(
         version="1.4.1-flexdisplay.0.13.0",
