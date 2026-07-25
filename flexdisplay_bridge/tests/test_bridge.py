@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -18,7 +19,46 @@ from flexdisplay_bridge.config import (
 from flexdisplay_bridge.dashboards import build_dashboard_pages
 from flexdisplay_bridge.home_assistant import EntityState
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
+from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
+
+
+def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "devices": {
+                    "X4-LEGACY": {
+                        "device_id": "X4-LEGACY",
+                        "pending_commands": [],
+                        "dispatched_commands": ["install"],
+                    },
+                    "X3-PENDING": {
+                        "device_id": "X3-PENDING",
+                        "pending_commands": ["refresh"],
+                    },
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = DeviceStore(state_path)
+
+    legacy = store.get("X4-LEGACY")
+    assert legacy is not None
+    assert legacy["dispatched_commands"] == []
+    assert legacy["legacy_dispatched_commands"] == ["install"]
+    assert legacy["legacy_commands_cleared_at"]
+
+    pending = store.get("X3-PENDING")
+    assert pending is not None
+    assert pending["pending_commands"] == ["refresh"]
+    assert pending["pending_command_id"] == "X3-PENDING-00000001"
+
+    persisted = json.loads(state_path.read_text(encoding="utf-8"))
+    assert persisted["command_sequence"] == 1
 
 
 def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:

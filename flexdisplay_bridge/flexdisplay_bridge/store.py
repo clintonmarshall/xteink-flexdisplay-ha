@@ -26,8 +26,32 @@ class DeviceStore:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict) and isinstance(loaded.get("devices"), dict):
                 self._state = loaded
+                self._migrate_legacy_commands()
         except (OSError, json.JSONDecodeError):
             self._state = {"devices": {}}
+
+    def _migrate_legacy_commands(self) -> None:
+        """Make pre-command-ID state safe after upgrading the Bridge."""
+        changed = False
+        sequence = int(self._state.get("command_sequence", 0))
+        for record in self._state["devices"].values():
+            pending = record.get("pending_commands") or []
+            if pending and not record.get("pending_command_id"):
+                sequence += 1
+                device_id = str(record.get("device_id") or "device")
+                record["pending_command_id"] = f"{device_id}-{sequence:08x}"
+                changed = True
+
+            dispatched = record.get("dispatched_commands") or []
+            if dispatched and not record.get("dispatched_command_id"):
+                record["legacy_dispatched_commands"] = list(dispatched)[-8:]
+                record["dispatched_commands"] = []
+                record["legacy_commands_cleared_at"] = utc_now()
+                changed = True
+
+        if changed:
+            self._state["command_sequence"] = sequence
+            self._save()
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.1
+
+- Migrates pre-command-ID Bridge state on startup.
+- Preserves legacy pending commands by assigning durable IDs.
+- Clears unacknowledgeable legacy dispatched commands so stale installs cannot
+  permanently block the canary and parallel-install safety gates.
+
 ## 0.10.0
 
 - Added persistent command IDs and explicit server acknowledgement so device
