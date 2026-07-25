@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import re
 from contextlib import asynccontextmanager
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -19,6 +20,7 @@ from .store import DeviceStore
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
 SUPPORTED_COMMANDS = {"refresh", "next", "previous", "overview", "restart", "install"}
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
+SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
 
 
 def _firmware_version(value: str) -> tuple[int, int, int]:
@@ -37,11 +39,14 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
         try:
             seen = datetime.fromisoformat(last_seen)
             age = (datetime.now(UTC) - seen).total_seconds()
-            profile = settings.device(
-                str(result.get("device_id") or ""),
-                int(result.get("width") or 480),
-                int(result.get("height") or 800),
-                str(result.get("model") or ""),
+            profile = _effective_device(
+                settings.device(
+                    str(result.get("device_id") or ""),
+                    int(result.get("width") or 480),
+                    int(result.get("height") or 800),
+                    str(result.get("model") or ""),
+                ),
+                result,
             )
             online_window = max(180, int(profile.refresh_interval_seconds * 1.5) + 60)
             online = age <= online_window
@@ -51,12 +56,52 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
     result["online"] = online
     result["power_state"] = power_state
     result["latest_firmware"] = settings.firmware.version or result.get("firmware", "")
+    profile = _effective_device(
+        settings.device(
+            str(result.get("device_id") or ""),
+            int(result.get("width") or 480),
+            int(result.get("height") or 800),
+            str(result.get("model") or ""),
+        ),
+        result,
+    )
+    result["name"] = profile.name
+    result["area"] = profile.area
+    result["assigned_profile"] = profile.profile
+    result["assigned_mode"] = profile.mode
+    result["assigned_auto_start"] = profile.auto_start
+    result["assigned_refresh_interval_seconds"] = profile.refresh_interval_seconds
+    result["available_profiles"] = list(settings.profiles)
+    result["available_modes"] = sorted(SUPPORTED_MODES)
     result["update_available"] = bool(
         settings.firmware.version
         and settings.firmware.url
         and _firmware_version(settings.firmware.version) > _firmware_version(str(result.get("firmware") or ""))
     )
     return result
+
+
+def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfig:
+    return replace(
+        base,
+        name=str(record.get("assigned_name") or base.name),
+        area=str(record.get("assigned_area") or base.area),
+        profile=str(record.get("assigned_profile") or base.profile),
+        mode=str(record.get("assigned_mode") or base.mode),
+        auto_start=bool(record.get("assigned_auto_start", base.auto_start)),
+        refresh_interval_seconds=_integer(
+            str(record.get("assigned_refresh_interval_seconds"))
+            if record.get("assigned_refresh_interval_seconds") is not None
+            else None,
+            base.refresh_interval_seconds,
+            60,
+            86400,
+        ),
+    )
+
+
+def _header_value(value: Any) -> str:
+    return str(value or "").replace("\r", " ").replace("\n", " ")[:160]
 
 
 def _integer(value: str | None, default: int, minimum: int, maximum: int) -> int:
@@ -203,6 +248,40 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.queue_command(selected, command)
         return {"queued": command, "device": record}
 
+    @app.put("/api/v1/devices/{device_id}/provision")
+    def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        assignment: dict[str, Any] = {}
+        if "name" in payload:
+            assignment["assigned_name"] = _header_value(payload["name"]) or selected
+        if "area" in payload:
+            assignment["assigned_area"] = _header_value(payload["area"])
+        if "profile" in payload:
+            profile = str(payload["profile"])
+            if profile not in settings.profiles:
+                raise HTTPException(status_code=400, detail="Unknown dashboard profile")
+            assignment["assigned_profile"] = profile
+        if "mode" in payload:
+            mode = str(payload["mode"])
+            if mode not in SUPPORTED_MODES:
+                raise HTTPException(status_code=400, detail="Unsupported device mode")
+            assignment["assigned_mode"] = mode
+        if "auto_start" in payload:
+            assignment["assigned_auto_start"] = bool(payload["auto_start"])
+        if "refresh_interval_seconds" in payload:
+            assignment["assigned_refresh_interval_seconds"] = _integer(
+                str(payload["refresh_interval_seconds"]),
+                900,
+                60,
+                86400,
+            )
+        if not assignment:
+            raise HTTPException(status_code=400, detail="No provisioning fields supplied")
+        record = store.provision(selected, assignment)
+        store.queue_command(selected, "refresh")
+        return {"device": _decorate_device(record, settings)}
+
     @app.get("/api/v1/screen")
     def screen(
         response: Response,
@@ -245,9 +324,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "wake_reason": x_flexdisplay_wake_reason or None,
         }
         record = store.touch(device_id, telemetry)
+        configured = settings.device(device_id, width, height, model)
+        if settings.provisioning.enabled:
+            record = store.ensure_provisioning(
+                device_id,
+                {
+                    "assigned_name": configured.name,
+                    "assigned_area": configured.area,
+                    "assigned_profile": configured.profile,
+                    "assigned_mode": configured.mode,
+                    "assigned_auto_start": configured.auto_start,
+                    "assigned_refresh_interval_seconds": configured.refresh_interval_seconds,
+                },
+            )
         record = store.record_button_events(device_id, _button_events(x_flexdisplay_button_events)) or record
         store.acknowledge(device_id, x_flexdisplay_command_result or "")
-        profile: DeviceConfig = settings.device(device_id, width, height, model)
+        profile: DeviceConfig = _effective_device(configured, record)
         commands = store.consume_commands(device_id)
         if commands:
             record = store.get(device_id) or record
@@ -303,6 +395,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         mqtt.publish_device(device_id, profile, state)
         response.headers["ETag"] = f'"{digest}"'
         response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
+        if settings.provisioning.enabled:
+            response.headers["X-FlexDisplay-Provisioned"] = "true"
+            response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)
+            response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)
+            response.headers["X-FlexDisplay-Profile"] = _header_value(profile.profile)
+            response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(profile.mode)
+            response.headers["X-FlexDisplay-Auto-Start"] = "true" if profile.auto_start else "false"
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
         response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
         response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))

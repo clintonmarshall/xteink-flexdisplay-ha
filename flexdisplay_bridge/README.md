@@ -7,7 +7,9 @@ After installation:
 
 1. Start the app.
 2. Confirm `http://HOME_ASSISTANT_IP:8099/healthz` responds.
-3. Point each device's `/.crosspoint/home-assistant.json` at
+3. Power on a FlexDisplay 0.10.0 fleet device; it registers and receives its
+   assignment automatically. Standard builds can still point
+   `/.crosspoint/home-assistant.json` at
    `http://HOME_ASSISTANT_IP:8099/api/v1/screen`.
 4. Install the FlexDisplay custom integration through HACS and enter the same
    bridge URL.

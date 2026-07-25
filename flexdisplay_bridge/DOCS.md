@@ -17,6 +17,25 @@ Options:
 - `firmware_size`: exact firmware file size in bytes.
 - `firmware_minimum_battery`: minimum charge percentage for an unplugged update.
 
+## Zero-touch provisioning
+
+FlexDisplay 0.10.0 fleet builds register on their first bridge request. Defaults
+for unknown devices are controlled by:
+
+```yaml
+provisioning:
+  enabled: true
+  default_area: ""
+  default_mode: home_assistant
+  auto_start: true
+  refresh_interval_seconds: 900
+```
+
+An explicit entry under `devices` can set `name`, `area`, `profile`, `mode`,
+`auto_start`, and `refresh_interval_seconds`. The initial assignment is
+persisted in the bridge state store. Home Assistant exposes the assigned
+dashboard profile and mode as select entities.
+
 ## Dashboard profiles
 
 Without a configured profile, the Bridge generates eight readable pages from

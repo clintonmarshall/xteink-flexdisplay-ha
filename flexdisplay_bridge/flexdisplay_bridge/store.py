@@ -52,6 +52,52 @@ class DeviceStore:
             self._save()
             return deepcopy(record)
 
+    def ensure_provisioning(self, device_id: str, assignment: dict[str, Any]) -> dict[str, Any]:
+        """Persist the initial assignment for an automatically discovered device."""
+        with self._lock:
+            record = self._state["devices"].setdefault(
+                device_id,
+                {
+                    "device_id": device_id,
+                    "first_seen": utc_now(),
+                    "pending_commands": [],
+                    "render_revision": 0,
+                },
+            )
+            changed = False
+            for key, value in assignment.items():
+                if key not in record and value is not None:
+                    record[key] = value
+                    changed = True
+            if not record.get("provisioned"):
+                record["provisioned"] = True
+                record["provisioned_at"] = utc_now()
+                changed = True
+            if changed:
+                self._save()
+            return deepcopy(record)
+
+    def provision(self, device_id: str, assignment: dict[str, Any]) -> dict[str, Any]:
+        """Update an assignment from the authenticated bridge API."""
+        with self._lock:
+            record = self._state["devices"].setdefault(
+                device_id,
+                {
+                    "device_id": device_id,
+                    "first_seen": utc_now(),
+                    "last_seen": None,
+                    "pending_commands": [],
+                    "render_revision": 0,
+                },
+            )
+            record.update(assignment)
+            record["provisioned"] = True
+            record["provisioned_at"] = record.get("provisioned_at") or utc_now()
+            record["provisioning_updated_at"] = utc_now()
+            record["render_revision"] = int(record.get("render_revision", 0)) + 1
+            self._save()
+            return deepcopy(record)
+
     def queue_command(self, device_id: str, command: str) -> dict[str, Any]:
         with self._lock:
             record = self._state["devices"].setdefault(
