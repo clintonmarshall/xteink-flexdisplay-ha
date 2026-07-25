@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.4
+
+- Stops sending local `device.*` telemetry placeholders to the Home Assistant
+  REST API, preventing false fleet-wide `HA ERROR` banners.
+- Allows the USB-recovery API to accept recent macOS USB evidence when an X4's
+  charge-detection telemetry reports disconnected despite an active serial
+  connection.
+- Validates and audits the matching USB serial suffix, modem port, full-flash
+  backup SHA-256, and observation timestamp.
+
 ## 0.10.3
 
 - Added an explicit USB-recovery verification endpoint and Home Assistant

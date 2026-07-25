@@ -17,7 +17,7 @@ from flexdisplay_bridge.config import (
     HomeAssistantConfig,
 )
 from flexdisplay_bridge.dashboards import build_dashboard_pages
-from flexdisplay_bridge.home_assistant import EntityState
+from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
@@ -98,6 +98,41 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert record["rssi"] == -54
         assert record["provisioned"] is True
         assert record["assigned_name"] == "Test X4"
+
+
+def test_home_assistant_fetch_skips_local_device_pseudo_entities() -> None:
+    class Response:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            return {"state": "23.4", "attributes": {"unit_of_measurement": "°C"}}
+
+    class Session:
+        def __init__(self) -> None:
+            self.urls: list[str] = []
+
+        def get(self, url: str, **kwargs) -> Response:
+            del kwargs
+            self.urls.append(url)
+            return Response()
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://homeassistant.test", token="test-token")
+    )
+    session = Session()
+    client.session = session
+    states, error = client.fetch(
+        (
+            EntityConfig("device.battery", "Device Battery"),
+            EntityConfig("sensor.room_temperature", "Room Temperature"),
+            EntityConfig("device.usb", "USB Power"),
+        )
+    )
+
+    assert error == ""
+    assert [state.entity_id for state in states] == ["sensor.room_temperature"]
+    assert session.urls == ["http://homeassistant.test/api/states/sensor.room_temperature"]
 
 
 def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) -> None:
@@ -685,6 +720,81 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
         assert record["last_command_result"] == "install:usb-recovery-verified"
         assert record["usb_recovery_verification_ready"] is False
         assert record["usb_recovery_history"][-1]["reconciled_command_id"] == command_id
+
+
+def test_usb_recovery_accepts_recent_matching_macos_evidence(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-9DD5C8",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        assert client.post("/api/v1/devices/X4-9DD5C8/commands/install").status_code == 200
+        delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-9DD5C8",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        command_id = delivery.headers["x-flexdisplay-command-id"]
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-9DD5C8",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "false",
+            },
+        )
+        record = client.get("/api/v1/devices/X4-9DD5C8").json()
+        assert record["usb_recovery_verification_ready"] is False
+
+        evidence = {
+            "source": "macos_ioreg",
+            "serial": "7C:E8:B1:9D:D5:C8",
+            "port": "/dev/cu.usbmodem2101",
+            "backup_sha256": "ca" * 32,
+            "observed_at": datetime.now(UTC).isoformat(timespec="seconds"),
+        }
+        wrong_serial = client.post(
+            "/api/v1/devices/X4-9DD5C8/firmware/verify-usb-recovery",
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": command_id,
+                "external_usb_evidence": {**evidence, "serial": "00:00:00:00:00:00"},
+            },
+        )
+        assert wrong_serial.status_code == 409
+        assert "USB power" in wrong_serial.json()["detail"]
+
+        verified = client.post(
+            "/api/v1/devices/X4-9DD5C8/firmware/verify-usb-recovery",
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": command_id,
+                "external_usb_evidence": evidence,
+            },
+        )
+        assert verified.status_code == 200
+        audit = verified.json()["audit"]
+        assert audit["observed_usb_connected"] is False
+        assert audit["external_usb_evidence"]["serial"] == "7CE8B19DD5C8"
+        assert audit["external_usb_evidence"]["backup_sha256"] == "ca" * 32
+        assert verified.json()["device"]["firmware_rollout_status"] == "canary_verified"
 
 
 def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Path) -> None:
