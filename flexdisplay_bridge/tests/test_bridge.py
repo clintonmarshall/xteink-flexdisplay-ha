@@ -298,6 +298,13 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
         assert record["render_revision"] == 1
         assert record["dispatched_commands"] == ["refresh"]
 
+        redelivered = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X4-DEMO01"},
+        )
+        assert redelivered.headers["x-flexdisplay-commands"] == "refresh"
+        assert redelivered.headers["x-flexdisplay-command-id"] == command_id
+
         stale = client.get(
             "/api/v1/screen",
             headers={

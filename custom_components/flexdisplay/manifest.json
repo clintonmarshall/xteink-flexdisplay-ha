@@ -8,5 +8,5 @@
   "iot_class": "local_polling",
   "issue_tracker": "https://github.com/clintonmarshall/xteink-flexdisplay/issues",
   "requirements": [],
-  "version": "0.10.4"
+  "version": "0.10.5"
 }
