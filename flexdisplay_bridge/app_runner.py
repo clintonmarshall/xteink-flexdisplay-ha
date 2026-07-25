@@ -17,8 +17,8 @@ DEFAULT_FIRMWARE = {
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
         "releases/download/v0.7.0/firmware.bin"
     ),
-    "firmware_sha256": "b3740bfce2732635db06e93069ed39843b65d7cd9b1aef657cc2c92714f85027",
-    "firmware_size": 5_479_152,
+    "firmware_sha256": "462ac7c865d33c51995b15b83d49feebbef1e5105d21cc0a5903d5416e954e32",
+    "firmware_size": 5_479_168,
 }
 
 
