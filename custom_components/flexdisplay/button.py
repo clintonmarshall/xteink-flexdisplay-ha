@@ -22,9 +22,17 @@ class FlexDisplayButtonDescription(ButtonEntityDescription):
 
 DESCRIPTIONS = (
     FlexDisplayButtonDescription(key="refresh", translation_key="refresh", command="refresh"),
+    FlexDisplayButtonDescription(
+        key="full_refresh",
+        translation_key="full_refresh",
+        command="full-refresh",
+    ),
     FlexDisplayButtonDescription(key="previous", translation_key="previous", command="previous"),
     FlexDisplayButtonDescription(key="next", translation_key="next", command="next"),
     FlexDisplayButtonDescription(key="overview", translation_key="overview", command="overview"),
+    FlexDisplayButtonDescription(key="clear", translation_key="clear", command="clear"),
+    FlexDisplayButtonDescription(key="sleep", translation_key="sleep", command="sleep"),
+    FlexDisplayButtonDescription(key="power_off", translation_key="power_off", command="power-off"),
     FlexDisplayButtonDescription(key="restart", translation_key="restart", command="restart"),
 )
 
@@ -50,6 +58,21 @@ class FlexDisplayCommandButton(FlexDisplayEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
+    """Cancel commands that have not yet reached the device."""
+
+    _attr_translation_key = "cancel_commands"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_cancel_commands"
+
+    async def async_press(self) -> None:
+        """Clear the Bridge's pending command queue."""
+        await self.coordinator.client.cancel_commands(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -61,7 +84,10 @@ async def async_setup_entry(
         entry,
         async_add_entities,
         lambda coordinator, device_id: (
-            FlexDisplayCommandButton(coordinator, device_id, description)
-            for description in DESCRIPTIONS
+            *(
+                FlexDisplayCommandButton(coordinator, device_id, description)
+                for description in DESCRIPTIONS
+            ),
+            FlexDisplayCancelCommandsButton(coordinator, device_id),
         ),
     )

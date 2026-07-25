@@ -19,7 +19,18 @@ from .renderer import DashboardRenderer
 from .store import DeviceStore
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
-SUPPORTED_COMMANDS = {"refresh", "next", "previous", "overview", "restart", "install"}
+SUPPORTED_COMMANDS = {
+    "refresh",
+    "full-refresh",
+    "next",
+    "previous",
+    "overview",
+    "clear",
+    "sleep",
+    "power-off",
+    "restart",
+    "install",
+}
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
 
@@ -85,6 +96,8 @@ def _decorate_device(record: dict[str, Any], settings: BridgeConfig) -> dict[str
     result["assigned_mode"] = profile.mode
     result["assigned_auto_start"] = profile.auto_start
     result["assigned_refresh_interval_seconds"] = profile.refresh_interval_seconds
+    result["assigned_live_mode"] = profile.live_mode
+    result["assigned_manual_sleep_seconds"] = profile.manual_sleep_seconds
     result["assigned_intelligent_sleep"] = profile.intelligent_sleep
     result["assigned_active_start"] = profile.active_start
     result["assigned_active_end"] = profile.active_end
@@ -118,6 +131,15 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             if record.get("assigned_refresh_interval_seconds") is not None
             else None,
             base.refresh_interval_seconds,
+            60,
+            86400,
+        ),
+        live_mode=bool(record.get("assigned_live_mode", base.live_mode)),
+        manual_sleep_seconds=_integer(
+            str(record.get("assigned_manual_sleep_seconds"))
+            if record.get("assigned_manual_sleep_seconds") is not None
+            else None,
+            base.manual_sleep_seconds,
             60,
             86400,
         ),
@@ -232,6 +254,8 @@ def _sleep_plan(
             "image_unchanged": image_unchanged,
         }
 
+    if profile.live_mode:
+        return plan("awake", 0, "live_mode")
     if not profile.intelligent_sleep:
         return plan("awake", 0, "disabled")
     if usb_connected and profile.stay_awake_on_usb:
@@ -384,6 +408,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.queue_command(selected, command)
         return {"queued": command, "device": record}
 
+    @app.delete("/api/v1/devices/{device_id}/commands")
+    def cancel_commands(device_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        record = store.clear_commands(selected)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {"cancelled": True, "device": _decorate_device(record, settings)}
+
     @app.put("/api/v1/devices/{device_id}/provision")
     def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
         authorize(request)
@@ -405,9 +438,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             assignment["assigned_mode"] = mode
         if "auto_start" in payload:
             assignment["assigned_auto_start"] = bool(payload["auto_start"])
+        if "live_mode" in payload:
+            assignment["assigned_live_mode"] = bool(payload["live_mode"])
         if "refresh_interval_seconds" in payload:
             assignment["assigned_refresh_interval_seconds"] = _integer(
                 str(payload["refresh_interval_seconds"]),
+                900,
+                60,
+                86400,
+            )
+        if "manual_sleep_seconds" in payload:
+            assignment["assigned_manual_sleep_seconds"] = _integer(
+                str(payload["manual_sleep_seconds"]),
                 900,
                 60,
                 86400,
@@ -504,6 +546,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_mode": configured.mode,
                     "assigned_auto_start": configured.auto_start,
                     "assigned_refresh_interval_seconds": configured.refresh_interval_seconds,
+                    "assigned_live_mode": configured.live_mode,
+                    "assigned_manual_sleep_seconds": configured.manual_sleep_seconds,
                     "assigned_intelligent_sleep": configured.intelligent_sleep,
                     "assigned_active_start": configured.active_start,
                     "assigned_active_end": configured.active_end,
@@ -572,6 +616,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             bool(_boolean(x_flexdisplay_usb_connected)),
             image_unchanged,
         )
+        if "power-off" in commands:
+            sleep_plan = {
+                **sleep_plan,
+                "sleep_action": "power_off",
+                "sleep_seconds": 0,
+                "sleep_reason": "remote_command",
+                "next_wake_at": None,
+            }
+        elif "sleep" in commands or "clear" in commands:
+            sleep_plan = {
+                **sleep_plan,
+                "sleep_action": "scheduled",
+                "sleep_seconds": profile.manual_sleep_seconds,
+                "sleep_reason": "remote_command",
+                "next_wake_at": (
+                    datetime.now(UTC) + timedelta(seconds=profile.manual_sleep_seconds)
+                ).isoformat(timespec="seconds"),
+            }
         record = store.touch(device_id, sleep_plan)
         state = {
             **record,
@@ -595,6 +657,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Profile"] = _header_value(profile.profile)
             response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(profile.mode)
             response.headers["X-FlexDisplay-Auto-Start"] = "true" if profile.auto_start else "false"
+            response.headers["X-FlexDisplay-Live-Mode"] = "true" if profile.live_mode else "false"
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
         response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
         response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))

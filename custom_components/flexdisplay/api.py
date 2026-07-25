@@ -47,6 +47,10 @@ class FlexDisplayApiClient:
         """Queue a command for a device."""
         await self._request("POST", f"/api/v1/devices/{device_id}/commands/{command}")
 
+    async def cancel_commands(self, device_id: str) -> None:
+        """Cancel commands that have not yet reached a device."""
+        await self._request("DELETE", f"/api/v1/devices/{device_id}/commands")
+
     async def provision(self, device_id: str, assignment: dict[str, Any]) -> None:
         """Update the server-side assignment for a device."""
         await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)

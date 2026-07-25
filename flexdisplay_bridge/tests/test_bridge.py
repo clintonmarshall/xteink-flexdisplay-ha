@@ -112,6 +112,8 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
                 "profile": "showroom",
                 "mode": "home_assistant",
                 "refresh_interval_seconds": 300,
+                "live_mode": True,
+                "manual_sleep_seconds": 1200,
                 "intelligent_sleep": True,
                 "active_start": "07:00",
                 "active_end": "21:30",
@@ -125,6 +127,8 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert device["area"] == "Showroom"
         assert device["assigned_profile"] == "showroom"
         assert device["assigned_refresh_interval_seconds"] == 300
+        assert device["assigned_live_mode"] is True
+        assert device["assigned_manual_sleep_seconds"] == 1200
         assert device["assigned_active_start"] == "07:00"
         assert device["assigned_active_end"] == "21:30"
         assert device["assigned_low_battery_percent"] == 40
@@ -134,6 +138,8 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert screen.headers["x-flexdisplay-area"] == "Showroom"
         assert screen.headers["x-flexdisplay-profile"] == "showroom"
         assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
+        assert screen.headers["x-flexdisplay-live-mode"] == "true"
+        assert screen.headers["x-flexdisplay-sleep-reason"] == "live_mode"
 
 
 def test_sleep_plan_respects_usb_active_hours_battery_and_unchanged_images() -> None:
@@ -224,6 +230,41 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
         record = client.get("/api/v1/devices/X4-DEMO01").json()
         assert record["last_command_result"] == "refresh:complete"
         assert record["dispatched_commands"] == []
+
+
+def test_remote_power_commands_and_queue_cancellation(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        devices={
+            "X3-DEMO01": DeviceConfig(
+                name="Remote X3",
+                manual_sleep_seconds=1200,
+            )
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+
+        client.post("/api/v1/devices/X3-DEMO01/commands/full-refresh")
+        cancelled = client.delete("/api/v1/devices/X3-DEMO01/commands")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["device"]["pending_commands"] == []
+
+        client.post("/api/v1/devices/X3-DEMO01/commands/sleep")
+        sleep = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+        assert sleep.headers["x-flexdisplay-commands"] == "sleep"
+        assert sleep.headers["x-flexdisplay-sleep-action"] == "scheduled"
+        assert sleep.headers["x-flexdisplay-sleep-seconds"] == "1200"
+        assert sleep.headers["x-flexdisplay-sleep-reason"] == "remote_command"
+
+        client.post("/api/v1/devices/X3-DEMO01/commands/power-off")
+        power_off = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-DEMO01"},
+        )
+        assert power_off.headers["x-flexdisplay-commands"] == "power-off"
+        assert power_off.headers["x-flexdisplay-sleep-action"] == "power_off"
+        assert power_off.headers["x-flexdisplay-sleep-seconds"] == "0"
 
 
 def test_next_command_advances_readable_dashboard_pages(tmp_path: Path) -> None:

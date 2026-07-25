@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.9.0
+
+- Added full queued remote control: force redraw, clear display, timed sleep,
+  power-off, restart, navigation, refresh, and pending-command cancellation.
+- Added Home Assistant controls for live polling, auto-start, intelligent
+  sleep, USB stay-awake, active hours, refresh and sleep durations, battery
+  thresholds, interval multipliers, name, area, and timezone.
+- Added live-mode fleet provisioning and remote-command sleep plans.
+- Expanded optional MQTT Discovery buttons to match the device command set.
+- Bundled the credential-free shared X3/X4 FlexDisplay 0.12.0 firmware metadata.
+
 ## 0.8.0
 
 - Added intelligent sleep plans with active hours, low-battery throttling,

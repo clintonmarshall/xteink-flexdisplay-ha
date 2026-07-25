@@ -56,6 +56,18 @@ and whether the last image was unchanged. A scheduled sleep intentionally
 differs from the reader's normal power-off action: it retains the X3/X4 power
 latch so the ESP32-C3 timer can wake the firmware.
 
+## Remote control
+
+Firmware 0.12.0 and integration 0.9.0 expose queued controls for refresh,
+forced redraw, page navigation, clearing the e-paper panel, restart, timed
+sleep, and power-off. Configuration entities change live polling, auto-start,
+sleep policy, active hours, refresh cadence, battery policy, display identity,
+area, and timezone without editing an SD-card file.
+
+Commands sent while a device is sleeping remain queued until its timer or a
+physical button wakes it. **Power off until button wake** intentionally disables
+the timer. **Cancel pending commands** removes commands not yet delivered.
+
 ## Dashboard profiles
 
 Without a configured profile, the Bridge generates eight readable pages from

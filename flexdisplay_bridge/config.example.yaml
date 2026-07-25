@@ -11,6 +11,8 @@ provisioning:
   default_mode: home_assistant
   auto_start: true
   refresh_interval_seconds: 900
+  live_mode: false
+  manual_sleep_seconds: 900
   intelligent_sleep: true
   active_start: "06:00"
   active_end: "22:00"
@@ -88,6 +90,8 @@ devices:
     width: 480
     height: 800
     refresh_interval_seconds: 300
+    live_mode: false
+    manual_sleep_seconds: 900
     profile: default
     mode: home_assistant
     auto_start: true
