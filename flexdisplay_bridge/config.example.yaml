@@ -47,6 +47,9 @@ firmware:
   sha256: ""
   size: 0
   minimum_battery_percent: 40
+  canary_required: true
+  require_usb_for_canary: true
+  max_parallel: 1
 
 dashboard:
   title: HOME ASSISTANT

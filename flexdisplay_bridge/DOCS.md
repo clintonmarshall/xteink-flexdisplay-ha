@@ -16,6 +16,9 @@ Options:
 - `firmware_sha256`: lowercase SHA-256 digest for that exact file.
 - `firmware_size`: exact firmware file size in bytes.
 - `firmware_minimum_battery`: minimum charge percentage for an unplugged update.
+- `firmware_canary_required`: require a verified canary before fleet installs.
+- `firmware_require_usb_for_canary`: require external power for the canary.
+- `firmware_max_parallel`: maximum simultaneous queued/dispatched installs.
 
 ## Zero-touch provisioning
 
@@ -67,6 +70,21 @@ area, and timezone without editing an SD-card file.
 Commands sent while a device is sleeping remain queued until its timer or a
 physical button wakes it. **Power off until button wake** intentionally disables
 the timer. **Cancel pending commands** removes commands not yet delivered.
+
+## Safer firmware rollout
+
+Firmware 0.13.0 and integration 0.10.0 assign durable IDs to commands and keep
+results on the device SD card until the Bridge confirms the matching ID. Stale
+results cannot clear a newer command.
+
+For each newly configured release, the first eligible update becomes the
+canary. With the default options it must report a ready SD card and USB power.
+The fleet remains blocked until that device reboots into the exact target
+firmware and acknowledges completion. Further installs run one at a time by
+default, and any failure pauses the rollout until a new release is configured.
+
+The Firmware entity shows install blockers, rollout state, canary identity,
+update role, update status, and command-ID diagnostics in its attributes.
 
 ## Dashboard profiles
 

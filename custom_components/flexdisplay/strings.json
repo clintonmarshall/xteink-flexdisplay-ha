@@ -46,6 +46,12 @@
       "last_command_result": {
         "name": "Last command result"
       },
+      "firmware_rollout_status": {
+        "name": "Firmware rollout status"
+      },
+      "firmware_update_status": {
+        "name": "Firmware update status"
+      },
       "power_state": {
         "name": "Power state"
       },

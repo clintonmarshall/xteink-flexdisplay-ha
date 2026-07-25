@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.10.0
+
+- Added persistent command IDs and explicit server acknowledgement so device
+  results are retained until the Bridge confirms the matching command.
+- Added strict OTA manifest, SD-card, power, battery, and concurrent-install
+  preflight checks.
+- Added USB-powered canary-first rollout gating. Fleet installs remain blocked
+  until the canary boots the target firmware and reports a matching completion.
+- Added firmware rollout and per-device update-status entities and update-dialog
+  diagnostics in Home Assistant.
+- Bundled the credential-free shared X3/X4 FlexDisplay 0.13.0 firmware metadata.
+
 ## 0.9.0
 
 - Added full queued remote control: force redraw, clear display, timed sleep,
