@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.10.5
+
+- Redeliver unacknowledged durable commands with their existing command ID.
+- Recover OTA installs when a device resets or loses the first command response.
+
 ## 0.10.4
 
 - Stops sending local `device.*` telemetry placeholders to the Home Assistant

@@ -785,6 +785,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         commands = store.consume_commands(device_id)
         if commands:
             record = store.get(device_id) or record
+        elif not command_acknowledged:
+            # Durable commands use at-least-once delivery. If the device resets,
+            # loses the response, or fails before persisting a result, resend the
+            # same dispatched command and command ID until it acknowledges.
+            record = store.get(device_id) or record
+            commands = list(record.get("dispatched_commands") or [])
         command_id = str(record.get("dispatched_command_id") or "") if commands else ""
         entity_states, ha_error = ha.fetch(profile.entities)
         dashboard_profile = settings.profile(profile)
