@@ -37,6 +37,10 @@ class HomeAssistantClient:
         headers = {"Authorization": f"Bearer {self.config.token}", "Content-Type": "application/json"}
         error = ""
         for entity in entities:
+            # device.* values are synthetic FlexDisplay telemetry. They are
+            # resolved by dashboards.py and must never be requested from HA.
+            if entity.entity_id.startswith("device."):
+                continue
             try:
                 response = self.session.get(
                     f"{self.config.base_url}/api/states/{entity.entity_id}",

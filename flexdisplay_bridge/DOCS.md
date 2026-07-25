@@ -94,6 +94,13 @@ those conditions pass and the matching stuck install command is still active.
 Pressing it records separate USB-recovery evidence in the Bridge audit history;
 it does not impersonate a device acknowledgement.
 
+Some X4 revisions stop reporting USB power after charging completes even while
+their USB serial connection remains active. The recovery API can additionally
+accept a recent `macos_ioreg` observation containing a USB serial that matches
+the device-ID suffix, `/dev/cu.usbmodem*` port, and the SHA-256 of the verified
+full-flash backup. This evidence is retained in both device and rollout audit
+history.
+
 ## Dashboard profiles
 
 Without a configured profile, the Bridge generates eight readable pages from

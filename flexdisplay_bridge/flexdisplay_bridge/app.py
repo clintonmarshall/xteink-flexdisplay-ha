@@ -38,6 +38,27 @@ MINIMUM_FIRMWARE_SIZE = 64 * 1024
 USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS = 600
 
 
+def _valid_external_usb_evidence(device_id: str, evidence: Any) -> bool:
+    """Validate a recent macOS USB observation that matches the device identity."""
+    if not isinstance(evidence, dict):
+        return False
+    serial = re.sub(r"[^0-9A-F]", "", str(evidence.get("serial") or "").upper())
+    device_suffix = re.sub(r"[^0-9A-F]", "", device_id.upper())[-6:]
+    if (
+        evidence.get("source") != "macos_ioreg"
+        or not serial.endswith(device_suffix)
+        or not str(evidence.get("port") or "").startswith("/dev/cu.usbmodem")
+        or not re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("backup_sha256") or ""))
+    ):
+        return False
+    try:
+        observed = datetime.fromisoformat(str(evidence.get("observed_at") or ""))
+        age = (datetime.now(UTC) - observed).total_seconds()
+        return 0 <= age <= USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS
+    except (TypeError, ValueError):
+        return False
+
+
 def _firmware_version(value: str) -> tuple[int, int, int]:
     match = re.search(r"flexdisplay[.-](\d+)\.(\d+)\.(\d+)", value)
     if not match:
@@ -119,6 +140,7 @@ def _usb_recovery_blockers(
     record: dict[str, Any],
     settings: BridgeConfig,
     store: DeviceStore,
+    external_usb_evidence: dict[str, Any] | None = None,
 ) -> list[str]:
     """Explain why an operator cannot reconcile a USB-recovered canary."""
     target = settings.firmware.version
@@ -134,7 +156,10 @@ def _usb_recovery_blockers(
         blockers.append("This device is not the active canary")
     if record.get("firmware") != target:
         blockers.append("The device is not reporting the exact target firmware")
-    if record.get("usb_connected") is not True:
+    if record.get("usb_connected") is not True and not _valid_external_usb_evidence(
+        str(record.get("device_id") or ""),
+        external_usb_evidence,
+    ):
         blockers.append("The device is not reporting USB power")
     if record.get("sd_ready") is not True:
         blockers.append("The device SD card is not ready")
@@ -574,7 +599,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         current = store.get(selected)
         if not current:
             raise HTTPException(status_code=404, detail="Device has not checked in")
-        blockers = _usb_recovery_blockers(current, settings, store)
+        external_usb_evidence = payload.get("external_usb_evidence")
+        blockers = _usb_recovery_blockers(
+            current,
+            settings,
+            store,
+            external_usb_evidence if isinstance(external_usb_evidence, dict) else None,
+        )
         if blockers:
             raise HTTPException(status_code=409, detail="; ".join(blockers))
         target = str(payload.get("expected_target_version") or "")
@@ -587,6 +618,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 target,
                 command_id,
                 max_checkin_age_seconds=USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS,
+                external_usb_evidence=(
+                    external_usb_evidence if isinstance(external_usb_evidence, dict) else None
+                ),
             )
         except ValueError as err:
             raise HTTPException(status_code=409, detail=str(err)) from err

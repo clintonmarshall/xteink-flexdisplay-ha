@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 import threading
 from copy import deepcopy
 from datetime import UTC, datetime
@@ -228,6 +229,7 @@ class DeviceStore:
         expected_command_id: str,
         *,
         max_checkin_age_seconds: int = 600,
+        external_usb_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Reconcile a physically verified USB recovery without forging a device ACK."""
         with self._lock:
@@ -238,6 +240,17 @@ class DeviceStore:
             rollout = self._state.get("firmware_rollout") or {}
             dispatched = list(record.get("dispatched_commands") or [])
             dispatched_id = str(record.get("dispatched_command_id") or "")
+            evidence = external_usb_evidence or {}
+            usb_serial = re.sub(r"[^0-9A-F]", "", str(evidence.get("serial") or "").upper())
+            device_suffix = re.sub(r"[^0-9A-F]", "", device_id.upper())[-6:]
+            evidence_observed_at = str(evidence.get("observed_at") or "")
+            external_usb_valid = bool(
+                evidence.get("source") == "macos_ioreg"
+                and usb_serial.endswith(device_suffix)
+                and str(evidence.get("port") or "").startswith("/dev/cu.usbmodem")
+                and re.fullmatch(r"[0-9a-f]{64}", str(evidence.get("backup_sha256") or ""))
+                and evidence_observed_at
+            )
             blockers: list[str] = []
             if not target_version:
                 blockers.append("A target firmware version is required")
@@ -249,8 +262,10 @@ class DeviceStore:
                 blockers.append("This device is not the active canary")
             if record.get("firmware") != target_version:
                 blockers.append("The device is not reporting the exact target firmware")
-            if record.get("usb_connected") is not True:
-                blockers.append("The device is not reporting USB power")
+            if record.get("usb_connected") is not True and not external_usb_valid:
+                blockers.append(
+                    "USB power must be reported by the device or proven by matching external evidence"
+                )
             if record.get("sd_ready") is not True:
                 blockers.append("The device SD card is not ready")
             if record.get("pending_commands"):
@@ -268,22 +283,38 @@ class DeviceStore:
                     blockers.append("The device check-in is not recent enough")
             except (TypeError, ValueError):
                 blockers.append("The device has no valid recent check-in")
+            if external_usb_valid:
+                try:
+                    observed = datetime.fromisoformat(evidence_observed_at)
+                    evidence_age = (datetime.now(UTC) - observed).total_seconds()
+                    if evidence_age < 0 or evidence_age > max_checkin_age_seconds:
+                        blockers.append("The external USB observation is not recent enough")
+                except (TypeError, ValueError):
+                    blockers.append("The external USB observation time is invalid")
 
             if blockers:
                 raise ValueError("; ".join(blockers))
 
             verified_at = utc_now()
-            evidence = {
+            verification_evidence = {
                 "method": "usb_recovery",
                 "device_id": device_id,
                 "target_version": target_version,
                 "observed_firmware": str(record.get("firmware") or ""),
-                "observed_usb_connected": True,
+                "observed_usb_connected": record.get("usb_connected") is True,
                 "observed_sd_ready": True,
                 "observed_last_seen": last_seen,
                 "reconciled_command_id": dispatched_id,
                 "verified_at": verified_at,
             }
+            if external_usb_valid:
+                verification_evidence["external_usb_evidence"] = {
+                    "source": "macos_ioreg",
+                    "serial": usb_serial,
+                    "port": str(evidence["port"]),
+                    "backup_sha256": str(evidence["backup_sha256"]),
+                    "observed_at": evidence_observed_at,
+                }
 
             record["dispatched_commands"] = []
             record.pop("dispatched_command_id", None)
@@ -293,7 +324,7 @@ class DeviceStore:
             record["firmware_update_status"] = "verified"
             record["firmware_verification_method"] = "usb_recovery"
             record["firmware_verified_at"] = verified_at
-            record["last_usb_recovery_verification"] = evidence
+            record["last_usb_recovery_verification"] = verification_evidence
             history = record.setdefault("command_history", [])
             history.append(
                 {
@@ -305,7 +336,7 @@ class DeviceStore:
             )
             record["command_history"] = history[-16:]
             recovery_history = record.setdefault("usb_recovery_history", [])
-            recovery_history.append(evidence)
+            recovery_history.append(verification_evidence)
             record["usb_recovery_history"] = recovery_history[-8:]
 
             updated = rollout.setdefault("updated_devices", [])
@@ -317,7 +348,7 @@ class DeviceStore:
             rollout["last_verified_device_id"] = device_id
             rollout["last_verification_method"] = "usb_recovery"
             rollout_history = rollout.setdefault("verification_history", [])
-            rollout_history.append(evidence)
+            rollout_history.append(verification_evidence)
             rollout["verification_history"] = rollout_history[-16:]
 
             self._save()
