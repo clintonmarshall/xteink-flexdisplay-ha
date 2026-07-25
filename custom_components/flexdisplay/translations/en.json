@@ -109,6 +109,9 @@
       "refresh": {
         "name": "Refresh"
       },
+      "full_refresh": {
+        "name": "Force full refresh"
+      },
       "next": {
         "name": "Next screen"
       },
@@ -118,8 +121,20 @@
       "overview": {
         "name": "Return to overview"
       },
+      "clear": {
+        "name": "Clear display"
+      },
+      "sleep": {
+        "name": "Sleep now"
+      },
+      "power_off": {
+        "name": "Power off until button wake"
+      },
       "restart": {
         "name": "Restart"
+      },
+      "cancel_commands": {
+        "name": "Cancel pending commands"
       }
     },
     "select": {
@@ -131,6 +146,62 @@
       },
       "assigned_mode": {
         "name": "Assigned mode"
+      }
+    },
+    "number": {
+      "refresh_interval": {
+        "name": "Refresh interval"
+      },
+      "manual_sleep_duration": {
+        "name": "Manual sleep duration"
+      },
+      "manual_wake_grace": {
+        "name": "Manual wake grace"
+      },
+      "critical_battery": {
+        "name": "Critical battery threshold"
+      },
+      "low_battery": {
+        "name": "Low battery threshold"
+      },
+      "low_battery_multiplier": {
+        "name": "Low battery interval multiplier"
+      },
+      "unchanged_image_multiplier": {
+        "name": "Unchanged image interval multiplier"
+      }
+    },
+    "switch": {
+      "live_mode": {
+        "name": "Live remote control"
+      },
+      "auto_start": {
+        "name": "Auto-start assigned mode"
+      },
+      "intelligent_sleep": {
+        "name": "Intelligent sleep"
+      },
+      "stay_awake_on_usb": {
+        "name": "Stay awake on USB"
+      }
+    },
+    "time": {
+      "active_start": {
+        "name": "Active hours start"
+      },
+      "active_end": {
+        "name": "Active hours end"
+      }
+    },
+    "text": {
+      "device_name": {
+        "name": "Device name"
+      },
+      "area": {
+        "name": "Assigned area"
+      },
+      "timezone": {
+        "name": "Timezone"
       }
     },
     "update": {

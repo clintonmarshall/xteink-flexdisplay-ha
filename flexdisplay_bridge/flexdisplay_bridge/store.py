@@ -131,6 +131,17 @@ class DeviceStore:
                 self._save()
             return commands
 
+    def clear_commands(self, device_id: str) -> dict[str, Any] | None:
+        """Cancel commands that have not yet been delivered to a device."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            record["pending_commands"] = []
+            record["commands_cancelled_at"] = utc_now()
+            self._save()
+            return deepcopy(record)
+
     def acknowledge(self, device_id: str, result: str) -> None:
         if not result:
             return

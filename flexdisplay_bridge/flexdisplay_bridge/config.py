@@ -47,6 +47,8 @@ class DeviceConfig:
     profile: str = "default"
     mode: str = "home_assistant"
     auto_start: bool = True
+    live_mode: bool = False
+    manual_sleep_seconds: int = 900
     intelligent_sleep: bool = True
     active_start: str = "06:00"
     active_end: str = "22:00"
@@ -66,6 +68,8 @@ class ProvisioningConfig:
     default_mode: str = "home_assistant"
     auto_start: bool = True
     refresh_interval_seconds: int = 900
+    live_mode: bool = False
+    manual_sleep_seconds: int = 900
     intelligent_sleep: bool = True
     active_start: str = "06:00"
     active_end: str = "22:00"
@@ -141,6 +145,8 @@ class BridgeConfig:
             profile=self.default_profile,
             mode=self.provisioning.default_mode,
             auto_start=self.provisioning.auto_start,
+            live_mode=self.provisioning.live_mode,
+            manual_sleep_seconds=self.provisioning.manual_sleep_seconds,
             intelligent_sleep=self.provisioning.intelligent_sleep,
             active_start=self.provisioning.active_start,
             active_end=self.provisioning.active_end,
@@ -236,6 +242,8 @@ def _device(
         profile=profile_name,
         mode=str(value.get("mode") or "home_assistant"),
         auto_start=bool(value.get("auto_start", True)),
+        live_mode=bool(value.get("live_mode", False)),
+        manual_sleep_seconds=max(60, min(86400, int(value.get("manual_sleep_seconds", 900)))),
         intelligent_sleep=bool(value.get("intelligent_sleep", True)),
         active_start=_clock(value.get("active_start"), "06:00"),
         active_end=_clock(value.get("active_end"), "22:00"),
@@ -310,6 +318,11 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         refresh_interval_seconds=max(
             60,
             min(86400, int(provisioning_raw.get("refresh_interval_seconds", 900))),
+        ),
+        live_mode=bool(provisioning_raw.get("live_mode", False)),
+        manual_sleep_seconds=max(
+            60,
+            min(86400, int(provisioning_raw.get("manual_sleep_seconds", 900))),
         ),
         intelligent_sleep=bool(provisioning_raw.get("intelligent_sleep", True)),
         active_start=_clock(provisioning_raw.get("active_start"), "06:00"),

@@ -129,21 +129,33 @@ class MqttService:
             topic = f"{self.config.discovery_prefix}/sensor/{slug}/{key}/config"
             self.client.publish(topic, json.dumps(payload), retain=True)
 
-        button = {
-            "name": "Refresh",
-            "unique_id": f"flexdisplay_{slug}_refresh",
-            "command_topic": f"{self.config.topic_prefix}/{device_id}/command/refresh",
-            "payload_press": "PRESS",
-            "device": device,
-            "origin": {
-                "name": "FlexDisplay HA Bridge",
-                "sw_version": __version__,
-                "support_url": "https://github.com/",
-            },
-        }
-        self.client.publish(
-            f"{self.config.discovery_prefix}/button/{slug}/refresh/config",
-            json.dumps(button),
-            retain=True,
-        )
+        for command, name in {
+            "refresh": "Refresh",
+            "full-refresh": "Force full refresh",
+            "previous": "Previous screen",
+            "next": "Next screen",
+            "overview": "Return to overview",
+            "clear": "Clear display",
+            "sleep": "Sleep now",
+            "power-off": "Power off until button wake",
+            "restart": "Restart",
+        }.items():
+            command_slug = command.replace("-", "_")
+            button = {
+                "name": name,
+                "unique_id": f"flexdisplay_{slug}_{command_slug}",
+                "command_topic": f"{self.config.topic_prefix}/{device_id}/command/{command}",
+                "payload_press": "PRESS",
+                "device": device,
+                "origin": {
+                    "name": "FlexDisplay HA Bridge",
+                    "sw_version": __version__,
+                    "support_url": "https://github.com/",
+                },
+            }
+            self.client.publish(
+                f"{self.config.discovery_prefix}/button/{slug}/{command_slug}/config",
+                json.dumps(button),
+                retain=True,
+            )
         self.client.publish(state_topic, json.dumps(state), retain=True)

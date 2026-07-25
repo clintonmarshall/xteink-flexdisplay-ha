@@ -88,8 +88,12 @@ For each device known to the bridge, the integration exposes:
 - awake, sleeping, or offline state;
 - pending command and last command result;
 - online connectivity;
-- refresh, previous-screen, next-screen, overview, and restart buttons;
+- refresh, forced-redraw, previous-screen, next-screen, overview, clear,
+  timed-sleep, power-off, restart, and pending-command cancellation buttons;
 - direct dashboard-page selection;
+- live-control, auto-start, intelligent-sleep, and USB stay-awake switches;
+- refresh/sleep timing, active-hours, battery-policy, name, area, and timezone
+  controls;
 - firmware update availability and installation.
 - USB and SD-card state, battery voltage, uptime, memory, and wake reason;
 - last physical button, press count, and a native Physical Button event entity.
@@ -115,6 +119,11 @@ assigned-mode selection.
 Firmware `0.11.0`, Bridge `0.8.0`, and integration `0.8.0` add intelligent
 scheduled sleep, active hours, battery-aware refresh throttling, unchanged-image
 suppression, and automatic entity creation for newly discovered fleet devices.
+
+Firmware `0.12.0`, Bridge `0.9.0`, and integration `0.9.0` add complete queued
+remote control and editable per-device fleet policy. Sleeping devices receive
+commands at their next timer or physical-button wake; a radio wake is not
+possible while the ESP32-C3 is in deep sleep.
 
 ## Security
 
