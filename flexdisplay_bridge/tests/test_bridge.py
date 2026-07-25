@@ -804,6 +804,91 @@ def test_usb_recovery_accepts_recent_matching_macos_evidence(tmp_path: Path) -> 
         assert verified.json()["device"]["firmware_rollout_status"] == "canary_verified"
 
 
+def test_usb_recovery_verifies_stuck_fleet_device_after_canary(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.13.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        canary_required=True,
+        require_usb_for_canary=True,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        for device_id in ("X4-CANARY", "X3-FLEET01"):
+            client.get(
+                "/api/v1/screen",
+                headers={
+                    "X-FlexDisplay-ID": device_id,
+                    "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                    "X-FlexDisplay-SD-Ready": "true",
+                    "X-FlexDisplay-USB-Connected": "true",
+                },
+            )
+
+        assert client.post("/api/v1/devices/X4-CANARY/commands/install").status_code == 200
+        canary_delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-CANARY",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-CANARY",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+                "X-FlexDisplay-Command-ID": canary_delivery.headers[
+                    "x-flexdisplay-command-id"
+                ],
+                "X-FlexDisplay-Command-Result": "install:complete",
+            },
+        )
+
+        assert client.post("/api/v1/devices/X3-FLEET01/commands/install").status_code == 200
+        fleet_delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-FLEET01",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.12.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        fleet_command_id = fleet_delivery.headers["x-flexdisplay-command-id"]
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-FLEET01",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        ready = client.get("/api/v1/devices/X3-FLEET01").json()
+        assert ready["usb_recovery_verification_ready"] is True
+
+        verified = client.post(
+            "/api/v1/devices/X3-FLEET01/firmware/verify-usb-recovery",
+            json={
+                "expected_target_version": firmware.version,
+                "expected_command_id": fleet_command_id,
+            },
+        )
+        assert verified.status_code == 200
+        record = verified.json()["device"]
+        assert record["firmware_update_status"] == "verified"
+        assert record["firmware_rollout_status"] == "fleet_active"
+        assert record["firmware_canary_device_id"] == "X4-CANARY"
+        assert record["dispatched_commands"] == []
+        assert record["last_usb_recovery_verification"]["role"] == "fleet"
+
+
 def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Path) -> None:
     invalid = FirmwareConfig(
         version="1.4.1-flexdisplay.0.13.0",

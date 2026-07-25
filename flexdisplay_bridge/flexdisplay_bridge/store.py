@@ -256,10 +256,15 @@ class DeviceStore:
                 blockers.append("A target firmware version is required")
             if rollout.get("target_version") != target_version:
                 blockers.append("The active rollout does not match the requested target")
-            if rollout.get("status") != "canary_active":
-                blockers.append("The rollout is not waiting for an active canary")
-            if rollout.get("canary_device_id") != device_id:
+            rollout_status = str(rollout.get("status") or "")
+            is_active_canary = (
+                rollout_status == "canary_active"
+                and rollout.get("canary_device_id") == device_id
+            )
+            if rollout_status == "canary_active" and not is_active_canary:
                 blockers.append("This device is not the active canary")
+            elif rollout_status not in {"canary_active", "canary_verified", "fleet_active"}:
+                blockers.append("The rollout is not accepting verified USB recoveries")
             if record.get("firmware") != target_version:
                 blockers.append("The device is not reporting the exact target firmware")
             if record.get("usb_connected") is not True and not external_usb_valid:
@@ -298,6 +303,7 @@ class DeviceStore:
             verified_at = utc_now()
             verification_evidence = {
                 "method": "usb_recovery",
+                "role": "canary" if is_active_canary else "fleet",
                 "device_id": device_id,
                 "target_version": target_version,
                 "observed_firmware": str(record.get("firmware") or ""),
@@ -342,8 +348,11 @@ class DeviceStore:
             updated = rollout.setdefault("updated_devices", [])
             if device_id not in updated:
                 updated.append(device_id)
-            rollout["status"] = "canary_verified"
-            rollout["canary_verified_at"] = verified_at
+            if is_active_canary:
+                rollout["status"] = "canary_verified"
+                rollout["canary_verified_at"] = verified_at
+            elif rollout.get("status") == "canary_verified":
+                rollout["status"] = "fleet_active"
             rollout["last_verified_at"] = verified_at
             rollout["last_verified_device_id"] = device_id
             rollout["last_verification_method"] = "usb_recovery"
