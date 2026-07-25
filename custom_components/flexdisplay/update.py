@@ -72,6 +72,10 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
             "command_id": self.record.get("dispatched_command_id")
             or self.record.get("pending_command_id"),
             "last_command_id": self.record.get("last_command_id"),
+            "verification_method": self.record.get("firmware_verification_method"),
+            "verified_at": self.record.get("firmware_verified_at"),
+            "usb_recovery_ready": self.record.get("usb_recovery_verification_ready", False),
+            "usb_recovery_blockers": self.record.get("usb_recovery_verification_blockers") or [],
         }
 
     def version_is_newer(self, latest_version: str, installed_version: str) -> bool:

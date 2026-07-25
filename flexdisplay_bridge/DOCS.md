@@ -86,6 +86,14 @@ default, and any failure pauses the rollout until a new release is configured.
 The Firmware entity shows install blockers, rollout state, canary identity,
 update role, update status, and command-ID diagnostics in its attributes.
 
+If an old canary firmware consumes an install but cannot acknowledge it, first
+make and verify a complete flash backup, install the exact configured target
+over USB, and confirm the device checks in with USB power and a ready SD card.
+The **Verify USB firmware recovery** button becomes available only while all
+those conditions pass and the matching stuck install command is still active.
+Pressing it records separate USB-recovery evidence in the Bridge audit history;
+it does not impersonate a device acknowledgement.
+
 ## Dashboard profiles
 
 Without a configured profile, the Bridge generates eight readable pages from

@@ -141,6 +141,9 @@
       },
       "cancel_commands": {
         "name": "Cancel pending commands"
+      },
+      "verify_usb_recovery": {
+        "name": "Verify USB firmware recovery"
       }
     },
     "select": {

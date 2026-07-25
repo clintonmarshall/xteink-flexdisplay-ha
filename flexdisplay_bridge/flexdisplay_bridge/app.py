@@ -35,6 +35,7 @@ SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
 OTA_PARTITION_SIZE = 0x640000
 MINIMUM_FIRMWARE_SIZE = 64 * 1024
+USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS = 600
 
 
 def _firmware_version(value: str) -> tuple[int, int, int]:
@@ -111,6 +112,45 @@ def _firmware_install_blockers(
         blockers.append(
             f"Maximum of {firmware.max_parallel} concurrent firmware install(s) reached"
         )
+    return blockers
+
+
+def _usb_recovery_blockers(
+    record: dict[str, Any],
+    settings: BridgeConfig,
+    store: DeviceStore,
+) -> list[str]:
+    """Explain why an operator cannot reconcile a USB-recovered canary."""
+    target = settings.firmware.version
+    rollout = store.firmware_rollout()
+    blockers: list[str] = []
+    if not target:
+        blockers.append("No target firmware release is configured")
+    if rollout.get("target_version") != target:
+        blockers.append("The active rollout does not match the configured target")
+    if rollout.get("status") != "canary_active":
+        blockers.append("The rollout is not waiting for an active canary")
+    if rollout.get("canary_device_id") != record.get("device_id"):
+        blockers.append("This device is not the active canary")
+    if record.get("firmware") != target:
+        blockers.append("The device is not reporting the exact target firmware")
+    if record.get("usb_connected") is not True:
+        blockers.append("The device is not reporting USB power")
+    if record.get("sd_ready") is not True:
+        blockers.append("The device SD card is not ready")
+    if record.get("pending_commands"):
+        blockers.append("The device has pending commands")
+    if list(record.get("dispatched_commands") or []) != ["install"]:
+        blockers.append("The only dispatched command must be the stuck install")
+    if not record.get("dispatched_command_id"):
+        blockers.append("The stuck install has no durable command ID")
+    try:
+        seen = datetime.fromisoformat(str(record.get("last_seen")))
+        age = (datetime.now(UTC) - seen).total_seconds()
+        if age < 0 or age > USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS:
+            blockers.append("The device check-in is not recent enough")
+    except (TypeError, ValueError):
+        blockers.append("The device has no valid recent check-in")
     return blockers
 
 
@@ -202,6 +242,9 @@ def _decorate_device(
             rollout.get("target_version") == settings.firmware.version
             and rollout.get("status") == "canary_verified"
         )
+        recovery_blockers = _usb_recovery_blockers(result, settings, store)
+        result["usb_recovery_verification_blockers"] = recovery_blockers
+        result["usb_recovery_verification_ready"] = not recovery_blockers
     return result
 
 
@@ -518,6 +561,41 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
         return {"cancelled": True, "device": _decorate_device(record, settings, store)}
+
+    @app.post("/api/v1/devices/{device_id}/firmware/verify-usb-recovery")
+    def verify_usb_recovery(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        """Reconcile a stuck canary after an independently verified USB flash."""
+        authorize(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        blockers = _usb_recovery_blockers(current, settings, store)
+        if blockers:
+            raise HTTPException(status_code=409, detail="; ".join(blockers))
+        target = str(payload.get("expected_target_version") or "")
+        command_id = str(payload.get("expected_command_id") or "")
+        if target != settings.firmware.version:
+            raise HTTPException(status_code=409, detail="Expected target does not match configuration")
+        try:
+            record = store.verify_usb_recovery(
+                selected,
+                target,
+                command_id,
+                max_checkin_age_seconds=USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS,
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {
+            "verified": True,
+            "verification_method": "usb_recovery",
+            "device": _decorate_device(record, settings, store),
+            "audit": record.get("last_usb_recovery_verification"),
+        }
 
     @app.put("/api/v1/devices/{device_id}/provision")
     def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:

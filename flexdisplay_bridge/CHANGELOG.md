@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.10.3
+
+- Added an explicit USB-recovery verification endpoint and Home Assistant
+  button for reconciling a stuck firmware canary.
+- Requires a recent check-in from the same canary, the exact configured target
+  firmware, USB power, a ready SD card, no pending commands, and the matching
+  durable install command ID.
+- Records USB recovery evidence and verification method in bounded device and
+  rollout audit histories instead of forging a device acknowledgement.
+
 ## 0.10.2
 
 - Cancels legacy pending firmware installs during migration because they predate
