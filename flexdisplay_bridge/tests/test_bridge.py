@@ -36,7 +36,7 @@ def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
                     },
                     "X3-PENDING": {
                         "device_id": "X3-PENDING",
-                        "pending_commands": ["refresh"],
+                        "pending_commands": ["refresh", "install"],
                     },
                 }
             }
@@ -56,6 +56,8 @@ def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
     assert pending is not None
     assert pending["pending_commands"] == ["refresh"]
     assert pending["pending_command_id"] == "X3-PENDING-00000001"
+    assert pending["legacy_pending_commands"] == ["refresh", "install"]
+    assert pending["legacy_pending_install_cancelled_at"]
 
     persisted = json.loads(state_path.read_text(encoding="utf-8"))
     assert persisted["command_sequence"] == 1

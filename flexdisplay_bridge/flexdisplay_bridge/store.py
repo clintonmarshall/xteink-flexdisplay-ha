@@ -35,11 +35,17 @@ class DeviceStore:
         changed = False
         sequence = int(self._state.get("command_sequence", 0))
         for record in self._state["devices"].values():
-            pending = record.get("pending_commands") or []
+            pending = list(record.get("pending_commands") or [])
             if pending and not record.get("pending_command_id"):
-                sequence += 1
-                device_id = str(record.get("device_id") or "device")
-                record["pending_command_id"] = f"{device_id}-{sequence:08x}"
+                if "install" in pending:
+                    record["legacy_pending_commands"] = pending[-8:]
+                    record["legacy_pending_install_cancelled_at"] = utc_now()
+                    pending = [command for command in pending if command != "install"]
+                    record["pending_commands"] = pending
+                if pending:
+                    sequence += 1
+                    device_id = str(record.get("device_id") or "device")
+                    record["pending_command_id"] = f"{device_id}-{sequence:08x}"
                 changed = True
 
             dispatched = record.get("dispatched_commands") or []

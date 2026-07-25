@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.10.2
+
+- Cancels legacy pending firmware installs during migration because they predate
+  the canary gate and cannot be safely resumed.
+- Preserves non-install legacy commands with newly assigned durable IDs.
+- Records cancelled legacy install metadata for audit and recovery.
+
 ## 0.10.1
 
 - Migrates pre-command-ID Bridge state on startup.
