@@ -19,7 +19,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity
+from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -137,6 +137,29 @@ DESCRIPTIONS = (
         state_class=SensorStateClass.TOTAL_INCREASING,
         value_fn=lambda record: record.get("button_press_count", 0),
     ),
+    FlexDisplaySensorDescription(
+        key="sleep_action",
+        translation_key="sleep_action",
+        value_fn=lambda record: record.get("sleep_action") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="sleep_reason",
+        translation_key="sleep_reason",
+        value_fn=lambda record: record.get("sleep_reason") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="sleep_seconds",
+        translation_key="sleep_duration",
+        device_class=SensorDeviceClass.DURATION,
+        native_unit_of_measurement="s",
+        value_fn=lambda record: record.get("sleep_seconds"),
+    ),
+    FlexDisplaySensorDescription(
+        key="next_wake_at",
+        translation_key="next_wake",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda record: parse_datetime(record.get("next_wake_at", "")),
+    ),
 )
 
 
@@ -168,10 +191,11 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for devices already registered with the bridge."""
     del hass
-    coordinator: FlexDisplayCoordinator = entry.runtime_data
-    async_add_entities(
-        FlexDisplaySensor(coordinator, record["device_id"], description)
-        for record in coordinator.data
-        if record.get("device_id")
-        for description in DESCRIPTIONS
+    setup_dynamic_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator, device_id: (
+            FlexDisplaySensor(coordinator, device_id, description)
+            for description in DESCRIPTIONS
+        ),
     )

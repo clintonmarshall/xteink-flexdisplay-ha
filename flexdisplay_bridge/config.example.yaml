@@ -11,6 +11,16 @@ provisioning:
   default_mode: home_assistant
   auto_start: true
   refresh_interval_seconds: 900
+  intelligent_sleep: true
+  active_start: "06:00"
+  active_end: "22:00"
+  timezone: Australia/Melbourne
+  critical_battery_percent: 15
+  low_battery_percent: 35
+  low_battery_multiplier: 4
+  unchanged_image_multiplier: 2
+  stay_awake_on_usb: true
+  manual_wake_grace_seconds: 60
 
 home_assistant:
   base_url: http://homeassistant.local:8123
@@ -81,3 +91,13 @@ devices:
     profile: default
     mode: home_assistant
     auto_start: true
+    intelligent_sleep: true
+    active_start: "06:00"
+    active_end: "22:00"
+    timezone: Australia/Melbourne
+    critical_battery_percent: 15
+    low_battery_percent: 35
+    low_battery_multiplier: 4
+    unchanged_image_multiplier: 2
+    stay_awake_on_usb: true
+    manual_wake_grace_seconds: 60

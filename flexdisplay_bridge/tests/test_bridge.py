@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import io
+from datetime import UTC, datetime
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from flexdisplay_bridge.app import create_app
+from flexdisplay_bridge.app import _sleep_plan, create_app
 from flexdisplay_bridge.config import (
     BridgeConfig,
     DashboardPageConfig,
@@ -44,6 +45,8 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert response.headers["x-flexdisplay-device-name"] == "Test X4"
         assert response.headers["x-flexdisplay-assigned-mode"] == "home_assistant"
         assert response.headers["x-flexdisplay-auto-start"] == "true"
+        assert response.headers["x-flexdisplay-sleep-action"] == "scheduled"
+        assert int(response.headers["x-flexdisplay-sleep-seconds"]) >= 60
         with Image.open(io.BytesIO(response.content)) as image:
             assert image.size == (480, 800)
             assert image.mode == "1"
@@ -79,6 +82,7 @@ def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) 
         assert record["name"] == "X3-NEW001"
         assert record["assigned_profile"] == "wall"
         assert record["assigned_auto_start"] is True
+        assert record["assigned_intelligent_sleep"] is True
         assert record["available_profiles"] == ["wall"]
 
 
@@ -108,6 +112,11 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
                 "profile": "showroom",
                 "mode": "home_assistant",
                 "refresh_interval_seconds": 300,
+                "intelligent_sleep": True,
+                "active_start": "07:00",
+                "active_end": "21:30",
+                "timezone": "Australia/Melbourne",
+                "low_battery_percent": 40,
             },
         )
         assert provisioned.status_code == 200
@@ -116,12 +125,74 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert device["area"] == "Showroom"
         assert device["assigned_profile"] == "showroom"
         assert device["assigned_refresh_interval_seconds"] == 300
+        assert device["assigned_active_start"] == "07:00"
+        assert device["assigned_active_end"] == "21:30"
+        assert device["assigned_low_battery_percent"] == 40
 
         screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert screen.headers["x-flexdisplay-device-name"] == "Showroom Panel"
         assert screen.headers["x-flexdisplay-area"] == "Showroom"
         assert screen.headers["x-flexdisplay-profile"] == "showroom"
         assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
+
+
+def test_sleep_plan_respects_usb_active_hours_battery_and_unchanged_images() -> None:
+    profile = DeviceConfig(
+        name="Test",
+        refresh_interval_seconds=300,
+        intelligent_sleep=True,
+        active_start="06:00",
+        active_end="22:00",
+        timezone="Australia/Melbourne",
+        critical_battery_percent=15,
+        low_battery_percent=35,
+        low_battery_multiplier=4,
+        unchanged_image_multiplier=2,
+        stay_awake_on_usb=True,
+    )
+    active = datetime(2026, 7, 25, 2, 0, tzinfo=UTC)  # 12:00 Melbourne
+    inactive = datetime(2026, 7, 25, 14, 0, tzinfo=UTC)  # 00:00 Melbourne
+
+    assert _sleep_plan(profile, 80, True, False, active)["sleep_action"] == "awake"
+    assert _sleep_plan(profile, 10, False, False, active)["sleep_action"] == "power_off"
+    assert _sleep_plan(profile, 80, False, False, active)["sleep_seconds"] == 300
+    assert _sleep_plan(profile, 30, False, False, active)["sleep_seconds"] == 1200
+    assert _sleep_plan(profile, 80, False, True, active)["sleep_seconds"] == 600
+
+    overnight = _sleep_plan(profile, 80, False, False, inactive)
+    assert overnight["sleep_action"] == "scheduled"
+    assert overnight["sleep_reason"] == "outside_active_hours"
+    assert overnight["sleep_seconds"] == 21600
+
+
+def test_screen_marks_matching_image_as_unchanged(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        devices={
+            "X3-DEMO01": DeviceConfig(
+                name="Test X3",
+                refresh_interval_seconds=300,
+                unchanged_image_multiplier=3,
+            )
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+        digest = first.headers["x-flexdisplay-image-sha256"]
+        second = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Image-SHA256": digest,
+            },
+        )
+        assert second.headers["x-flexdisplay-image-unchanged"] == "true"
+        assert second.headers["x-flexdisplay-sleep-reason"] in {
+            "unchanged_image",
+            "low_battery_unchanged",
+            "outside_active_hours",
+        }
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:

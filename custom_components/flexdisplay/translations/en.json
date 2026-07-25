@@ -72,6 +72,18 @@
       },
       "button_press_count": {
         "name": "Button press count"
+      },
+      "sleep_action": {
+        "name": "Sleep action"
+      },
+      "sleep_reason": {
+        "name": "Sleep reason"
+      },
+      "sleep_duration": {
+        "name": "Sleep duration"
+      },
+      "next_wake": {
+        "name": "Next scheduled wake"
       }
     },
     "binary_sensor": {
@@ -83,6 +95,9 @@
       },
       "sd_ready": {
         "name": "SD card ready"
+      },
+      "image_unchanged": {
+        "name": "Image unchanged"
       }
     },
     "event": {

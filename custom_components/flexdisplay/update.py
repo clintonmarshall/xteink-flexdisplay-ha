@@ -14,7 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity
+from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
 class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
@@ -76,9 +76,8 @@ async def async_setup_entry(
 ) -> None:
     """Create update entities for registered devices."""
     del hass
-    coordinator: FlexDisplayCoordinator = entry.runtime_data
-    async_add_entities(
-        FlexDisplayFirmwareUpdate(coordinator, record["device_id"])
-        for record in coordinator.data
-        if record.get("device_id")
+    setup_dynamic_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator, device_id: (FlexDisplayFirmwareUpdate(coordinator, device_id),),
     )

@@ -8,7 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity
+from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
 class FlexDisplayPageSelect(FlexDisplayEntity, SelectEntity):
@@ -99,14 +99,12 @@ async def async_setup_entry(
 ) -> None:
     """Create a page selector for each registered device."""
     del hass
-    coordinator: FlexDisplayCoordinator = entry.runtime_data
-    async_add_entities(
-        entity
-        for record in coordinator.data
-        if record.get("device_id")
-        for entity in (
-            FlexDisplayPageSelect(coordinator, record["device_id"]),
-            FlexDisplayProfileSelect(coordinator, record["device_id"]),
-            FlexDisplayModeSelect(coordinator, record["device_id"]),
-        )
+    setup_dynamic_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator, device_id: (
+            FlexDisplayPageSelect(coordinator, device_id),
+            FlexDisplayProfileSelect(coordinator, device_id),
+            FlexDisplayModeSelect(coordinator, device_id),
+        ),
     )

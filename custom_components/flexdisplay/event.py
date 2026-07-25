@@ -11,7 +11,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import BUTTON_EVENT_TYPES, EVENT_TYPE
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity
+from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
 class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
@@ -57,9 +57,8 @@ async def async_setup_entry(
 ) -> None:
     """Create physical-button event entities."""
     del hass
-    coordinator: FlexDisplayCoordinator = entry.runtime_data
-    async_add_entities(
-        FlexDisplayButtonEvent(coordinator, record["device_id"])
-        for record in coordinator.data
-        if record.get("device_id")
+    setup_dynamic_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator, device_id: (FlexDisplayButtonEvent(coordinator, device_id),),
     )
