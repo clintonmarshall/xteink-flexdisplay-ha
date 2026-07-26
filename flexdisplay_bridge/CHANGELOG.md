@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.10.7
+
+- Maps new physical Right/Down button events to the next dashboard page and
+  Left/Up events to the previous page.
+- De-duplicates retried button telemetry so a single press advances only once.
+- Keeps explicit Home Assistant navigation commands higher priority when they
+  arrive in the same device check-in.
+
 ## 0.10.6
 
 - Extend guarded USB recovery verification to an active fleet installation.

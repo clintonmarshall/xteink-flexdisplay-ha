@@ -469,6 +469,38 @@ def _button_events(value: str | None) -> list[dict[str, Any]]:
     return result[:16]
 
 
+def _new_button_events(record: dict[str, Any], events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    known = {
+        (
+            int(event.get("sequence") or 0),
+            str(event.get("button") or ""),
+            int(event.get("uptime_ms") or 0),
+        )
+        for event in record.get("recent_button_events") or []
+    }
+    return [
+        event
+        for event in events
+        if (
+            int(event.get("sequence") or 0),
+            str(event.get("button") or ""),
+            int(event.get("uptime_ms") or 0),
+        )
+        not in known
+    ]
+
+
+def _physical_page_delta(events: list[dict[str, Any]]) -> int:
+    delta = 0
+    for event in events:
+        button = str(event.get("button") or "")
+        if button in {"right", "down"}:
+            delta += 1
+        elif button in {"left", "up"}:
+            delta -= 1
+    return delta
+
+
 def _number(value: str | None) -> float | None:
     try:
         return float(value) if value not in (None, "") else None
@@ -780,7 +812,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
                 },
             )
-        record = store.record_button_events(device_id, _button_events(x_flexdisplay_button_events)) or record
+        button_events = _button_events(x_flexdisplay_button_events)
+        new_button_events = _new_button_events(record, button_events)
+        physical_page_delta = _physical_page_delta(new_button_events)
+        record = store.record_button_events(device_id, button_events) or record
         command_acknowledged = store.acknowledge(
             device_id,
             x_flexdisplay_command_result or "",
@@ -818,6 +853,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             if requested_page:
                 page_index = (int(requested_page.removeprefix("page-")) - 1) % len(pages)
+            elif physical_page_delta:
+                page_index = (page_index + physical_page_delta) % len(pages)
             elif dashboard_profile and _auto_rotate_due(record, dashboard_profile.auto_rotate_seconds):
                 page_index = (page_index + 1) % len(pages)
         page = pages[page_index]
