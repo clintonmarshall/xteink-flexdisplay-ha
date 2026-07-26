@@ -494,6 +494,53 @@ def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> No
         assert len(client.get("/api/v1/devices/X4-DEMO01/events").json()["events"]) == 2
 
 
+def test_new_physical_button_events_navigate_once(tmp_path: Path) -> None:
+    profile = DashboardProfileConfig(
+        name="wall",
+        pages=(
+            DashboardPageConfig("CLIMATE", ()),
+            DashboardPageConfig("ENERGY", ()),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        profiles={"wall": profile},
+        devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
+    )
+    with TestClient(create_app(config)) as client:
+        right = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Button-Events": "1,right,pressed,120000",
+            },
+        )
+        assert right.headers["x-flexdisplay-page"] == "2"
+        assert right.headers["x-flexdisplay-page-title"] == "ENERGY"
+
+        duplicate = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Button-Events": "1,right,pressed,120000",
+            },
+        )
+        assert duplicate.headers["x-flexdisplay-page"] == "2"
+
+        left = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Button-Events": "2,left,pressed,121000",
+            },
+        )
+        assert left.headers["x-flexdisplay-page"] == "1"
+        assert left.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        record = client.get("/api/v1/devices/X3-DEMO01").json()
+        assert record["button_press_count"] == 2
+
+
 def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
     firmware = FirmwareConfig(
         version="0.6.0",
