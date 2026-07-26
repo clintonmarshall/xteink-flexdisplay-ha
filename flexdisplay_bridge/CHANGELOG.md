@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.10.8
+
+- Bundles the credential-free shared X3/X4 FlexDisplay `0.14.0` firmware
+  manifest for Home Assistant OTA updates.
+- Migrates only the exact packaged `0.13.0` manifest so existing installations
+  receive the new release without overwriting custom firmware URLs.
+- Includes reliable device response-header handling, replay-safe OTA version
+  checks, and physical-button Bridge check-ins in the firmware image.
+
 ## 0.10.7
 
 - Maps new physical Right/Down button events to the next dashboard page and

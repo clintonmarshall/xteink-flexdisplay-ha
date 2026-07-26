@@ -12,14 +12,25 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.13.0",
+    "firmware_version": "1.4.1-flexdisplay.0.14.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/v0.10.0/firmware.bin"
+        "releases/download/firmware-v0.14.0/firmware.bin"
     ),
-    "firmware_sha256": "900dcdf981579901deeb4913570cd4f5e7613d532b698b0ced03af45d47df214",
-    "firmware_size": 5_483_808,
+    "firmware_sha256": "f32000d6bb914b8e3bc923e62f7586e4b57a3bf4ddfa8e2e4c1e8d48793370b8",
+    "firmware_size": 5_485_440,
 }
+LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.4.1-flexdisplay.0.13.0",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+            "releases/download/v0.10.0/firmware.bin"
+        ),
+        "firmware_sha256": "900dcdf981579901deeb4913570cd4f5e7613d532b698b0ced03af45d47df214",
+        "firmware_size": 5_483_808,
+    },
+)
 
 
 def option(options: dict, name: str, default: object = "") -> str:
@@ -38,6 +49,14 @@ def firmware_option(options: dict, name: str) -> str:
     return str(value)
 
 
+def firmware_options(options: dict) -> dict[str, str]:
+    """Migrate exact packaged manifests while preserving custom overrides."""
+    for legacy in LEGACY_PACKAGED_FIRMWARE:
+        if all(str(options.get(name, "")) == str(value) for name, value in legacy.items()):
+            return {name: str(value) for name, value in DEFAULT_FIRMWARE.items()}
+    return {name: firmware_option(options, name) for name in DEFAULT_FIRMWARE}
+
+
 def main() -> None:
     """Configure and launch the bridge."""
     options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
@@ -49,10 +68,11 @@ def main() -> None:
     os.environ["FLEXDISPLAY_MQTT_USERNAME"] = option(options, "mqtt_username", "flexdisplay")
     os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = option(options, "mqtt_password")
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
-    os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = firmware_option(options, "firmware_version")
-    os.environ["FLEXDISPLAY_FIRMWARE_URL"] = firmware_option(options, "firmware_url")
-    os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = firmware_option(options, "firmware_sha256")
-    os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = firmware_option(options, "firmware_size")
+    firmware = firmware_options(options)
+    os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = firmware["firmware_version"]
+    os.environ["FLEXDISPLAY_FIRMWARE_URL"] = firmware["firmware_url"]
+    os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = firmware["firmware_sha256"]
+    os.environ["FLEXDISPLAY_FIRMWARE_SIZE"] = firmware["firmware_size"]
     os.environ["FLEXDISPLAY_FIRMWARE_MINIMUM_BATTERY"] = option(
         options, "firmware_minimum_battery", 40
     )
