@@ -570,6 +570,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.dashboards = dashboards
     app.state.mqtt = mqtt
 
+    @app.middleware("http")
+    async def normalize_ingress_path(request: Request, call_next):
+        """Tolerate malformed ingress paths while Home Assistant refreshes app metadata."""
+        path = str(request.scope.get("path") or "")
+        if path.startswith("//"):
+            request.scope["path"] = f"/{path.lstrip('/')}"
+            raw_path = request.scope.get("raw_path")
+            if isinstance(raw_path, bytes) and raw_path.startswith(b"//"):
+                request.scope["raw_path"] = b"/" + raw_path.lstrip(b"/")
+        return await call_next(request)
+
     @app.get("/healthz")
     def health() -> dict[str, Any]:
         return {

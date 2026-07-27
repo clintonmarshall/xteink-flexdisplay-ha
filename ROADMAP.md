@@ -6,7 +6,7 @@ may move only after the previous phase is usable on both XTEINK X3 and X4.
 ## v0.15 — Visual Dashboard Studio
 
 Status: implemented, pending release and Home Assistant deployment.
-Delivery: Bridge/HACS `0.11.0`; existing device firmware `0.14.0` is compatible.
+Delivery: Bridge/HACS `0.11.1`; existing device firmware `0.14.0` is compatible.
 
 - Home Assistant App web editor with live X3 and X4 previews.
 - Persisted dashboard profiles that survive App restarts and upgrades.
