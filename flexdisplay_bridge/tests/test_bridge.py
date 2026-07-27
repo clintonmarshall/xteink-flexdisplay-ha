@@ -660,6 +660,173 @@ def test_new_physical_button_events_navigate_once(tmp_path: Path) -> None:
         assert record["button_press_count"] == 2
 
 
+def test_configurable_double_press_calls_home_assistant_once(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_call_service(
+        _client: HomeAssistantClient,
+        service: str,
+        entity_id: str = "",
+        data: dict | None = None,
+    ) -> tuple[bool, str]:
+        calls.append((service, entity_id, data))
+        return True, f"called {service}"
+
+    monkeypatch.setattr(HomeAssistantClient, "call_service", fake_call_service)
+    profile = DashboardProfileConfig(
+        name="wall",
+        pages=(DashboardPageConfig("CLIMATE", ()), DashboardPageConfig("ENERGY", ())),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token="test-token"),
+        profiles={"wall": profile},
+        devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
+    )
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+        saved = client.put(
+            "/api/v1/devices/X3-DEMO01/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "mode": "home_assistant",
+                        "button": "right",
+                        "gesture": "double",
+                        "action": {
+                            "type": "home_assistant",
+                            "service": "light.toggle",
+                            "entity_id": "light.showroom",
+                            "data": {"transition": 1},
+                        },
+                    }
+                ]
+            },
+        )
+        assert saved.status_code == 200
+
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Mode": "home_assistant",
+                "X-FlexDisplay-Button-Events": (
+                    "7,right,pressed,121000,double,home_assistant"
+                ),
+            },
+        )
+        assert response.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        assert calls == [("light.toggle", "light.showroom", {"transition": 1})]
+
+        # Firmware retries remain replay-safe.
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-DEMO01",
+                "X-FlexDisplay-Mode": "home_assistant",
+                "X-FlexDisplay-Button-Events": (
+                    "7,right,pressed,121000,double,home_assistant"
+                ),
+            },
+        )
+        assert len(calls) == 1
+        record = client.get("/api/v1/devices/X3-DEMO01").json()
+        assert record["last_button_gesture"] == "double"
+        assert record["last_button_action_result"] == "called light.toggle"
+        event = record["recent_button_events"][-1]
+        assert event["configured_action"]["service"] == "light.toggle"
+        assert event["configured_action"]["success"] is True
+
+
+def test_reader_mode_events_never_execute_home_assistant_mapping(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    calls: list[str] = []
+    monkeypatch.setattr(
+        HomeAssistantClient,
+        "call_service",
+        lambda _client, service, entity_id="", data=None: (
+            calls.append(service) is None,
+            f"called {service}",
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token="test-token"),
+    )
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        client.put(
+            "/api/v1/devices/X4-DEMO01/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "button": "confirm",
+                        "gesture": "long",
+                        "action": {
+                            "type": "home_assistant",
+                            "service": "scene.turn_on",
+                            "entity_id": "scene.showroom",
+                        },
+                    }
+                ]
+            },
+        )
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-Mode": "home_assistant",
+                "X-FlexDisplay-Button-Events": "9,confirm,pressed,555,long,reader",
+            },
+        )
+        assert response.status_code == 200
+        assert calls == []
+        record = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert record["recent_button_events"][-1]["mode"] == "reader"
+        assert record["last_button_action_result"] == "no action"
+
+
+def test_button_action_validation_reserves_recovery_and_admin_services(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
+        reserved = client.put(
+            "/api/v1/devices/X4-DEMO01/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "button": "power",
+                        "gesture": "long",
+                        "action": {"type": "none"},
+                    }
+                ]
+            },
+        )
+        assert reserved.status_code == 400
+
+        administrative = client.put(
+            "/api/v1/devices/X4-DEMO01/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "button": "confirm",
+                        "gesture": "long",
+                        "action": {
+                            "type": "home_assistant",
+                            "service": "homeassistant.restart",
+                        },
+                    }
+                ]
+            },
+        )
+        assert administrative.status_code == 400
+
+
 def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Path) -> None:
     state_path = tmp_path / "state.json"
     config = BridgeConfig(
@@ -736,6 +903,25 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
     with TestClient(create_app(config)) as client:
         studio = client.get("/api/v1/studio", headers=headers).json()
         assert [item["name"] for item in studio["profiles"]] == ["default", "showroom"]
+
+
+def test_dashboard_studio_uses_searchable_full_catalogue_entity_picker(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+
+    with TestClient(create_app(config)) as client:
+        response = client.get("/studio/")
+
+    assert response.status_code == 200
+    assert "function searchEntities" in response.text
+    assert "function bindEntityPicker" in response.text
+    assert "entity-picker-results" in response.text
+    assert "keep typing to narrow" in response.text
+    assert 'list="entityOptions"' not in response.text
 
 
 def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> None:

@@ -524,12 +524,76 @@ class DeviceStore:
                 known.add(identity)
                 record["last_button"] = received["button"]
                 record["last_button_action"] = received["action"]
+                record["last_button_gesture"] = received.get("gesture") or "short"
                 record["last_button_at"] = received["received_at"]
                 record["button_press_count"] = int(record.get("button_press_count", 0)) + 1
                 changed = True
             if changed:
                 record["recent_button_events"] = recent[-32:]
                 self._save()
+            return deepcopy(record)
+
+    def set_button_actions(
+        self,
+        device_id: str,
+        mappings: dict[str, dict[str, Any]],
+    ) -> dict[str, Any] | None:
+        """Replace a device's validated physical-button action overrides."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            if record.get("button_action_mappings") == mappings:
+                return deepcopy(record)
+            record["button_action_mappings"] = deepcopy(mappings)
+            record["button_actions_updated_at"] = utc_now()
+            self._save()
+            return deepcopy(record)
+
+    def record_button_action_result(
+        self,
+        device_id: str,
+        event: dict[str, Any],
+        action: dict[str, Any],
+        success: bool,
+        detail: str,
+    ) -> dict[str, Any] | None:
+        """Attach an execution result to a recorded gesture and its device summary."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            identity = (
+                int(event.get("sequence") or 0),
+                str(event.get("button") or ""),
+                int(event.get("uptime_ms") or 0),
+            )
+            result = {
+                "type": str(action.get("type") or "none"),
+                "source": str(action.get("source") or "default"),
+                "success": success,
+                "detail": detail[:240],
+                "executed_at": utc_now(),
+            }
+            if action.get("command"):
+                result["command"] = action["command"]
+            if action.get("service"):
+                result["service"] = action["service"]
+            if action.get("entity_id"):
+                result["entity_id"] = action["entity_id"]
+            for recent in reversed(record.get("recent_button_events") or []):
+                recent_identity = (
+                    int(recent.get("sequence") or 0),
+                    str(recent.get("button") or ""),
+                    int(recent.get("uptime_ms") or 0),
+                )
+                if recent_identity == identity:
+                    recent["configured_action"] = result
+                    break
+            record["last_button_action_result"] = detail[:240]
+            record["last_button_action_success"] = success
+            record["last_button_action_at"] = result["executed_at"]
+            self._save()
             return deepcopy(record)
 
     def get(self, device_id: str) -> dict[str, Any] | None:

@@ -279,3 +279,59 @@ class HomeAssistantClient:
             return entities, ""
         except (requests.RequestException, ValueError) as exc:
             return [], f"Home Assistant request failed: {exc}"
+
+    def service_catalog(self) -> tuple[list[str], str]:
+        """Return callable domain.service names for Dashboard Studio."""
+        if not self.config.token:
+            return [], "HA token not configured"
+        try:
+            response = self.session.get(
+                f"{self.config.base_url}/api/services",
+                headers=self._headers(),
+                timeout=self.config.timeout_seconds,
+                verify=self.config.verify_tls,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if not isinstance(payload, list):
+                raise ValueError("Home Assistant returned an invalid service catalogue")
+            services: list[str] = []
+            for domain in payload:
+                if not isinstance(domain, dict):
+                    continue
+                domain_name = str(domain.get("domain") or "")
+                domain_services = domain.get("services")
+                if not domain_name or not isinstance(domain_services, dict):
+                    continue
+                services.extend(f"{domain_name}.{service}" for service in domain_services)
+            return sorted(services), ""
+        except (requests.RequestException, ValueError) as exc:
+            return [], f"Home Assistant service request failed: {exc}"
+
+    def call_service(
+        self,
+        service: str,
+        entity_id: str = "",
+        data: dict[str, Any] | None = None,
+    ) -> tuple[bool, str]:
+        """Call one pre-validated Home Assistant service."""
+        if not self.config.token:
+            return False, "HA token not configured"
+        if "." not in service:
+            return False, "Invalid Home Assistant service"
+        domain, service_name = service.split(".", 1)
+        payload = dict(data or {})
+        if entity_id:
+            payload["entity_id"] = entity_id
+        try:
+            response = self.session.post(
+                f"{self.config.base_url}/api/services/{domain}/{service_name}",
+                headers=self._headers(),
+                json=payload,
+                timeout=self.config.timeout_seconds,
+                verify=self.config.verify_tls,
+            )
+            response.raise_for_status()
+            return True, f"called {service}"
+        except requests.RequestException as exc:
+            return False, f"Home Assistant service failed: {exc}"

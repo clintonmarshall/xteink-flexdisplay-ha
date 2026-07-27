@@ -64,9 +64,12 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
                     "type": "button_pressed",
                     "button": event.get("button"),
                     "action": event.get("action"),
+                    "gesture": event.get("gesture") or "short",
+                    "mode": event.get("mode") or "home_assistant",
                     "sequence": event.get("sequence"),
                     "device_uptime_ms": event.get("uptime_ms"),
                     "received_at": event.get("received_at"),
+                    "configured_action": event.get("configured_action"),
                 },
             )
 

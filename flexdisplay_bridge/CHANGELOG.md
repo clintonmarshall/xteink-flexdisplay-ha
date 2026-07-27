@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.17.0
+
+- Replaced the browser-native Dashboard Studio entity list with a searchable
+  full-catalogue picker that remains usable on large Home Assistant installs.
+- Added per-device short-, double-, and long-press mappings for Confirm, Left,
+  Right, Up, and Down in Home Assistant mode.
+- Added Dashboard Studio controls for default/no-op behavior, page navigation,
+  entity toggle/on/off, scene/script/automation activation, and validated
+  Home Assistant service calls.
+- Preserved short-arrow page navigation by default and kept Back and Power
+  reserved for escape, wake, and recovery.
+- Added gesture mode tagging so button presses from Reader, TRMNL, OpenDisplay,
+  or Photo Frame cannot be replayed later as Home Assistant actions.
+- Added replay-safe action execution results to the device API, native event
+  attributes, and Home Assistant sensors.
+- Bundled the runtime-detected X3/X4 FlexDisplay `0.17.0` firmware manifest.
+
 ## 0.13.0
 
 - Added first-class Dashboard Studio image tiles sourced from Home Assistant

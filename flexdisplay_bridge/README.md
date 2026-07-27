@@ -17,6 +17,12 @@ After installation:
 The app automatically uses Home Assistant's internal Supervisor API token. It
 does not require a long-lived access token in its options.
 
+FlexDisplay `0.17.0` adds per-device physical-button actions in Dashboard
+Studio. Confirm and the direction buttons support short, double, and long
+presses for dashboard navigation, entity controls, scenes, scripts,
+automations, and validated Home Assistant services. Back and Power remain
+reserved recovery controls.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

@@ -141,6 +141,16 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("last_button") or "none",
     ),
     FlexDisplaySensorDescription(
+        key="last_button_gesture",
+        translation_key="last_button_gesture",
+        value_fn=lambda record: record.get("last_button_gesture") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_button_action_result",
+        translation_key="last_button_action_result",
+        value_fn=lambda record: record.get("last_button_action_result") or "none",
+    ),
+    FlexDisplaySensorDescription(
         key="last_button_at",
         translation_key="last_button_at",
         device_class=SensorDeviceClass.TIMESTAMP,

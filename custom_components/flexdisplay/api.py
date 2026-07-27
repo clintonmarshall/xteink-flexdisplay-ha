@@ -78,3 +78,19 @@ class FlexDisplayApiClient:
     async def provision(self, device_id: str, assignment: dict[str, Any]) -> None:
         """Update the server-side assignment for a device."""
         await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)
+
+    async def button_actions(self, device_id: str) -> dict[str, Any]:
+        """Return physical-button action mappings for one device."""
+        return await self._request("GET", f"/api/v1/devices/{device_id}/button-actions")
+
+    async def set_button_actions(
+        self,
+        device_id: str,
+        mappings: list[dict[str, Any]],
+    ) -> dict[str, Any]:
+        """Replace physical-button action mappings for one device."""
+        return await self._request(
+            "PUT",
+            f"/api/v1/devices/{device_id}/button-actions",
+            json={"mappings": mappings},
+        )

@@ -46,6 +46,31 @@ Saving a profile queues a refresh for every device currently assigned to it.
 Sleeping devices receive that refresh on their next scheduled or physical
 button wake.
 
+## Physical-button actions
+
+Firmware, Bridge, and integration `0.17.0` classify short, double, and long
+presses in Home Assistant mode. Open **Physical-button actions** in Dashboard
+Studio, choose a fleet device, button, gesture, and action, then save it.
+
+Available actions are:
+
+- next, previous, overview, or refresh dashboard navigation;
+- toggle, turn on, or turn off a Home Assistant entity;
+- activate a `scene.*`, `script.*`, or `automation.*` entity;
+- call a selected `domain.service` with optional JSON service data;
+- do nothing, or restore the compatibility-preserving default.
+
+Short Right/Down presses default to the next page and short Left/Up presses
+default to the previous page. Confirm has no default remote action. Back and
+Power are deliberately reserved for escape, wake, and recovery and cannot be
+remapped.
+
+Mappings apply only while the device is in Home Assistant mode. Each gesture is
+tagged with its originating mode before being buffered on SD, so a press made
+in Reader, TRMNL, OpenDisplay, or Photo Frame cannot execute later when the
+device checks into the Bridge. Replayed HTTP requests are de-duplicated by the
+event sequence, button, and device uptime before any service call.
+
 Options:
 
 - `dashboard_title`: heading rendered on each e-paper screen.

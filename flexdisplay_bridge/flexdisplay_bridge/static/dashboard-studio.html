@@ -28,8 +28,8 @@
       color: var(--ink);
       font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, select { font: inherit; }
-    button, select, input {
+    button, input, select, textarea { font: inherit; }
+    button, select, input, textarea {
       min-height: 38px;
       border: 1px solid var(--line);
       border-radius: 9px;
@@ -42,7 +42,7 @@
       font-weight: 650;
     }
     button:hover { border-color: #607383; background: #17232e; }
-    button:focus-visible, input:focus-visible, select:focus-visible {
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
@@ -51,7 +51,8 @@
     button.danger { color: var(--danger); }
     button.icon { width: 38px; padding: 0; }
     button:disabled { cursor: not-allowed; opacity: .45; }
-    input, select { width: 100%; padding: 8px 10px; }
+    input, select, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 78px; resize: vertical; }
     label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .035em; }
     .app {
       display: grid;
@@ -185,6 +186,31 @@
     .tile-body .field-grid { gap: 8px; }
     .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .url-source[hidden] { display: none; }
     .rule-fields[hidden] { display: none; }
+    .action-fields[hidden] { display: none; }
+    .entity-picker { position: relative; min-width: 0; }
+    .entity-picker-results {
+      position: absolute; z-index: 30; top: calc(100% + 5px); right: 0; left: 0;
+      max-height: min(390px, 55vh); overflow: auto;
+      border: 1px solid #536573; border-radius: 10px; background: #0b131a;
+      box-shadow: 0 18px 42px rgba(0, 0, 0, .48);
+    }
+    .entity-picker-results[hidden] { display: none; }
+    .entity-result {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px;
+      padding: 9px 10px; border-bottom: 1px solid var(--line); cursor: pointer;
+    }
+    .entity-result:last-of-type { border-bottom: 0; }
+    .entity-result:hover, .entity-result.active { background: rgba(103, 214, 193, .12); }
+    .entity-result-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--ink); font-weight: 700; }
+    .entity-result-id { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 10px/1.3 ui-monospace, SFMono-Regular, Menlo, monospace; }
+    .entity-result-state { grid-row: 1 / 3; grid-column: 2; align-self: center; max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--accent-2); font-size: 11px; }
+    .entity-result-count { padding: 7px 10px; color: var(--muted); font-size: 10px; text-align: center; }
+    .action-summary { display: grid; gap: 6px; margin-top: 12px; }
+    .action-summary-row {
+      display: flex; justify-content: space-between; gap: 8px;
+      padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px;
+      background: #0d151d; font-size: 11px;
+    }
     .rule-fields { display: grid; gap: 10px; margin-top: 10px; }
     .rule-badge {
       display: inline-block; margin-left: 5px; padding: 1px 6px;
@@ -365,7 +391,7 @@
           <span class="small muted">Overnight ranges such as 22:00–06:00 are supported. The device timezone is used.</span>
         </div>
         <div id="conditionFields" class="rule-fields" hidden>
-          <label>Trigger entity<input id="conditionEntity" list="entityOptions" placeholder="binary_sensor.front_door"></label>
+          <label>Trigger entity<input id="conditionEntity" placeholder="Search entity name or ID…" autocomplete="off"></label>
           <div class="field-grid">
             <label>Condition
               <select id="conditionOperator">
@@ -414,10 +440,63 @@
         <button id="assignProfile" class="primary" style="width:100%; margin-top:10px">Assign profile and refresh</button>
         <p class="small muted" style="margin:10px 0 0">Sleeping devices apply the profile at their next scheduled or physical-button wake.</p>
       </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div><h2>Physical-button actions</h2><span class="small muted">Per-device · Home Assistant mode</span></div>
+        </div>
+        <label>Device<select id="buttonActionDevice"></select></label>
+        <div class="field-grid" style="margin-top:10px">
+          <label>Button
+            <select id="buttonActionButton">
+              <option value="confirm">Confirm</option>
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+              <option value="up">Up</option>
+              <option value="down">Down</option>
+            </select>
+          </label>
+          <label>Gesture
+            <select id="buttonActionGesture">
+              <option value="short">Short press</option>
+              <option value="double">Double press</option>
+              <option value="long">Long press</option>
+            </select>
+          </label>
+        </div>
+        <label style="margin-top:10px">Action
+          <select id="buttonActionType">
+            <option value="default">Default behaviour</option>
+            <option value="none">Do nothing</option>
+            <option value="navigation_next">Next dashboard page</option>
+            <option value="navigation_previous">Previous dashboard page</option>
+            <option value="navigation_overview">Dashboard overview</option>
+            <option value="navigation_refresh">Refresh current page</option>
+            <option value="toggle">Toggle Home Assistant entity</option>
+            <option value="turn_on">Turn entity on</option>
+            <option value="turn_off">Turn entity off</option>
+            <option value="activate">Run scene, script, or automation</option>
+            <option value="service">Call Home Assistant service</option>
+          </select>
+        </label>
+        <div id="buttonEntityFields" class="action-fields" style="margin-top:10px" hidden>
+          <label>Target entity<input id="buttonActionEntity" placeholder="Search entity name or ID…" autocomplete="off"></label>
+        </div>
+        <div id="buttonServiceFields" class="action-fields" style="margin-top:10px" hidden>
+          <label>Service<input id="buttonActionService" list="serviceOptions" placeholder="light.toggle"></label>
+          <label style="margin-top:10px">Service data (optional JSON)<textarea id="buttonActionData" spellcheck="false" placeholder='{"brightness_pct": 50}'></textarea></label>
+        </div>
+        <div class="button-row" style="margin-top:10px">
+          <button id="saveButtonAction" class="primary">Save action</button>
+          <button id="clearButtonActions">Reset all</button>
+        </div>
+        <div id="buttonActionSummary" class="action-summary"></div>
+        <p class="small muted" style="margin:10px 0 0">Back and Power stay reserved for escape, wake, and recovery. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
+      </div>
     </aside>
   </div>
 
-  <datalist id="entityOptions"></datalist>
+  <datalist id="serviceOptions"></datalist>
   <dialog id="profileDialog">
     <form id="profileForm" class="dialog-body" method="dialog">
       <div><div class="eyebrow">Create profile</div><h2 style="font-size:20px">Start a new dashboard</h2></div>
@@ -442,6 +521,8 @@
       profiles: [],
       devices: [],
       entities: [],
+      services: [],
+      buttonMappings: [],
       profile: null,
       pageIndex: 0,
       model: "X4",
@@ -516,6 +597,8 @@
         chooseProfile(state.profile?.name || state.profiles[0]?.name);
         $("#saveState").textContent = "Saved";
         loadEntities();
+        loadServices();
+        if ($("#buttonActionDevice").value) loadButtonActions($("#buttonActionDevice").value);
       } catch (error) {
         $("#saveState").textContent = "Unavailable";
         if (!String(error.message).includes("API key")) toast(error.message, true);
@@ -527,14 +610,8 @@
         const response = await api("studio/entities");
         const payload = await response.json();
         state.entities = payload.entities || [];
-        const list = $("#entityOptions");
-        list.innerHTML = "";
-        state.entities.forEach((entity) => {
-          const option = document.createElement("option");
-          option.value = entity.entity_id;
-          option.label = `${entity.label} · ${entity.state}${entity.unit ? ` ${entity.unit}` : ""}`;
-          list.append(option);
-        });
+        bindEntityPicker($("#conditionEntity"));
+        bindEntityPicker($("#buttonActionEntity"));
         renderTiles();
         if (payload.error) toast(`Entity catalogue: ${payload.error}`, true);
       } catch (error) {
@@ -542,8 +619,134 @@
       }
     }
 
+    function searchEntities(query, allowedDomains = []) {
+      const needle = query.trim().toLowerCase();
+      const preferred = ["sensor", "binary_sensor", "light", "switch", "climate", "weather", "camera", "image", "scene", "script", "automation"];
+      const matches = [];
+      for (const entity of state.entities) {
+        if (allowedDomains.length && !allowedDomains.includes(entity.domain)) continue;
+        const entityId = String(entity.entity_id || "").toLowerCase();
+        const label = String(entity.label || entity.entity_id || "").toLowerCase();
+        const value = `${entity.state || ""} ${entity.unit || ""}`.toLowerCase();
+        let score = preferred.indexOf(entity.domain);
+        if (score < 0) score = preferred.length + 1;
+        if (needle) {
+          if (entityId === needle) score = 0;
+          else if (entityId.startsWith(needle)) score = 10;
+          else if (label.startsWith(needle)) score = 20;
+          else if (entityId.includes(needle)) score = 30;
+          else if (label.includes(needle)) score = 40;
+          else if (value.includes(needle)) score = 50;
+          else continue;
+        }
+        matches.push({entity, score});
+      }
+      matches.sort((left, right) =>
+        left.score - right.score ||
+        String(left.entity.label || left.entity.entity_id).localeCompare(
+          String(right.entity.label || right.entity.entity_id)
+        )
+      );
+      return {total: matches.length, items: matches.slice(0, 80).map((match) => match.entity)};
+    }
+
+    function bindEntityPicker(input, allowedDomains = []) {
+      if (!input || input.dataset.entityPickerBound) return;
+      input.dataset.entityPickerBound = "true";
+      input.setAttribute("role", "combobox");
+      input.setAttribute("aria-autocomplete", "list");
+      input.setAttribute("aria-expanded", "false");
+
+      const wrapper = document.createElement("div");
+      wrapper.className = "entity-picker";
+      input.parentNode.insertBefore(wrapper, input);
+      wrapper.append(input);
+      const results = document.createElement("div");
+      results.className = "entity-picker-results";
+      results.hidden = true;
+      results.setAttribute("role", "listbox");
+      wrapper.append(results);
+      let activeIndex = -1;
+      let visibleEntities = [];
+
+      const setActive = (index) => {
+        const rows = [...results.querySelectorAll(".entity-result")];
+        if (!rows.length) return;
+        activeIndex = Math.max(0, Math.min(index, rows.length - 1));
+        rows.forEach((row, rowIndex) => row.classList.toggle("active", rowIndex === activeIndex));
+        rows[activeIndex].scrollIntoView({block: "nearest"});
+      };
+
+      const selectEntity = (entity) => {
+        input.value = entity.entity_id;
+        input.dispatchEvent(new Event("change", {bubbles: true}));
+        results.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+      };
+
+      const renderResults = (showBrowseList = false) => {
+        const match = searchEntities(showBrowseList ? "" : input.value, allowedDomains);
+        visibleEntities = match.items;
+        activeIndex = -1;
+        results.innerHTML = visibleEntities.length
+          ? visibleEntities.map((entity, index) => `
+              <div class="entity-result" role="option" data-index="${index}">
+                <span class="entity-result-label">${escapeHtml(entity.label || entity.entity_id)}</span>
+                <span class="entity-result-id">${escapeHtml(entity.entity_id)}</span>
+                <span class="entity-result-state">${escapeHtml(entity.state || "--")}${entity.unit ? ` ${escapeHtml(entity.unit)}` : ""}</span>
+              </div>
+            `).join("") + `<div class="entity-result-count">Showing ${visibleEntities.length} of ${match.total} matches · keep typing to narrow</div>`
+          : '<div class="empty" style="margin:8px">No matching Home Assistant entities.</div>';
+        results.hidden = false;
+        input.setAttribute("aria-expanded", "true");
+        results.querySelectorAll(".entity-result").forEach((row) => {
+          row.addEventListener("mousedown", (event) => {
+            event.preventDefault();
+            selectEntity(visibleEntities[Number(row.dataset.index)]);
+          });
+        });
+      };
+
+      input.addEventListener("focus", () => renderResults(true));
+      input.addEventListener("input", () => renderResults(false));
+      input.addEventListener("keydown", (event) => {
+        if (event.key === "ArrowDown") {
+          event.preventDefault();
+          if (results.hidden) renderResults(false);
+          setActive(activeIndex + 1);
+        } else if (event.key === "ArrowUp") {
+          event.preventDefault();
+          setActive(activeIndex <= 0 ? visibleEntities.length - 1 : activeIndex - 1);
+        } else if (event.key === "Enter" && activeIndex >= 0) {
+          event.preventDefault();
+          selectEntity(visibleEntities[activeIndex]);
+        } else if (event.key === "Escape") {
+          results.hidden = true;
+          input.setAttribute("aria-expanded", "false");
+        }
+      });
+      input.addEventListener("blur", () => setTimeout(() => {
+        results.hidden = true;
+        input.setAttribute("aria-expanded", "false");
+      }, 120));
+    }
+
+    async function loadServices() {
+      try {
+        const response = await api("studio/services");
+        const payload = await response.json();
+        state.services = payload.services || [];
+        $("#serviceOptions").innerHTML = state.services.map((service) =>
+          `<option value="${escapeHtml(service)}"></option>`
+        ).join("");
+        if (payload.error) toast(`Service catalogue: ${payload.error}`, true);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
     function populateDevices() {
-      for (const id of ["deviceSelect", "assignDevice"]) {
+      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice"]) {
         const select = $(`#${id}`);
         const previous = select.value;
         select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
@@ -554,6 +757,144 @@
           select.append(option);
         });
         if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+      }
+    }
+
+    async function loadButtonActions(deviceId) {
+      if (!deviceId) {
+        state.buttonMappings = [];
+        return renderButtonAction();
+      }
+      try {
+        const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`);
+        const payload = await response.json();
+        state.buttonMappings = payload.mappings || [];
+        renderButtonAction();
+      } catch (error) {
+        state.buttonMappings = [];
+        renderButtonAction();
+        toast(error.message, true);
+      }
+    }
+
+    function selectedButtonMapping() {
+      const button = $("#buttonActionButton").value;
+      const gesture = $("#buttonActionGesture").value;
+      return state.buttonMappings.find((mapping) =>
+        mapping.button === button && mapping.gesture === gesture
+      );
+    }
+
+    function actionPreset(action) {
+      if (!action) return "default";
+      if (action.type === "none") return "none";
+      if (action.type === "navigation") return `navigation_${action.command}`;
+      if (action.type !== "home_assistant") return "default";
+      if (action.service.endsWith(".toggle")) return "toggle";
+      if (action.service === "automation.trigger") return "activate";
+      if (
+        action.service.endsWith(".turn_on") &&
+        ["scene", "script"].includes((action.entity_id || "").split(".", 1)[0])
+      ) return "activate";
+      if (action.service.endsWith(".turn_on")) return "turn_on";
+      if (action.service.endsWith(".turn_off")) return "turn_off";
+      return "service";
+    }
+
+    function actionLabel(mapping) {
+      const action = mapping.action;
+      if (action.type === "none") return "Do nothing";
+      if (action.type === "navigation") return titleCase(action.command);
+      return `${action.service}${action.entity_id ? ` · ${action.entity_id}` : ""}`;
+    }
+
+    function renderButtonAction() {
+      const mapping = selectedButtonMapping();
+      const action = mapping?.action;
+      $("#buttonActionType").value = actionPreset(action);
+      $("#buttonActionEntity").value = action?.entity_id || "";
+      $("#buttonActionService").value = action?.service || "";
+      $("#buttonActionData").value = action?.data ? JSON.stringify(action.data, null, 2) : "";
+      toggleButtonActionFields();
+      $("#buttonActionSummary").innerHTML = state.buttonMappings.length
+        ? state.buttonMappings.map((item) => `
+            <div class="action-summary-row">
+              <span>${titleCase(item.button)} · ${titleCase(item.gesture)}</span>
+              <span class="muted">${escapeHtml(actionLabel(item))}</span>
+            </div>
+          `).join("")
+        : '<div class="empty">No overrides. Short arrows use normal page navigation.</div>';
+    }
+
+    function toggleButtonActionFields() {
+      const type = $("#buttonActionType").value;
+      const entityRequired = ["toggle", "turn_on", "turn_off", "activate", "service"].includes(type);
+      $("#buttonEntityFields").hidden = !entityRequired;
+      $("#buttonServiceFields").hidden = type !== "service";
+    }
+
+    function buildButtonAction() {
+      const type = $("#buttonActionType").value;
+      if (type === "default") return null;
+      if (type === "none") return {type: "none"};
+      if (type.startsWith("navigation_")) {
+        return {type: "navigation", command: type.replace("navigation_", "")};
+      }
+      const entityId = $("#buttonActionEntity").value.trim().toLowerCase();
+      if (!entityId.includes(".")) throw new Error("Choose a valid Home Assistant target entity.");
+      const domain = entityId.split(".", 1)[0];
+      let service;
+      if (type === "toggle") service = `${domain}.toggle`;
+      if (type === "turn_on") service = `${domain}.turn_on`;
+      if (type === "turn_off") service = `${domain}.turn_off`;
+      if (type === "activate") {
+        if (domain === "automation") service = "automation.trigger";
+        else if (["scene", "script"].includes(domain)) service = `${domain}.turn_on`;
+        else throw new Error("Run supports scene, script, or automation entities.");
+      }
+      if (type === "service") service = $("#buttonActionService").value.trim().toLowerCase();
+      if (!service?.includes(".")) throw new Error("Choose a valid domain.service.");
+      let data = {};
+      const encodedData = $("#buttonActionData").value.trim();
+      if (encodedData) {
+        try { data = JSON.parse(encodedData); }
+        catch (_) { throw new Error("Service data must be valid JSON."); }
+        if (!data || Array.isArray(data) || typeof data !== "object") {
+          throw new Error("Service data must be a JSON object.");
+        }
+      }
+      return {
+        type: "home_assistant",
+        service,
+        entity_id: entityId,
+        ...(Object.keys(data).length ? {data} : {}),
+      };
+    }
+
+    async function saveButtonAction(resetAll = false) {
+      const deviceId = $("#buttonActionDevice").value;
+      if (!deviceId) return toast("Select a device first.", true);
+      try {
+        let mappings = resetAll ? [] : clone(state.buttonMappings);
+        if (!resetAll) {
+          const button = $("#buttonActionButton").value;
+          const gesture = $("#buttonActionGesture").value;
+          mappings = mappings.filter((mapping) =>
+            mapping.button !== button || mapping.gesture !== gesture
+          );
+          const action = buildButtonAction();
+          if (action) mappings.push({mode: "home_assistant", button, gesture, action});
+        }
+        const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`, {
+          method: "PUT",
+          body: {mappings},
+        });
+        const payload = await response.json();
+        state.buttonMappings = payload.mappings || [];
+        renderButtonAction();
+        toast(resetAll ? "All button actions reset to defaults." : "Physical-button action saved.");
+      } catch (error) {
+        toast(error.message, true);
       }
     }
 
@@ -651,7 +992,7 @@
           <div class="tile-head"><h3>Tile ${index + 1}</h3><button class="icon danger remove-tile" title="Remove tile">×</button></div>
           <div class="tile-body">
             <label class="entity-source" ${isImage && imageSource === "url" ? "hidden" : ""}>${isImage ? "Home Assistant image or camera entity" : "Home Assistant entity"}
-              <input class="tile-entity" list="entityOptions" value="${escapeHtml(tile.entity_id)}" placeholder="sensor.example">
+              <input class="tile-entity" value="${escapeHtml(tile.entity_id)}" placeholder="Search entity name or ID…" autocomplete="off">
             </label>
             <div class="image-fields" ${isImage ? "" : "hidden"}>
               <div class="field-grid">
@@ -718,6 +1059,10 @@
         changed();
         renderTiles();
       });
+      bindEntityPicker(
+        card.querySelector(".tile-entity"),
+        tile.style === "image" ? ["camera", "image"] : []
+      );
       card.querySelector(".tile-image-source").addEventListener("change", (event) => {
         if (event.target.value === "url") {
           tile.entity_id = `image_url.page_${state.pageIndex + 1}_tile_${index + 1}`;
@@ -1069,6 +1414,14 @@
       changed();
     });
     $("#assignProfile").addEventListener("click", assignProfile);
+    $("#buttonActionDevice").addEventListener("change", (event) => loadButtonActions(event.target.value));
+    $("#buttonActionButton").addEventListener("change", renderButtonAction);
+    $("#buttonActionGesture").addEventListener("change", renderButtonAction);
+    $("#buttonActionType").addEventListener("change", toggleButtonActionFields);
+    $("#saveButtonAction").addEventListener("click", () => saveButtonAction(false));
+    $("#clearButtonActions").addEventListener("click", () => {
+      if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
+    });
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       if (selected?.model) setModel(selected.model.toUpperCase().includes("4") ? "X4" : "X3");
