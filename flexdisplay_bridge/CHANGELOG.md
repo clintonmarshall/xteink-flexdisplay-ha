@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.12.0
+
+- Added priority alert pages driven by Home Assistant entity state, including
+  equals, threshold, on/off, contains, and unavailable conditions.
+- Added optional alert expiry based on the entity's latest state change, so a
+  persistent condition can restore the normal playlist and rearm when it
+  changes again.
+- Added timezone-aware scheduled page sets with overnight-window support.
+- Added Dashboard Studio controls and doorbell, alarm, daytime energy,
+  appliance-running, and weather-alert starter templates.
+- Added active page-set telemetry through the bridge device API and response
+  headers.
+
 ## 0.11.1
 
 - Fixed the Home Assistant ingress entry so Dashboard Studio opens at

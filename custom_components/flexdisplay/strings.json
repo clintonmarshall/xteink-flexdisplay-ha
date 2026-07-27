@@ -40,6 +40,9 @@
       "dashboard_page_number": {
         "name": "Dashboard page number"
       },
+      "dashboard_selection": {
+        "name": "Active page set"
+      },
       "pending_commands": {
         "name": "Pending commands"
       },

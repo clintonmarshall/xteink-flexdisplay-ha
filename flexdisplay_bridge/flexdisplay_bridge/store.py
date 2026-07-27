@@ -471,6 +471,7 @@ class DeviceStore:
         title: str,
         titles: list[str] | None = None,
         profile: str | None = None,
+        selection: str | None = None,
     ) -> dict[str, Any] | None:
         with self._lock:
             record = self._state["devices"].get(device_id)
@@ -485,6 +486,8 @@ class DeviceStore:
                 record["dashboard_pages"] = titles
             if profile is not None:
                 record["dashboard_profile"] = profile
+            if selection is not None:
+                record["dashboard_selection"] = selection
             if changed or not record.get("dashboard_page_changed_at"):
                 record["dashboard_page_changed_at"] = utc_now()
             self._save()

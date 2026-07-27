@@ -184,6 +184,13 @@
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
     .range-fields[hidden] { display: none; }
+    .rule-fields[hidden] { display: none; }
+    .rule-fields { display: grid; gap: 10px; margin-top: 10px; }
+    .rule-badge {
+      display: inline-block; margin-left: 5px; padding: 1px 6px;
+      border: 1px solid var(--line); border-radius: 999px;
+      color: var(--accent-2); font-size: 9px; font-weight: 800; text-transform: uppercase;
+    }
     .empty {
       padding: 16px; border: 1px dashed var(--line); border-radius: 10px;
       color: var(--muted); text-align: center; font-size: 12px;
@@ -328,6 +335,73 @@
 
       <div class="section">
         <div class="section-head">
+          <div><h2>State-aware behaviour</h2><span class="small muted">Choose when this page becomes active</span></div>
+        </div>
+        <div class="field-grid">
+          <label>Page type
+            <select id="pageActivationType">
+              <option value="always">Normal playlist</option>
+              <option value="schedule">Scheduled page set</option>
+              <option value="condition">Priority alert</option>
+            </select>
+          </label>
+          <label>Start from template
+            <select id="pageTemplate">
+              <option value="">Choose…</option>
+              <option value="doorbell">Doorbell alert</option>
+              <option value="alarm">Alarm status</option>
+              <option value="energy">Daytime energy</option>
+              <option value="appliance">Appliance running</option>
+              <option value="weather_alert">Weather alert</option>
+            </select>
+          </label>
+        </div>
+        <button id="applyTemplate" style="width:100%; margin-top:10px">Apply template to this page</button>
+        <div id="scheduleFields" class="rule-fields" hidden>
+          <div class="field-grid">
+            <label>Active from<input id="scheduleStart" type="time"></label>
+            <label>Active until<input id="scheduleEnd" type="time"></label>
+          </div>
+          <span class="small muted">Overnight ranges such as 22:00–06:00 are supported. The device timezone is used.</span>
+        </div>
+        <div id="conditionFields" class="rule-fields" hidden>
+          <label>Trigger entity<input id="conditionEntity" list="entityOptions" placeholder="binary_sensor.front_door"></label>
+          <div class="field-grid">
+            <label>Condition
+              <select id="conditionOperator">
+                <option value="equals">Equals</option>
+                <option value="not_equals">Does not equal</option>
+                <option value="above">Above</option>
+                <option value="below">Below</option>
+                <option value="contains">Contains</option>
+                <option value="on">Is on/open/active</option>
+                <option value="off">Is off/closed/clear</option>
+                <option value="unavailable">Is unavailable</option>
+              </select>
+            </label>
+            <label>Compare value<input id="conditionValue" placeholder="on, 30, warning…"></label>
+          </div>
+          <div class="field-grid">
+            <label>Priority<input id="conditionPriority" type="number" min="0" max="100" step="1"></label>
+            <label>Expire after
+              <select id="conditionExpiry">
+                <option value="0">While condition is active</option>
+                <option value="60">1 minute</option>
+                <option value="120">2 minutes</option>
+                <option value="300">5 minutes</option>
+                <option value="900">15 minutes</option>
+                <option value="3600">1 hour</option>
+                <option value="21600">6 hours</option>
+                <option value="86400">24 hours</option>
+              </select>
+            </label>
+          </div>
+          <span class="small muted">Higher-priority alerts appear first. Expired alerts rearm after the Home Assistant entity changes again.</span>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head">
           <div><h2>Tiles</h2><span class="small muted">Up to four per page</span></div>
           <button id="addTile">Add tile</button>
         </div>
@@ -407,13 +481,25 @@
       node.timer = setTimeout(() => node.className = "", 3200);
     }
 
+    function defaultActivation() {
+      return {
+        type: "always", entity_id: "", operator: "equals", value: "",
+        priority: 50, expires_after_seconds: 0, start: "06:00", end: "22:00",
+      };
+    }
+
     function defaultPage() {
-      return {title: "OVERVIEW", layout: "auto", entities: []};
+      return {title: "OVERVIEW", layout: "auto", activation: defaultActivation(), entities: []};
     }
 
     function normalizeProfile(profile) {
       const selected = clone(profile);
       selected.pages = selected.pages?.length ? selected.pages : [defaultPage()];
+      selected.pages = selected.pages.map((page) => ({
+        ...page,
+        activation: {...defaultActivation(), ...(page.activation || {})},
+        entities: page.entities || [],
+      }));
       selected.auto_rotate_seconds ||= 0;
       return selected;
     }
@@ -503,7 +589,7 @@
         <div class="page-item ${index === state.pageIndex ? "active" : ""}" data-page="${index}" tabindex="0">
           <span class="page-number">${index + 1}</span>
           <span class="page-meta">
-            <span class="page-title">${escapeHtml(page.title)}</span>
+            <span class="page-title">${escapeHtml(page.title)}${ruleBadge(page.activation)}</span>
             <span class="page-layout">${layoutLabel(page.layout)} · ${page.entities.length} tile${page.entities.length === 1 ? "" : "s"}</span>
           </span>
           <span aria-hidden="true">›</span>
@@ -529,6 +615,18 @@
       $("#previewTitle").textContent = `${state.profile.name} · ${page.title}`;
       $("#pageTitle").value = page.title;
       $("#pageLayout").value = page.layout || "auto";
+      const activation = {...defaultActivation(), ...(page.activation || {})};
+      page.activation = activation;
+      $("#pageActivationType").value = activation.type;
+      $("#scheduleStart").value = activation.start;
+      $("#scheduleEnd").value = activation.end;
+      $("#conditionEntity").value = activation.entity_id;
+      $("#conditionOperator").value = activation.operator;
+      $("#conditionValue").value = activation.value;
+      $("#conditionPriority").value = String(activation.priority);
+      $("#conditionExpiry").value = String(activation.expires_after_seconds);
+      if (!$("#conditionExpiry").value) $("#conditionExpiry").value = "0";
+      toggleRuleFields();
       $("#movePageUp").disabled = state.pageIndex === 0;
       $("#movePageDown").disabled = state.pageIndex === state.profile.pages.length - 1;
       $("#deletePage").disabled = state.profile.pages.length === 1;
@@ -714,7 +812,12 @@
     }
 
     function addPage() {
-      state.profile.pages.push({title: `PAGE ${state.profile.pages.length + 1}`, layout: "auto", entities: []});
+      state.profile.pages.push({
+        title: `PAGE ${state.profile.pages.length + 1}`,
+        layout: "auto",
+        activation: defaultActivation(),
+        entities: [],
+      });
       state.pageIndex = state.profile.pages.length - 1;
       changed();
       renderPages();
@@ -780,6 +883,61 @@
       return "auto";
     }
 
+    function toggleRuleFields() {
+      const type = currentPage().activation.type;
+      $("#scheduleFields").hidden = type !== "schedule";
+      $("#conditionFields").hidden = type !== "condition";
+      const operator = currentPage().activation.operator;
+      $("#conditionValue").disabled = ["on", "off", "unavailable"].includes(operator);
+    }
+
+    function ruleBadge(activation = {}) {
+      if (activation.type === "condition") return '<span class="rule-badge">Alert</span>';
+      if (activation.type === "schedule") return '<span class="rule-badge">Schedule</span>';
+      return "";
+    }
+
+    function applyPageTemplate() {
+      const template = $("#pageTemplate").value;
+      if (!template) return toast("Choose a template first.", true);
+      const templates = {
+        doorbell: {
+          title: "FRONT DOOR", layout: "single",
+          activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.doorbell", operator:"on", priority:100, expires_after_seconds:120},
+          entities: [{entity_id:"binary_sensor.doorbell", label:"Doorbell", unit:"", icon:"alert", style:"value", minimum:0, maximum:100}],
+        },
+        alarm: {
+          title: "ALARM", layout: "single",
+          activation: {...defaultActivation(), type:"condition", entity_id:"alarm_control_panel.home_alarm", operator:"not_equals", value:"disarmed", priority:95},
+          entities: [{entity_id:"alarm_control_panel.home_alarm", label:"Alarm System", unit:"", icon:"alert", style:"value", minimum:0, maximum:100}],
+        },
+        energy: {
+          title: "ENERGY", layout: "rows",
+          activation: {...defaultActivation(), type:"schedule", start:"06:00", end:"22:00"},
+          entities: [
+            {entity_id:"sensor.site_power", label:"Site Power", unit:"kW", icon:"power", style:"value", minimum:0, maximum:20},
+            {entity_id:"sensor.solar_power", label:"Solar", unit:"kW", icon:"solar", style:"history", minimum:0, maximum:20},
+          ],
+        },
+        appliance: {
+          title: "APPLIANCE", layout: "single",
+          activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.washing_machine_running", operator:"on", priority:40, expires_after_seconds:21600},
+          entities: [{entity_id:"binary_sensor.washing_machine_running", label:"Washing Machine", unit:"", icon:"home", style:"value", minimum:0, maximum:100}],
+        },
+        weather_alert: {
+          title: "WEATHER ALERT", layout: "single",
+          activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.weather_alert", operator:"on", priority:90, expires_after_seconds:3600},
+          entities: [{entity_id:"binary_sensor.weather_alert", label:"Weather Alert", unit:"", icon:"weather", style:"value", minimum:0, maximum:100}],
+        },
+      };
+      state.profile.pages[state.pageIndex] = clone(templates[template]);
+      $("#pageTemplate").value = "";
+      changed();
+      renderPages();
+      renderInspector();
+      toast("Template applied. Replace the example entity IDs with your own if needed.");
+    }
+
     function escapeHtml(value) {
       return String(value ?? "").replace(/[&<>"']/g, (character) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
@@ -840,6 +998,26 @@
       currentPage().layout = event.target.value;
       changed(); renderPages();
     });
+    $("#pageActivationType").addEventListener("change", (event) => {
+      currentPage().activation.type = event.target.value;
+      changed(); toggleRuleFields(); renderPages();
+    });
+    for (const [selector, field] of [
+      ["#scheduleStart", "start"], ["#scheduleEnd", "end"],
+      ["#conditionEntity", "entity_id"], ["#conditionOperator", "operator"],
+      ["#conditionValue", "value"], ["#conditionPriority", "priority"],
+      ["#conditionExpiry", "expires_after_seconds"],
+    ]) {
+      $(selector).addEventListener("change", (event) => {
+        currentPage().activation[field] = ["priority", "expires_after_seconds"].includes(field)
+          ? Number(event.target.value)
+          : event.target.value;
+        changed();
+        if (field === "operator") toggleRuleFields();
+        renderPages();
+      });
+    }
+    $("#applyTemplate").addEventListener("click", applyPageTemplate);
     $("#autoRotate").addEventListener("change", (event) => {
       state.profile.auto_rotate_seconds = Number(event.target.value);
       changed();

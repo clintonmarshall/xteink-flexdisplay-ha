@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.11.1"
+version: "0.12.0"
 slug: flexdisplay_bridge
 description: Render Home Assistant dashboards and manage XTEINK X3/X4 FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay

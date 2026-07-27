@@ -39,7 +39,7 @@ jobs:
       - name: Build Home Assistant App image
         run: >-
           docker build
-          --build-arg BUILD_VERSION=0.9.0
+          --build-arg BUILD_VERSION=0.12.0
           --build-arg BUILD_ARCH=amd64
           flexdisplay_bridge
 

@@ -22,6 +22,7 @@ class EntityState:
     minimum: float = 0.0
     maximum: float = 100.0
     history: tuple[float, ...] = ()
+    last_changed: datetime | None = None
 
 
 class HomeAssistantClient:
@@ -86,6 +87,7 @@ class HomeAssistantClient:
                         entity.minimum,
                         entity.maximum,
                         self._history(entity.entity_id) if entity.style == "history" else (),
+                        self._timestamp(payload.get("last_changed")),
                     )
                 )
             except (requests.RequestException, ValueError) as exc:
@@ -105,6 +107,14 @@ class HomeAssistantClient:
                     )
                 )
         return results, error
+
+    @staticmethod
+    def _timestamp(value: Any) -> datetime | None:
+        try:
+            parsed = datetime.fromisoformat(str(value))
+            return parsed if parsed.tzinfo else parsed.replace(tzinfo=UTC)
+        except (TypeError, ValueError):
+            return None
 
     def _headers(self) -> dict[str, str]:
         return {

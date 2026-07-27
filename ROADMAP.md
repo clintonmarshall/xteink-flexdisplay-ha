@@ -5,7 +5,7 @@ may move only after the previous phase is usable on both XTEINK X3 and X4.
 
 ## v0.15 — Visual Dashboard Studio
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS `0.11.1`; existing device firmware `0.14.0` is compatible.
 
 - Home Assistant App web editor with live X3 and X4 previews.
@@ -17,7 +17,8 @@ Delivery: Bridge/HACS `0.11.1`; existing device firmware `0.14.0` is compatible.
 
 ## v0.16 — State-aware pages
 
-Status: next.
+Status: implemented, pending release and Home Assistant deployment.
+Delivery: Bridge/HACS `0.12.0`; existing device firmware `0.14.0` is compatible.
 
 - Conditional alert pages driven by Home Assistant entity state.
 - Priority and expiry rules that restore the normal playlist automatically.

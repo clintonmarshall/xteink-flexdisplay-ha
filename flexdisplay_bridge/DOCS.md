@@ -23,6 +23,14 @@ Each page supports:
 - automatic or explicit e-ink-safe icons;
 - large value, gauge, progress, 24-hour history, or QR visual treatment;
 - optional automatic page rotation.
+- normal-playlist, scheduled-page-set, or priority-alert activation.
+
+Scheduled pages replace the normal playlist during their configured local time
+window; overnight ranges are supported. Alert pages can compare an entity
+using equality, numeric thresholds, text containment, on/off semantics, or
+availability. Active alerts are ordered by priority ahead of the current
+scheduled or normal page set. Optional expiry is measured from Home
+Assistant's `last_changed` timestamp and rearms after the entity changes.
 
 Saving a profile queues a refresh for every device currently assigned to it.
 Sleeping devices receive that refresh on their next scheduled or physical

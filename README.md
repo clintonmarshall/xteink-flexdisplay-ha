@@ -11,7 +11,8 @@ This repository provides:
   sensors, queued controls, connectivity state, firmware-update entities, and
   physical-button events.
 - **Dashboard Studio**, a visual profile editor with live X3/X4 previews,
-  readable e-ink layouts, and direct fleet assignment.
+  readable e-ink layouts, state-aware alerts and schedules, and direct fleet
+  assignment.
 
 It intentionally contains no device firmware, factory backups, credentials,
 device identities, or private network configuration.
@@ -39,6 +40,9 @@ Dashboard Studio supports automatic, single-spotlight, stacked, side-by-side,
 and four-tile layouts. Tiles can display a large value and semantic icon, a
 gauge, progress bar, 24-hour history sparkline, or QR code. Use its X3/X4
 selector to inspect the exact device-sized render before assigning the profile.
+Pages can also be scheduled by time or promoted to priority alerts using live
+Home Assistant entity conditions. Five starter templates cover doorbells,
+alarms, daytime energy, running appliances, and weather alerts.
 
 The App uses Home Assistant's internal API token. No long-lived Home Assistant
 token is required in the App options.
@@ -141,6 +145,11 @@ Firmware `0.13.0`, Bridge `0.10.0`, and integration `0.10.0` add safer
 canary-first firmware rollout. Commands carry durable IDs, results remain on
 the SD card until explicitly acknowledged, and fleet installation is blocked
 until a USB-powered canary boots and verifies the target release.
+
+Bridge and integration `0.12.0` add state-aware dashboard pages, priority and
+expiry rules, timezone-aware scheduled page sets, Dashboard Studio alert
+templates, and an active-page-set sensor. Existing firmware `0.14.0` is
+compatible and does not need to be reflashed.
 
 ## Security
 
