@@ -7,6 +7,7 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any
 
+import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
 from .home_assistant import EntityState
@@ -85,7 +86,22 @@ def _number(value: str) -> float | None:
 
 
 def _icon_kind(entity: EntityState) -> str:
+    if entity.icon != "auto":
+        return entity.icon
     identity = f"{entity.entity_id} {entity.label}".lower()
+    state = entity.state.lower()
+    if entity.entity_id.startswith("weather."):
+        if any(value in state for value in ("rain", "pour", "lightning")):
+            return "rain"
+        return "weather"
+    if entity.entity_id.startswith(("light.", "switch.")):
+        return "light"
+    if entity.entity_id.startswith(("lock.", "binary_sensor.")) and any(
+        value in identity for value in ("door", "lock", "window")
+    ):
+        return "lock"
+    if any(value in identity for value in ("alarm", "alert", "warning")):
+        return "alert"
     if "wifi" in identity or "wi-fi" in identity or "signal" in identity:
         return "wifi"
     if "storage" in identity or "sd card" in identity:
@@ -240,6 +256,80 @@ def _draw_icon(
         )
         return
 
+    if kind in {"weather", "rain"}:
+        sun_r = max(6, width // 8)
+        sun_x = left + width // 3
+        sun_y = top + height // 3
+        draw.ellipse(
+            (sun_x - sun_r, sun_y - sun_r, sun_x + sun_r, sun_y + sun_r),
+            outline=0,
+            width=stroke,
+        )
+        cloud = (
+            left + width // 4,
+            top + height * 2 // 5,
+            right - width // 8,
+            bottom - height // 4,
+        )
+        draw.rounded_rectangle(cloud, radius=max(5, height // 8), fill=255, outline=0, width=stroke)
+        draw.ellipse(
+            (
+                cloud[0] + width // 9,
+                cloud[1] - height // 6,
+                cloud[0] + width * 4 // 9,
+                cloud[1] + height // 6,
+            ),
+            fill=255,
+            outline=0,
+            width=stroke,
+        )
+        if kind == "rain":
+            for offset in (width // 3, width // 2, width * 2 // 3):
+                draw.line(
+                    (left + offset, bottom - height // 5, left + offset - stroke, bottom),
+                    fill=0,
+                    width=stroke,
+                )
+        return
+
+    if kind == "light":
+        radius = min(width, height) // 4
+        draw.ellipse((cx - radius, top + height // 10, cx + radius, cy + radius // 2), outline=0, width=stroke)
+        draw.line((cx - radius // 2, cy + radius // 3, cx + radius // 2, cy + radius // 3), fill=0, width=stroke)
+        draw.line((cx - radius // 3, cy + radius // 2, cx + radius // 3, cy + radius // 2), fill=0, width=stroke)
+        return
+
+    if kind == "lock":
+        body_top = cy - height // 12
+        draw.rounded_rectangle(
+            (left + width // 5, body_top, right - width // 5, bottom - height // 10),
+            radius=stroke,
+            outline=0,
+            width=stroke,
+        )
+        draw.arc(
+            (left + width // 3, top + height // 10, right - width // 3, cy + height // 8),
+            180,
+            360,
+            fill=0,
+            width=stroke,
+        )
+        draw.ellipse((cx - stroke, cy + stroke, cx + stroke, cy + stroke * 3), fill=0)
+        return
+
+    if kind == "alert":
+        draw.polygon(
+            [
+                (cx, top + height // 12),
+                (right - width // 10, bottom - height // 10),
+                (left + width // 10, bottom - height // 10),
+            ],
+            outline=0,
+        )
+        draw.line((cx, top + height // 3, cx, bottom - height // 3), fill=0, width=stroke)
+        draw.ellipse((cx - stroke, bottom - height // 4, cx + stroke, bottom - height // 4 + stroke * 2), fill=0)
+        return
+
     roof_y = top + height // 3
     draw.line((left + width // 8, roof_y, cx, top + height // 10), fill=0, width=stroke)
     draw.line((cx, top + height // 10, right - width // 8, roof_y), fill=0, width=stroke)
@@ -274,6 +364,96 @@ def _draw_status_battery(
         draw.rectangle((x + 3, y + 3, x + 3 + inner_width, y + height - 3), fill=0)
 
 
+def _normalized(entity: EntityState) -> float | None:
+    value = _number(entity.state)
+    if value is None or entity.maximum <= entity.minimum:
+        return None
+    return max(0.0, min(1.0, (value - entity.minimum) / (entity.maximum - entity.minimum)))
+
+
+def _draw_tile_visual(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    entity: EntityState,
+    box: tuple[int, int, int, int],
+) -> None:
+    """Draw the selected e-ink-safe visual treatment in the tile's hero area."""
+    left, top, right, bottom = box
+    width = right - left
+    height = bottom - top
+    if entity.style == "qr":
+        code = qrcode.QRCode(version=None, box_size=2, border=1)
+        code.add_data(entity.state)
+        code.make(fit=True)
+        qr = code.make_image(fill_color="black", back_color="white").convert("L")
+        size = min(width, height)
+        image.paste(qr.resize((size, size), Image.Resampling.NEAREST), (left + (width - size) // 2, top))
+        return
+
+    fraction = _normalized(entity)
+    stroke = max(3, width // 28)
+    if entity.style == "progress":
+        bar_height = max(20, height // 3)
+        bar_top = top + (height - bar_height) // 2
+        draw.rounded_rectangle(
+            (left, bar_top, right, bar_top + bar_height),
+            radius=bar_height // 3,
+            outline=0,
+            width=stroke,
+        )
+        if fraction is not None:
+            inner = stroke + 2
+            fill_right = left + inner + int((width - inner * 2) * fraction)
+            if fill_right > left + inner:
+                draw.rounded_rectangle(
+                    (left + inner, bar_top + inner, fill_right, bar_top + bar_height - inner),
+                    radius=max(2, bar_height // 5),
+                    fill=0,
+                )
+        return
+
+    if entity.style == "gauge":
+        inset = max(3, stroke)
+        draw.arc(
+            (left + inset, top + inset, right - inset, bottom * 2 - top - inset),
+            180,
+            360,
+            fill=0,
+            width=stroke,
+        )
+        if fraction is not None:
+            angle = math.radians(180 + 180 * fraction)
+            cx = (left + right) // 2
+            cy = bottom
+            radius = width // 2 - inset * 2
+            draw.line(
+                (cx, cy, cx + int(math.cos(angle) * radius), cy + int(math.sin(angle) * radius)),
+                fill=0,
+                width=stroke,
+            )
+            draw.ellipse((cx - stroke, cy - stroke, cx + stroke, cy + stroke), fill=0)
+        return
+
+    if entity.style == "history":
+        values = list(entity.history)
+        if len(values) >= 2:
+            low = min(values)
+            high = max(values)
+            span = high - low or 1
+            points = [
+                (
+                    left + round(index * width / (len(values) - 1)),
+                    bottom - round((value - low) * height / span),
+                )
+                for index, value in enumerate(values)
+            ]
+            draw.line(points, fill=0, width=stroke, joint="curve")
+            draw.line((left, bottom, right, bottom), fill=0, width=1)
+            return
+
+    _draw_icon(draw, _icon_kind(entity), box, entity.state)
+
+
 class DashboardRenderer:
     def render(
         self,
@@ -286,6 +466,7 @@ class DashboardRenderer:
         page_index: int = 0,
         page_count: int = 1,
         ha_error: str = "",
+        layout: str = "auto",
     ) -> bytes:
         width = max(240, min(1200, width))
         height = max(240, min(1600, height))
@@ -320,8 +501,15 @@ class DashboardRenderer:
         grid_bottom = footer_top - gap
 
         if values:
-            columns = 2 if width >= 380 else 1
-            rows = math.ceil(len(values) / columns)
+            if layout == "single" or len(values) == 1:
+                columns, rows = 1, 1
+            elif layout == "rows" or (layout == "auto" and len(values) == 2):
+                columns, rows = 1, len(values)
+            elif layout == "columns":
+                columns, rows = len(values), 1
+            else:
+                columns = 2 if width >= 380 else 1
+                rows = math.ceil(len(values) / columns)
             card_width = (width - margin * 2 - gap * (columns - 1)) // columns
             card_height = (grid_bottom - grid_top - gap * (rows - 1)) // rows
             for index, entity in enumerate(values):
@@ -341,14 +529,17 @@ class DashboardRenderer:
                     width=2,
                 )
 
-                icon_size = min(max(58, cell_width // 3), max(58, card_height // 3))
+                icon_size = min(
+                    max(58, cell_width // (2 if len(values) == 1 else 3)),
+                    max(58, card_height // (2 if len(values) == 1 else 3)),
+                )
                 icon_left = left + (cell_width - icon_size) // 2
                 icon_top = top + 18
-                _draw_icon(
+                _draw_tile_visual(
+                    image,
                     draw,
-                    _icon_kind(entity),
+                    entity,
                     (icon_left, icon_top, icon_left + icon_size, icon_top + icon_size),
-                    entity.state,
                 )
 
                 label_width = cell_width - 24

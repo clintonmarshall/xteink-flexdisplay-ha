@@ -3,6 +3,31 @@
 The default configuration starts without MQTT and renders a bridge-status
 screen until entity IDs are added to `config.yaml`.
 
+## Dashboard Studio
+
+Open **FlexDisplay Studio** from the Home Assistant sidebar or use the App's
+**Open Web UI** button. The editor loads Home Assistant's entity catalogue,
+renders a live 1-bit preview for either XTEINK X3 or X4, and can assign a saved
+profile directly to a fleet device.
+
+Profiles created in Studio are written to
+`/data/flexdisplay-dashboards.json`. This file belongs to the App data volume
+and is preserved across upgrades and restarts. Once that file exists, it is the
+authoritative visual-profile set; `config.yaml` remains available for initial
+seeding and advanced non-dashboard configuration.
+
+Each page supports:
+
+- automatic, single, stacked, side-by-side, or four-tile layout;
+- zero to four Home Assistant or synthetic `device.*` tiles;
+- automatic or explicit e-ink-safe icons;
+- large value, gauge, progress, 24-hour history, or QR visual treatment;
+- optional automatic page rotation.
+
+Saving a profile queues a refresh for every device currently assigned to it.
+Sleeping devices receive that refresh on their next scheduled or physical
+button wake.
+
 Options:
 
 - `dashboard_title`: heading rendered on each e-paper screen.

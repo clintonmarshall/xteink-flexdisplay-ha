@@ -63,27 +63,40 @@ dashboard:
   #     unit: "°C"
   entities: []
   # Profiles replace the built-in pages for assigned devices. Each page accepts
-  # up to four entity IDs. Set auto_rotate_seconds to 0 to disable rotation.
+  # up to four entity IDs. Dashboard Studio can edit these visually after the
+  # first App start. Set auto_rotate_seconds to 0 to disable rotation.
   profiles:
     default:
       auto_rotate_seconds: 0
       pages:
         - title: Overview
+          layout: rows
           entities:
             - entity_id: sensor.outdoor_temperature
               label: Outside
               unit: "°C"
+              icon: temperature
+              style: value
             - entity_id: sensor.home_battery
               label: Home Battery
               unit: "%"
+              icon: battery
+              style: gauge
+              minimum: 0
+              maximum: 100
         - title: Energy
+          layout: rows
           entities:
             - entity_id: sensor.solar_power
               label: Solar
               unit: kW
+              icon: solar
+              style: value
             - entity_id: sensor.site_power
               label: Site
               unit: kW
+              icon: power
+              style: history
 
 devices:
   X4-DEMO01:

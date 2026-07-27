@@ -11,6 +11,7 @@ from .home_assistant import EntityState
 class DashboardPage:
     title: str
     entities: tuple[EntityState, ...]
+    layout: str = "auto"
 
 
 def _identity(entity: EntityState) -> str:
@@ -108,18 +109,35 @@ def build_dashboard_pages(
             DashboardPage(
                 page.title,
                 tuple(
-                    by_id.get(
-                        configured.entity_id,
+                    (
                         EntityState(
+                            current.entity_id,
+                            configured.label,
+                            current.state,
+                            configured.unit or current.unit,
+                            current.available,
+                            configured.icon,
+                            configured.style,
+                            configured.minimum,
+                            configured.maximum,
+                            current.history,
+                        )
+                        if (current := by_id.get(configured.entity_id))
+                        else EntityState(
                             configured.entity_id,
                             configured.label,
                             "--",
                             configured.unit,
                             False,
-                        ),
+                            configured.icon,
+                            configured.style,
+                            configured.minimum,
+                            configured.maximum,
+                        )
                     )
                     for configured in page.entities
                 )[:4],
+                page.layout,
             )
             for page in configured_pages
         )

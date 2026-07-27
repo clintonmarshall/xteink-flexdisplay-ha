@@ -10,6 +10,8 @@ This repository provides:
 - the **FlexDisplay** HACS integration, which creates Home Assistant devices,
   sensors, queued controls, connectivity state, firmware-update entities, and
   physical-button events.
+- **Dashboard Studio**, a visual profile editor with live X3/X4 previews,
+  readable e-ink layouts, and direct fleet assignment.
 
 It intentionally contains no device firmware, factory backups, credentials,
 device identities, or private network configuration.
@@ -27,6 +29,16 @@ device identities, or private network configuration.
 4. Start it and enable automatic startup.
 5. Open `http://HOME_ASSISTANT_IP:8099/healthz` and confirm that it reports
    `"status": "ok"`.
+
+Open **FlexDisplay Studio** from the Home Assistant sidebar, or select
+**Open Web UI** on the App. Existing YAML dashboard profiles are imported on
+first start. Studio saves later edits to the App data directory, where they
+survive App upgrades and restarts.
+
+Dashboard Studio supports automatic, single-spotlight, stacked, side-by-side,
+and four-tile layouts. Tiles can display a large value and semantic icon, a
+gauge, progress bar, 24-hour history sparkline, or QR code. Use its X3/X4
+selector to inspect the exact device-sized render before assigning the profile.
 
 The App uses Home Assistant's internal API token. No long-lived Home Assistant
 token is required in the App options.

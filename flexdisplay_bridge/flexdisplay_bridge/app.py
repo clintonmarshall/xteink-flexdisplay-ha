@@ -5,13 +5,21 @@ import re
 from contextlib import asynccontextmanager
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
+from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi.responses import FileResponse, RedirectResponse
 
 from . import __version__
 from .config import BridgeConfig, DeviceConfig, load_config
+from .dashboard_store import (
+    DashboardProfileStore,
+    DashboardValidationError,
+    parse_profile,
+    profile_payload,
+)
 from .dashboards import build_dashboard_pages
 from .home_assistant import HomeAssistantClient
 from .mqtt_service import MqttService
@@ -188,6 +196,7 @@ def _decorate_device(
     record: dict[str, Any],
     settings: BridgeConfig,
     store: DeviceStore | None = None,
+    available_profiles: list[str] | None = None,
 ) -> dict[str, Any]:
     result = dict(record)
     last_seen = result.get("last_seen")
@@ -254,7 +263,7 @@ def _decorate_device(
     result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
     result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
-    result["available_profiles"] = list(settings.profiles)
+    result["available_profiles"] = available_profiles or list(settings.profiles)
     result["available_modes"] = sorted(SUPPORTED_MODES)
     result["update_available"] = bool(
         settings.firmware.version
@@ -534,6 +543,11 @@ def _auto_rotate_due(record: dict[str, Any], seconds: int) -> bool:
 def create_app(config: BridgeConfig | None = None) -> FastAPI:
     settings = config or load_config()
     store = DeviceStore(settings.state_path)
+    dashboards = DashboardProfileStore(
+        settings.state_path.with_name("flexdisplay-dashboards.json"),
+        settings.profiles,
+        settings.default_profile,
+    )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
 
@@ -553,6 +567,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app = FastAPI(title="FlexDisplay Home Assistant Bridge", version=__version__, lifespan=lifespan)
     app.state.config = settings
     app.state.store = store
+    app.state.dashboards = dashboards
     app.state.mqtt = mqtt
 
     @app.get("/healthz")
@@ -567,7 +582,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/devices")
     def devices() -> dict[str, Any]:
-        return {"devices": [_decorate_device(record, settings, store) for record in store.all()]}
+        return {
+            "devices": [
+                _decorate_device(record, settings, store, dashboards.names())
+                for record in store.all()
+            ]
+        }
 
     @app.get("/api/v1/devices/{device_id}")
     def device(device_id: str) -> dict[str, Any]:
@@ -575,7 +595,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.get(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _decorate_device(record, settings, store)
+        return _decorate_device(record, settings, store, dashboards.names())
 
     @app.get("/api/v1/devices/{device_id}/events")
     def device_events(device_id: str) -> dict[str, Any]:
@@ -588,6 +608,176 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def authorize(request: Request) -> None:
         if settings.api_key and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key:
             raise HTTPException(status_code=401, detail="Bridge API key required")
+
+    @app.get("/studio", include_in_schema=False)
+    def studio_redirect() -> RedirectResponse:
+        return RedirectResponse("./studio/")
+
+    @app.get("/", include_in_schema=False)
+    def root_redirect() -> RedirectResponse:
+        return RedirectResponse("./studio/")
+
+    @app.get("/studio/", include_in_schema=False)
+    def studio_page() -> FileResponse:
+        path = Path(__file__).with_name("static") / "dashboard-studio.html"
+        return FileResponse(path, media_type="text/html")
+
+    @app.get("/api/v1/studio")
+    def studio(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return {
+            "version": __version__,
+            "profiles": dashboards.all(),
+            "devices": [
+                _decorate_device(record, settings, store, dashboards.names())
+                for record in store.all()
+            ],
+            "models": {
+                "X3": {"width": 528, "height": 792},
+                "X4": {"width": 480, "height": 800},
+            },
+            "capabilities": {
+                "layouts": ["auto", "single", "rows", "columns", "grid"],
+                "styles": ["value", "gauge", "progress", "history", "qr"],
+                "icons": [
+                    "auto",
+                    "home",
+                    "temperature",
+                    "humidity",
+                    "battery",
+                    "power",
+                    "solar",
+                    "wifi",
+                    "storage",
+                    "clock",
+                    "weather",
+                    "rain",
+                    "light",
+                    "lock",
+                    "alert",
+                ],
+            },
+        }
+
+    @app.get("/api/v1/studio/entities")
+    def studio_entities(request: Request) -> dict[str, Any]:
+        authorize(request)
+        entities, error = ha.catalog()
+        synthetic = [
+            {
+                "entity_id": entity_id,
+                "label": label,
+                "state": state,
+                "unit": unit,
+                "domain": "device",
+                "icon": "",
+                "device_class": "",
+            }
+            for entity_id, label, state, unit in (
+                ("device.battery", "Device Battery", "76", "%"),
+                ("device.uptime", "Uptime", "2.4 h", ""),
+                ("device.storage", "SD Card", "Ready", ""),
+                ("device.memory", "Free Memory", "112 KB", ""),
+                ("device.wifi", "Wi-Fi Signal", "-54", "dBm"),
+                ("device.mode", "Display Mode", "Home Assistant", ""),
+                ("device.wake", "Wake Reason", "Power Button", ""),
+                ("device.usb", "USB Power", "Connected", ""),
+            )
+        ]
+        return {"entities": synthetic + entities, "error": error}
+
+    @app.put("/api/v1/studio/profiles/{profile_name}")
+    def save_studio_profile(
+        profile_name: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            profile = dashboards.put(profile_name, payload)
+        except DashboardValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        refreshed: list[str] = []
+        for record in store.all():
+            if str(record.get("assigned_profile") or settings.default_profile) == profile_name:
+                store.queue_command(str(record["device_id"]), "refresh")
+                refreshed.append(str(record["device_id"]))
+        return {"profile": profile_payload(profile), "refresh_queued": refreshed}
+
+    @app.delete("/api/v1/studio/profiles/{profile_name}")
+    def delete_studio_profile(profile_name: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        assigned = [
+            str(record["device_id"])
+            for record in store.all()
+            if str(record.get("assigned_profile") or settings.default_profile) == profile_name
+        ]
+        if assigned:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Profile is assigned to: {', '.join(assigned)}",
+            )
+        try:
+            dashboards.delete(profile_name)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Profile not found") from err
+        except DashboardValidationError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {"deleted": profile_name}
+
+    @app.post("/api/v1/studio/preview")
+    def studio_preview(payload: dict[str, Any], request: Request) -> Response:
+        authorize(request)
+        raw_profile = payload.get("profile")
+        if not isinstance(raw_profile, dict):
+            raise HTTPException(status_code=400, detail="A dashboard profile is required")
+        try:
+            draft = parse_profile("preview", raw_profile)
+        except DashboardValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        model = str(payload.get("model") or "X4").upper()
+        default_width, default_height = ((528, 792) if model == "X3" else (480, 800))
+        width = _integer(str(payload.get("width") or default_width), default_width, 240, 1200)
+        height = _integer(str(payload.get("height") or default_height), default_height, 240, 1600)
+        device_id = str(payload.get("device_id") or f"{model}-PREVIEW")
+        record = store.get(device_id) or {
+            "device_id": device_id,
+            "name": f"{model} Preview",
+            "model": model,
+            "battery_percent": 76,
+            "rssi": -54,
+            "sd_ready": True,
+            "usb_connected": True,
+            "uptime_seconds": 8640,
+            "free_heap": 114688,
+            "mode": "home_assistant",
+            "wake_reason": "power_button",
+        }
+        states, ha_error = ha.fetch(DashboardProfileStore.entity_configs(draft))
+        pages = build_dashboard_pages(states, record, draft.pages)
+        page_index = _integer(
+            str(payload.get("page_index") or 0),
+            0,
+            0,
+            max(0, len(pages) - 1),
+        )
+        page = pages[page_index]
+        image = renderer.render(
+            title=page.title,
+            device=record,
+            width=width,
+            height=height,
+            entities=page.entities,
+            page_index=page_index,
+            page_count=len(pages),
+            ha_error=ha_error,
+            layout=page.layout,
+        )
+        return Response(
+            content=image,
+            media_type="image/png",
+            headers={"X-FlexDisplay-Preview-HA-Error": "true" if ha_error else "false"},
+        )
 
     @app.post("/api/v1/devices/{device_id}/commands/{command}")
     def command(device_id: str, command: str, request: Request) -> dict[str, Any]:
@@ -622,7 +812,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.clear_commands(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return {"cancelled": True, "device": _decorate_device(record, settings, store)}
+        return {
+            "cancelled": True,
+            "device": _decorate_device(record, settings, store, dashboards.names()),
+        }
 
     @app.post("/api/v1/devices/{device_id}/firmware/verify-usb-recovery")
     def verify_usb_recovery(
@@ -664,7 +857,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return {
             "verified": True,
             "verification_method": "usb_recovery",
-            "device": _decorate_device(record, settings, store),
+            "device": _decorate_device(record, settings, store, dashboards.names()),
             "audit": record.get("last_usb_recovery_verification"),
         }
 
@@ -679,7 +872,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             assignment["assigned_area"] = _header_value(payload["area"])
         if "profile" in payload:
             profile = str(payload["profile"])
-            if profile not in settings.profiles:
+            if profile not in dashboards.names():
                 raise HTTPException(status_code=400, detail="Unknown dashboard profile")
             assignment["assigned_profile"] = profile
         if "mode" in payload:
@@ -741,7 +934,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="No provisioning fields supplied")
         record = store.provision(selected, assignment)
         store.queue_command(selected, "refresh")
-        return {"device": _decorate_device(record, settings, store)}
+        return {
+            "device": _decorate_device(record, settings, store, dashboards.names()),
+        }
 
     @app.get("/api/v1/screen")
     def screen(
@@ -832,8 +1027,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record = store.get(device_id) or record
             commands = list(record.get("dispatched_commands") or [])
         command_id = str(record.get("dispatched_command_id") or "") if commands else ""
+        dashboard_profile = dashboards.resolve(profile.profile)
+        profile = replace(
+            profile,
+            profile=dashboard_profile.name,
+            entities=(
+                DashboardProfileStore.entity_configs(dashboard_profile)
+                if dashboard_profile.pages
+                else profile.entities
+            ),
+        )
         entity_states, ha_error = ha.fetch(profile.entities)
-        dashboard_profile = settings.profile(profile)
         pages = build_dashboard_pages(
             entity_states,
             record,
@@ -875,6 +1079,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             page_index=page_index,
             page_count=len(pages),
             ha_error=ha_error,
+            layout=page.layout,
         )
         digest = hashlib.sha256(image).hexdigest()
         image_unchanged = bool(x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest)

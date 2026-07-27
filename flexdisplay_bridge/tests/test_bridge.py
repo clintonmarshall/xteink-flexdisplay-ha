@@ -541,6 +541,179 @@ def test_new_physical_button_events_navigate_once(tmp_path: Path) -> None:
         assert record["button_press_count"] == 2
 
 
+def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Path) -> None:
+    state_path = tmp_path / "state.json"
+    config = BridgeConfig(
+        state_path=state_path,
+        api_key="studio-secret",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    profile = {
+        "auto_rotate_seconds": 300,
+        "pages": [
+            {
+                "title": "Showroom",
+                "layout": "rows",
+                "entities": [
+                    {
+                        "entity_id": "device.battery",
+                        "label": "Display Battery",
+                        "unit": "%",
+                        "icon": "battery",
+                        "style": "gauge",
+                        "minimum": 0,
+                        "maximum": 100,
+                    },
+                    {
+                        "entity_id": "device.wifi",
+                        "label": "Wi-Fi Signal",
+                        "unit": "dBm",
+                        "icon": "wifi",
+                        "style": "progress",
+                        "minimum": -100,
+                        "maximum": -30,
+                    },
+                ],
+            }
+        ],
+    }
+    headers = {"X-FlexDisplay-Bridge-Key": "studio-secret"}
+    with TestClient(create_app(config)) as client:
+        assert client.get("/studio/").status_code == 200
+        assert client.get("/api/v1/studio").status_code == 401
+        saved = client.put(
+            "/api/v1/studio/profiles/showroom",
+            headers=headers,
+            json=profile,
+        )
+        assert saved.status_code == 200
+        assert saved.json()["profile"]["pages"][0]["layout"] == "rows"
+        preview = client.post(
+            "/api/v1/studio/preview",
+            headers=headers,
+            json={"model": "X3", "profile": profile, "page_index": 0},
+        )
+        assert preview.status_code == 200
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.size == (528, 792)
+            assert image.mode == "1"
+
+    persisted = json.loads(
+        (tmp_path / "flexdisplay-dashboards.json").read_text(encoding="utf-8")
+    )
+    assert persisted["profiles"]["showroom"]["auto_rotate_seconds"] == 300
+
+    with TestClient(create_app(config)) as client:
+        studio = client.get("/api/v1/studio", headers=headers).json()
+        assert [item["name"] for item in studio["profiles"]] == ["default", "showroom"]
+
+
+def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    profile = {
+        "pages": [
+            {
+                "title": "Device Status",
+                "layout": "single",
+                "entities": [
+                    {
+                        "entity_id": "device.battery",
+                        "label": "Battery",
+                        "unit": "%",
+                        "icon": "battery",
+                        "style": "value",
+                        "minimum": 0,
+                        "maximum": 100,
+                    }
+                ],
+            }
+        ]
+    }
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-STUDIO1",
+                "X-FlexDisplay-Battery-Percent": "84",
+            },
+        )
+        assert client.put(
+            "/api/v1/studio/profiles/wall",
+            json=profile,
+        ).status_code == 200
+        assigned = client.put(
+            "/api/v1/devices/X4-STUDIO1/provision",
+            json={"profile": "wall"},
+        )
+        assert assigned.status_code == 200
+        screen = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-STUDIO1",
+                "X-FlexDisplay-Battery-Percent": "84",
+            },
+        )
+        assert screen.headers["x-flexdisplay-profile"] == "wall"
+        assert screen.headers["x-flexdisplay-page-title"] == "DEVICE STATUS"
+        assert screen.headers["x-flexdisplay-page-count"] == "1"
+
+
+def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        invalid_name = client.put(
+            "/api/v1/studio/profiles/not%20safe",
+            json={"pages": [{"title": "Overview", "entities": []}]},
+        )
+        assert invalid_name.status_code == 400
+        too_many_tiles = client.put(
+            "/api/v1/studio/profiles/wall",
+            json={
+                "pages": [
+                    {
+                        "title": "Overview",
+                        "entities": [
+                            {"entity_id": f"sensor.value_{index}"}
+                            for index in range(5)
+                        ],
+                    }
+                ]
+            },
+        )
+        assert too_many_tiles.status_code == 400
+
+
+def test_dashboard_renderer_supports_visual_tile_styles() -> None:
+    renderer = DashboardRenderer()
+    for style in ("value", "gauge", "progress", "history", "qr"):
+        entity = EntityState(
+            "sensor.visual",
+            style.title(),
+            "https://example.test" if style == "qr" else "64",
+            "" if style == "qr" else "%",
+            True,
+            "battery",
+            style,
+            0,
+            100,
+            (20, 30, 25, 50, 64) if style == "history" else (),
+        )
+        image = renderer.render(
+            title="VISUAL",
+            device={"device_id": "X4-PREVIEW", "battery_percent": 80, "rssi": -50},
+            width=480,
+            height=800,
+            entities=(entity,),
+            layout="single",
+        )
+        with Image.open(io.BytesIO(image)) as rendered:
+            assert rendered.size == (480, 800)
+            assert rendered.mode == "1"
+
+
 def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
     firmware = FirmwareConfig(
         version="0.6.0",
