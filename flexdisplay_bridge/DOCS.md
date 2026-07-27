@@ -21,9 +21,19 @@ Each page supports:
 - automatic, single, stacked, side-by-side, or four-tile layout;
 - zero to four Home Assistant or synthetic `device.*` tiles;
 - automatic or explicit e-ink-safe icons;
-- large value, gauge, progress, 24-hour history, or QR visual treatment;
+- large value, gauge, progress, 24-hour history, QR, or image visual treatment;
 - optional automatic page rotation.
 - normal-playlist, scheduled-page-set, or priority-alert activation.
+
+For an image tile, select a Home Assistant `camera.*` or `image.*` entity, or
+choose **Image URL** and enter an HTTP(S) address reachable from the App. Image
+tiles can crop to fill their card or contain the whole source. The live preview
+uses the same 1-bit Floyd–Steinberg conversion sent to X3/X4 devices.
+
+Direct image downloads are limited to 8 MB and 20 megapixels, reject embedded
+URL credentials and non-image responses, and never receive the Home Assistant
+bearer token. Home Assistant entity pictures are fetched with authorization
+only from the configured Home Assistant origin.
 
 Scheduled pages replace the normal playlist during their configured local time
 window; overnight ranges are supported. Alert pages can compare an entity

@@ -649,7 +649,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             },
             "capabilities": {
                 "layouts": ["auto", "single", "rows", "columns", "grid"],
-                "styles": ["value", "gauge", "progress", "history", "qr"],
+                "styles": ["value", "gauge", "progress", "history", "qr", "image"],
+                "image_fits": ["cover", "contain"],
                 "activation_types": ["always", "schedule", "condition"],
                 "condition_operators": [
                     "equals",

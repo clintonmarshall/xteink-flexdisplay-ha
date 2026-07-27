@@ -36,3 +36,10 @@ changes again.
 The Dashboard Studio includes starting templates for doorbells, alarms,
 daytime energy, running appliances, and weather alerts. Replace their example
 entity IDs with entities from your Home Assistant before saving.
+
+Image tiles can use a Home Assistant `camera.*` or `image.*` entity, or a
+direct HTTP(S) URL reachable from the Bridge App. Choose **Crop to fill** for
+edge-to-edge camera and artwork tiles, or **Fit whole image** when no part of
+the source may be cropped. Studio previews the exact monochrome, dithered
+result. Downloads are limited to 8 MB and 20 megapixels; direct URLs never
+receive the Home Assistant API token.

@@ -38,7 +38,8 @@ survive App upgrades and restarts.
 
 Dashboard Studio supports automatic, single-spotlight, stacked, side-by-side,
 and four-tile layouts. Tiles can display a large value and semantic icon, a
-gauge, progress bar, 24-hour history sparkline, or QR code. Use its X3/X4
+gauge, progress bar, 24-hour history sparkline, QR code, or a dithered image
+from a Home Assistant camera/image entity or direct HTTP(S) URL. Use its X3/X4
 selector to inspect the exact device-sized render before assigning the profile.
 Pages can also be scheduled by time or promoted to priority alerts using live
 Home Assistant entity conditions. Five starter templates cover doorbells,
@@ -149,6 +150,11 @@ until a USB-powered canary boots and verifies the target release.
 Bridge and integration `0.12.0` add state-aware dashboard pages, priority and
 expiry rules, timezone-aware scheduled page sets, Dashboard Studio alert
 templates, and an active-page-set sensor. Existing firmware `0.14.0` is
+compatible and does not need to be reflashed.
+
+Bridge and integration `0.13.0` add Dashboard Studio image tiles from Home
+Assistant entities and direct URLs, crop/contain controls, and bounded,
+credential-isolated image retrieval. Existing firmware `0.14.0` remains
 compatible and does not need to be reflashed.
 
 ## Security

@@ -17,13 +17,23 @@ Delivery: Bridge/HACS `0.11.1`; existing device firmware `0.14.0` is compatible.
 
 ## v0.16 — State-aware pages
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS `0.12.0`; existing device firmware `0.14.0` is compatible.
 
 - Conditional alert pages driven by Home Assistant entity state.
 - Priority and expiry rules that restore the normal playlist automatically.
 - Scheduled morning, daytime, evening, and overnight page sets.
 - Doorbell, alarm, energy, appliance, and weather-alert templates.
+
+## v0.16.1 — Dashboard image tiles
+
+Status: implemented, pending release and Home Assistant deployment.
+Delivery: Bridge/HACS `0.13.0`; existing device firmware `0.14.0` is compatible.
+
+- Home Assistant camera and image entity selection in Dashboard Studio.
+- Direct HTTP(S) image sources for content outside Home Assistant.
+- Crop-to-fill and fit-whole-image controls with exact X3/X4 1-bit previews.
+- Bounded downloads and strict separation of Home Assistant credentials.
 
 ## v0.17 — Configurable physical-button actions
 

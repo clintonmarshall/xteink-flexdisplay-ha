@@ -6,6 +6,7 @@ import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 from .config import (
     DashboardPageConfig,
@@ -16,7 +17,8 @@ from .config import (
 
 PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 LAYOUTS = {"auto", "single", "rows", "columns", "grid"}
-TILE_STYLES = {"value", "gauge", "progress", "history", "qr"}
+TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image"}
+IMAGE_FITS = {"cover", "contain"}
 ICONS = {
     "auto",
     "home",
@@ -79,6 +81,18 @@ def _clock(value: Any, fallback: str) -> str:
     if not 0 <= hour <= 23 or not 0 <= minute <= 59:
         return fallback
     return f"{hour:02d}:{minute:02d}"
+
+
+def _image_url(value: Any) -> str:
+    selected = _bounded_text(value, "", 2048)
+    if not selected:
+        return ""
+    parsed = urlparse(selected)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise DashboardValidationError("Image URLs must use http:// or https://")
+    if parsed.username or parsed.password:
+        raise DashboardValidationError("Image URLs must not contain embedded credentials")
+    return selected
 
 
 def _activation(raw: Any, page_number: int) -> PageActivationConfig:
@@ -149,17 +163,26 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                 raise DashboardValidationError(
                     f"Tile {tile_index + 1} on page {page_index + 1} must be an object"
                 )
-            entity_id = _bounded_text(raw_entity.get("entity_id"), "", 128)
-            if not entity_id or "." not in entity_id:
-                raise DashboardValidationError(
-                    f"Tile {tile_index + 1} on page {page_index + 1} needs an entity ID"
-                )
             style = str(raw_entity.get("style") or "value")
             icon = str(raw_entity.get("icon") or "auto")
             if style not in TILE_STYLES:
-                raise DashboardValidationError(f"{entity_id} has an unsupported tile style")
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported style"
+                )
+            image_url = _image_url(raw_entity.get("image_url")) if style == "image" else ""
+            entity_id = _bounded_text(raw_entity.get("entity_id"), "", 128)
+            if image_url and (not entity_id or entity_id == "sensor.example"):
+                entity_id = f"image_url.page_{page_index + 1}_tile_{tile_index + 1}"
+            if not entity_id or "." not in entity_id:
+                source = "an image URL or Home Assistant entity ID" if style == "image" else "an entity ID"
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} needs {source}"
+                )
             if icon not in ICONS:
                 raise DashboardValidationError(f"{entity_id} has an unsupported icon")
+            image_fit = str(raw_entity.get("image_fit") or "cover")
+            if image_fit not in IMAGE_FITS:
+                raise DashboardValidationError(f"{entity_id} has an unsupported image fit")
             minimum = _number(raw_entity.get("minimum"), 0.0)
             maximum = _number(raw_entity.get("maximum"), 100.0)
             if maximum <= minimum:
@@ -173,6 +196,8 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                     style=style,
                     minimum=minimum,
                     maximum=maximum,
+                    image_url=image_url,
+                    image_fit=image_fit,
                 )
             )
         pages.append(
@@ -316,7 +341,8 @@ class DashboardProfileStore:
         unique: dict[str, EntityConfig] = {}
         for page in profile.pages:
             for entity in page.entities:
-                unique[entity.entity_id] = entity
+                key = f"{entity.entity_id}\0{entity.image_url}" if entity.image_url else entity.entity_id
+                unique[key] = entity
             if (
                 page.activation.type == "condition"
                 and page.activation.entity_id

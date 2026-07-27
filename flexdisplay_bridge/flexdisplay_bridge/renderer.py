@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import Any
 
 import qrcode
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
 from .home_assistant import EntityState
 
@@ -454,6 +454,40 @@ def _draw_tile_visual(
     _draw_icon(draw, _icon_kind(entity), box, entity.state)
 
 
+def _draw_image_tile(
+    canvas: Image.Image,
+    entity: EntityState,
+    box: tuple[int, int, int, int],
+) -> bool:
+    """Decode, crop or contain, and dither a downloaded image for e-paper."""
+    if not entity.image_bytes:
+        return False
+    left, top, right, bottom = box
+    target = (max(1, right - left), max(1, bottom - top))
+    try:
+        with Image.open(BytesIO(entity.image_bytes)) as source:
+            normalized = ImageOps.autocontrast(ImageOps.exif_transpose(source).convert("L"))
+            if entity.image_fit == "contain":
+                rendered = Image.new("L", target, 255)
+                contained = ImageOps.contain(normalized, target, Image.Resampling.LANCZOS)
+                rendered.paste(
+                    contained,
+                    ((target[0] - contained.width) // 2, (target[1] - contained.height) // 2),
+                )
+            else:
+                rendered = ImageOps.fit(
+                    normalized,
+                    target,
+                    Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.5),
+                )
+            dithered = rendered.convert("1", dither=Image.Dither.FLOYDSTEINBERG).convert("L")
+            canvas.paste(dithered, (left, top))
+            return True
+    except (UnidentifiedImageError, OSError, ValueError):
+        return False
+
+
 class DashboardRenderer:
     def render(
         self,
@@ -528,6 +562,54 @@ class DashboardRenderer:
                     outline=0,
                     width=2,
                 )
+
+                if entity.style == "image":
+                    inset = 4
+                    caption_height = max(46, min(74, card_height // 7))
+                    image_bottom = bottom - caption_height
+                    rendered = _draw_image_tile(
+                        image,
+                        entity,
+                        (left + inset, top + inset, right - inset, image_bottom),
+                    )
+                    if not rendered:
+                        placeholder_size = min(92, cell_width // 3, max(48, card_height // 4))
+                        placeholder_left = left + (cell_width - placeholder_size) // 2
+                        placeholder_top = top + max(16, (image_bottom - top - placeholder_size) // 2)
+                        _draw_icon(
+                            draw,
+                            "alert",
+                            (
+                                placeholder_left,
+                                placeholder_top,
+                                placeholder_left + placeholder_size,
+                                placeholder_top + placeholder_size,
+                            ),
+                            entity.state,
+                        )
+                    draw.rectangle((left + 2, image_bottom, right - 2, bottom - 2), fill=255)
+                    draw.line((left + 2, image_bottom, right - 2, image_bottom), fill=0, width=2)
+                    caption_font = _fit(
+                        draw,
+                        entity.label,
+                        cell_width - 24,
+                        max(20, width // 21),
+                        True,
+                        13,
+                    )
+                    caption_box = draw.textbbox((0, 0), entity.label, font=caption_font)
+                    caption_width = caption_box[2] - caption_box[0]
+                    caption_height_text = caption_box[3] - caption_box[1]
+                    draw.text(
+                        (
+                            left + (cell_width - caption_width) // 2,
+                            image_bottom + (caption_height - caption_height_text) // 2 - caption_box[1],
+                        ),
+                        entity.label,
+                        fill=0,
+                        font=caption_font,
+                    )
+                    continue
 
                 icon_size = min(
                     max(58, cell_width // (2 if len(values) == 1 else 3)),
