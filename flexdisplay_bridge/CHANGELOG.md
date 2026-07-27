@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.11.0
+
+- Adds Dashboard Studio to the Home Assistant App with a responsive editor and
+  live XTEINK X3/X4 e-ink preview.
+- Persists visual profiles in the App data directory without replacing
+  hand-maintained YAML configuration.
+- Adds single, stacked, side-by-side, automatic, and four-tile page layouts.
+- Adds per-tile entity selection, labels, units, semantic icons, gauges,
+  progress bars, 24-hour history sparklines, and QR codes.
+- Adds authenticated profile, entity-catalogue, preview, and assignment APIs.
+- Queues a refresh for every device using a saved profile.
+- Exposes Dashboard Studio through the Home Assistant App web UI and ingress.
+
 ## 0.10.8
 
 - Bundles the credential-free shared X3/X4 FlexDisplay `0.14.0` firmware

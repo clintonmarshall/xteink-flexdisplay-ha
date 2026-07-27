@@ -1,0 +1,865 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FlexDisplay Dashboard Studio</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --ink: #edf3f8;
+      --muted: #92a2b0;
+      --panel: #111a23;
+      --panel-2: #17232e;
+      --line: #2b3945;
+      --accent: #ffb454;
+      --accent-2: #67d6c1;
+      --danger: #ff7a79;
+      --shadow: 0 24px 70px rgba(0, 0, 0, .34);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      background:
+        radial-gradient(circle at 85% -10%, rgba(103, 214, 193, .14), transparent 28rem),
+        radial-gradient(circle at 10% 110%, rgba(255, 180, 84, .12), transparent 34rem),
+        #091018;
+      color: var(--ink);
+      font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button, select, input {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #0d151d;
+      color: var(--ink);
+    }
+    button {
+      padding: 8px 12px;
+      cursor: pointer;
+      font-weight: 650;
+    }
+    button:hover { border-color: #607383; background: #17232e; }
+    button:focus-visible, input:focus-visible, select:focus-visible {
+      outline: 2px solid var(--accent);
+      outline-offset: 2px;
+    }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #1b1207; }
+    button.primary:hover { background: #ffc373; }
+    button.danger { color: var(--danger); }
+    button.icon { width: 38px; padding: 0; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    input, select { width: 100%; padding: 8px 10px; }
+    label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .035em; }
+    .app {
+      display: grid;
+      grid-template-columns: 270px minmax(420px, 1fr) 350px;
+      min-height: 100vh;
+    }
+    .sidebar, .inspector { background: rgba(17, 26, 35, .96); padding: 20px; overflow: auto; }
+    .sidebar { border-right: 1px solid var(--line); }
+    .inspector { border-left: 1px solid var(--line); }
+    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand-mark {
+      display: grid;
+      width: 42px;
+      height: 42px;
+      place-items: center;
+      border-radius: 12px;
+      background: var(--accent);
+      color: #111;
+      font-weight: 900;
+      font-size: 20px;
+      box-shadow: 0 8px 24px rgba(255, 180, 84, .22);
+    }
+    h1, h2, h3, p { margin-top: 0; }
+    h1 { margin: 0; font-size: 18px; letter-spacing: -.02em; }
+    h2 { margin-bottom: 4px; font-size: 15px; }
+    h3 { margin: 0; font-size: 14px; }
+    .eyebrow { color: var(--accent-2); font-size: 11px; font-weight: 800; letter-spacing: .12em; text-transform: uppercase; }
+    .muted { color: var(--muted); }
+    .small { font-size: 12px; }
+    .section { padding: 18px 0; border-top: 1px solid var(--line); }
+    .section-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 12px; }
+    .button-row { display: flex; gap: 8px; flex-wrap: wrap; }
+    .profile-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 10px; }
+    .page-list { display: grid; gap: 8px; }
+    .page-item {
+      display: grid;
+      grid-template-columns: 27px 1fr auto;
+      align-items: center;
+      width: 100%;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0d151d;
+      cursor: pointer;
+    }
+    .page-item.active { border-color: var(--accent); background: rgba(255, 180, 84, .08); }
+    .page-number {
+      display: grid; place-items: center; width: 22px; height: 22px;
+      border-radius: 50%; background: var(--panel-2); color: var(--muted); font-size: 11px; font-weight: 800;
+    }
+    .page-item.active .page-number { background: var(--accent); color: #111; }
+    .page-meta { overflow: hidden; text-align: left; }
+    .page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
+    .page-layout { color: var(--muted); font-size: 11px; }
+    .workspace { min-width: 0; padding: 24px; overflow: auto; }
+    .toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .toolbar-group { display: flex; align-items: center; gap: 8px; }
+    .segment { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .segment button { min-height: 30px; padding: 4px 12px; border: 0; background: transparent; color: var(--muted); }
+    .segment button.active { background: var(--accent-2); color: #09221d; }
+    .device-select { width: 190px; }
+    .canvas-shell {
+      display: grid;
+      min-height: calc(100vh - 112px);
+      place-items: center;
+      padding: 32px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background:
+        linear-gradient(45deg, rgba(255,255,255,.018) 25%, transparent 25%) 0 0/18px 18px,
+        linear-gradient(45deg, transparent 75%, rgba(255,255,255,.018) 75%) 0 0/18px 18px,
+        #0c141b;
+      box-shadow: inset 0 1px rgba(255,255,255,.025);
+    }
+    .device-frame {
+      position: relative;
+      width: min(100%, 420px);
+      padding: 15px;
+      border-radius: 14px;
+      background: #20272a;
+      border: 1px solid #435057;
+      box-shadow: var(--shadow);
+      transition: width .2s ease;
+    }
+    .device-frame.x3 { width: min(100%, 444px); }
+    .device-frame::after {
+      content: "";
+      position: absolute;
+      left: 50%;
+      bottom: 3px;
+      width: 38px;
+      height: 3px;
+      transform: translateX(-50%);
+      border-radius: 2px;
+      background: #0a0d0e;
+    }
+    .preview-wrap { position: relative; width: 100%; aspect-ratio: var(--ratio, 480/800); background: white; overflow: hidden; }
+    .preview-wrap img { display: block; width: 100%; height: 100%; image-rendering: auto; object-fit: contain; }
+    .preview-state {
+      position: absolute; inset: 0; display: grid; place-items: center;
+      padding: 30px; background: #f5f5f1; color: #222; text-align: center; font-weight: 700;
+    }
+    .preview-state[hidden] { display: none; }
+    .status-strip {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-top: 12px; color: var(--muted); font-size: 12px;
+    }
+    .live-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--accent-2); }
+    .dirty-dot { color: var(--accent); font-weight: 800; }
+    .field-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+    .tile-list { display: grid; gap: 12px; }
+    .tile-card {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0d151d;
+      overflow: hidden;
+    }
+    .tile-head {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      background: rgba(255,255,255,.02);
+    }
+    .tile-body { display: grid; gap: 10px; padding: 12px; }
+    .tile-body .field-grid { gap: 8px; }
+    .range-fields[hidden] { display: none; }
+    .empty {
+      padding: 16px; border: 1px dashed var(--line); border-radius: 10px;
+      color: var(--muted); text-align: center; font-size: 12px;
+    }
+    .auth {
+      display: grid; gap: 8px; padding: 12px; border-radius: 10px;
+      background: rgba(255, 122, 121, .08); border: 1px solid rgba(255, 122, 121, .3);
+    }
+    .auth[hidden] { display: none; }
+    #toast {
+      position: fixed; right: 20px; bottom: 20px; z-index: 20;
+      max-width: 360px; padding: 12px 16px; border: 1px solid var(--line);
+      border-radius: 10px; background: #101a23; box-shadow: var(--shadow);
+      opacity: 0; transform: translateY(10px); pointer-events: none; transition: .2s;
+    }
+    #toast.show { opacity: 1; transform: none; }
+    #toast.error { border-color: var(--danger); }
+    dialog {
+      width: min(420px, calc(100vw - 32px)); padding: 0;
+      border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink);
+      box-shadow: var(--shadow);
+    }
+    dialog::backdrop { background: rgba(0,0,0,.62); backdrop-filter: blur(4px); }
+    .dialog-body { display: grid; gap: 16px; padding: 20px; }
+    @media (max-width: 1120px) {
+      .app { grid-template-columns: 230px 1fr; }
+      .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
+      .tile-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+    @media (max-width: 720px) {
+      .app { display: block; }
+      .sidebar, .inspector, .workspace { padding: 16px; }
+      .toolbar { align-items: stretch; flex-direction: column; }
+      .toolbar-group { justify-content: space-between; }
+      .canvas-shell { min-height: 520px; padding: 18px; }
+      .tile-list { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">F</div>
+        <div><div class="eyebrow">XTEINK fleet</div><h1>Dashboard Studio</h1></div>
+      </div>
+
+      <div id="authPanel" class="auth" hidden>
+        <strong>Bridge key required</strong>
+        <span class="small muted">Enter the API key configured in the FlexDisplay Bridge App.</span>
+        <input id="apiKey" type="password" autocomplete="off" placeholder="Bridge API key">
+        <button id="unlockButton" class="primary">Unlock Studio</button>
+      </div>
+
+      <div class="section" style="border-top:0">
+        <div class="section-head"><h2>Profile</h2><span id="saveState" class="small muted">Loading…</span></div>
+        <select id="profileSelect" aria-label="Dashboard profile"></select>
+        <div class="profile-actions">
+          <button id="newProfile">New profile</button>
+          <button id="saveProfile" class="primary">Save changes</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Pages</h2><button id="addPage" class="icon" title="Add page">＋</button></div>
+        <div id="pageList" class="page-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Profile actions</h2></div>
+        <div class="button-row">
+          <button id="duplicateProfile">Duplicate</button>
+          <button id="deleteProfile" class="danger">Delete</button>
+        </div>
+        <p class="small muted" style="margin:12px 0 0">Profiles are stored in the Bridge data directory and survive App upgrades and restarts.</p>
+      </div>
+    </aside>
+
+    <main class="workspace">
+      <div class="toolbar">
+        <div>
+          <div class="eyebrow">Live e-ink preview</div>
+          <h2 id="previewTitle">Dashboard preview</h2>
+        </div>
+        <div class="toolbar-group">
+          <select id="deviceSelect" class="device-select" aria-label="Preview device">
+            <option value="">Sample device</option>
+          </select>
+          <div class="segment" aria-label="Device model">
+            <button data-model="X3">X3</button>
+            <button data-model="X4" class="active">X4</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="canvas-shell">
+        <div id="deviceFrame" class="device-frame">
+          <div id="previewWrap" class="preview-wrap">
+            <img id="previewImage" alt="Rendered e-ink dashboard preview">
+            <div id="previewState" class="preview-state">Building the first preview…</div>
+          </div>
+          <div class="status-strip">
+            <span><span class="live-dot"></span><span id="modelLabel">X4 · 480 × 800</span></span>
+            <span id="previewStatus">Waiting</span>
+          </div>
+        </div>
+      </div>
+    </main>
+
+    <aside class="inspector">
+      <div class="section-head">
+        <div><div class="eyebrow">Page settings</div><h2 id="inspectorTitle">Overview</h2></div>
+        <div class="button-row">
+          <button id="movePageUp" class="icon" title="Move page up">↑</button>
+          <button id="movePageDown" class="icon" title="Move page down">↓</button>
+          <button id="deletePage" class="icon danger" title="Delete page">×</button>
+        </div>
+      </div>
+
+      <div class="field-grid">
+        <label>Page title<input id="pageTitle" maxlength="40"></label>
+        <label>Layout
+          <select id="pageLayout">
+            <option value="auto">Automatic</option>
+            <option value="single">Single spotlight</option>
+            <option value="rows">Two stacked</option>
+            <option value="columns">Two side-by-side</option>
+            <option value="grid">Four-tile grid</option>
+          </select>
+        </label>
+      </div>
+      <label style="margin-top:12px">Automatic rotation
+        <select id="autoRotate">
+          <option value="0">Off</option>
+          <option value="30">Every 30 seconds</option>
+          <option value="60">Every minute</option>
+          <option value="300">Every 5 minutes</option>
+          <option value="900">Every 15 minutes</option>
+          <option value="3600">Every hour</option>
+        </select>
+      </label>
+
+      <div class="section">
+        <div class="section-head">
+          <div><h2>Tiles</h2><span class="small muted">Up to four per page</span></div>
+          <button id="addTile">Add tile</button>
+        </div>
+        <div id="tileList" class="tile-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Send to a device</h2></div>
+        <label>Target device<select id="assignDevice"></select></label>
+        <button id="assignProfile" class="primary" style="width:100%; margin-top:10px">Assign profile and refresh</button>
+        <p class="small muted" style="margin:10px 0 0">Sleeping devices apply the profile at their next scheduled or physical-button wake.</p>
+      </div>
+    </aside>
+  </div>
+
+  <datalist id="entityOptions"></datalist>
+  <dialog id="profileDialog">
+    <form id="profileForm" class="dialog-body" method="dialog">
+      <div><div class="eyebrow">Create profile</div><h2 style="font-size:20px">Start a new dashboard</h2></div>
+      <label>Profile ID<input id="profileName" required pattern="[A-Za-z0-9][A-Za-z0-9_-]{0,31}" placeholder="showroom"></label>
+      <label>Start from
+        <select id="profileTemplate">
+          <option value="blank">Blank page</option>
+          <option value="current">Current profile</option>
+        </select>
+      </label>
+      <div class="button-row" style="justify-content:flex-end">
+        <button id="cancelProfile" type="button">Cancel</button>
+        <button id="createProfile" class="primary" value="default">Create profile</button>
+      </div>
+    </form>
+  </dialog>
+  <div id="toast" role="status"></div>
+
+  <script>
+    const $ = (selector) => document.querySelector(selector);
+    const state = {
+      profiles: [],
+      devices: [],
+      entities: [],
+      profile: null,
+      pageIndex: 0,
+      model: "X4",
+      dirty: false,
+      previewTimer: null,
+      previewRequest: 0,
+    };
+    const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
+    const clone = (value) => JSON.parse(JSON.stringify(value));
+    const key = () => sessionStorage.getItem("flexdisplayBridgeKey") || "";
+
+    async function api(path, options = {}) {
+      const headers = new Headers(options.headers || {});
+      if (key()) headers.set("X-FlexDisplay-Bridge-Key", key());
+      if (options.body && typeof options.body !== "string") {
+        headers.set("Content-Type", "application/json");
+        options.body = JSON.stringify(options.body);
+      }
+      const response = await fetch(API(path), {...options, headers});
+      if (response.status === 401) {
+        $("#authPanel").hidden = false;
+        throw new Error("Bridge API key required");
+      }
+      if (!response.ok) {
+        let message = `${response.status} ${response.statusText}`;
+        try { message = (await response.json()).detail || message; } catch (_) {}
+        throw new Error(message);
+      }
+      return response;
+    }
+
+    function toast(message, error = false) {
+      const node = $("#toast");
+      node.textContent = message;
+      node.className = `${error ? "error " : ""}show`;
+      clearTimeout(node.timer);
+      node.timer = setTimeout(() => node.className = "", 3200);
+    }
+
+    function defaultPage() {
+      return {title: "OVERVIEW", layout: "auto", entities: []};
+    }
+
+    function normalizeProfile(profile) {
+      const selected = clone(profile);
+      selected.pages = selected.pages?.length ? selected.pages : [defaultPage()];
+      selected.auto_rotate_seconds ||= 0;
+      return selected;
+    }
+
+    async function load() {
+      $("#saveState").textContent = "Loading…";
+      try {
+        const response = await api("studio");
+        const payload = await response.json();
+        state.profiles = payload.profiles;
+        state.devices = payload.devices;
+        $("#authPanel").hidden = true;
+        populateDevices();
+        chooseProfile(state.profile?.name || state.profiles[0]?.name);
+        $("#saveState").textContent = "Saved";
+        loadEntities();
+      } catch (error) {
+        $("#saveState").textContent = "Unavailable";
+        if (!String(error.message).includes("API key")) toast(error.message, true);
+      }
+    }
+
+    async function loadEntities() {
+      try {
+        const response = await api("studio/entities");
+        const payload = await response.json();
+        state.entities = payload.entities || [];
+        const list = $("#entityOptions");
+        list.innerHTML = "";
+        state.entities.forEach((entity) => {
+          const option = document.createElement("option");
+          option.value = entity.entity_id;
+          option.label = `${entity.label} · ${entity.state}${entity.unit ? ` ${entity.unit}` : ""}`;
+          list.append(option);
+        });
+        renderTiles();
+        if (payload.error) toast(`Entity catalogue: ${payload.error}`, true);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function populateDevices() {
+      for (const id of ["deviceSelect", "assignDevice"]) {
+        const select = $(`#${id}`);
+        const previous = select.value;
+        select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
+        state.devices.forEach((device) => {
+          const option = document.createElement("option");
+          option.value = device.device_id;
+          option.textContent = `${device.name || device.device_id} · ${device.model || "X3"}`;
+          select.append(option);
+        });
+        if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+      }
+    }
+
+    function chooseProfile(name) {
+      const found = state.profiles.find((profile) => profile.name === name) || state.profiles[0];
+      if (!found) return;
+      state.profile = normalizeProfile(found);
+      state.pageIndex = 0;
+      state.dirty = false;
+      renderAll();
+    }
+
+    function currentPage() {
+      return state.profile.pages[state.pageIndex];
+    }
+
+    function renderAll() {
+      const profileSelect = $("#profileSelect");
+      profileSelect.innerHTML = state.profiles.map((profile) =>
+        `<option value="${escapeHtml(profile.name)}">${escapeHtml(profile.name)}</option>`
+      ).join("");
+      profileSelect.value = state.profile.name;
+      $("#autoRotate").value = String(state.profile.auto_rotate_seconds || 0);
+      if (!$("#autoRotate").value) $("#autoRotate").value = "0";
+      renderPages();
+      renderInspector();
+      updateDirtyState();
+      schedulePreview();
+    }
+
+    function renderPages() {
+      $("#pageList").innerHTML = state.profile.pages.map((page, index) => `
+        <div class="page-item ${index === state.pageIndex ? "active" : ""}" data-page="${index}" tabindex="0">
+          <span class="page-number">${index + 1}</span>
+          <span class="page-meta">
+            <span class="page-title">${escapeHtml(page.title)}</span>
+            <span class="page-layout">${layoutLabel(page.layout)} · ${page.entities.length} tile${page.entities.length === 1 ? "" : "s"}</span>
+          </span>
+          <span aria-hidden="true">›</span>
+        </div>
+      `).join("");
+      document.querySelectorAll(".page-item").forEach((item) => {
+        const select = () => {
+          state.pageIndex = Number(item.dataset.page);
+          renderPages();
+          renderInspector();
+          schedulePreview();
+        };
+        item.addEventListener("click", select);
+        item.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") select();
+        });
+      });
+    }
+
+    function renderInspector() {
+      const page = currentPage();
+      $("#inspectorTitle").textContent = page.title;
+      $("#previewTitle").textContent = `${state.profile.name} · ${page.title}`;
+      $("#pageTitle").value = page.title;
+      $("#pageLayout").value = page.layout || "auto";
+      $("#movePageUp").disabled = state.pageIndex === 0;
+      $("#movePageDown").disabled = state.pageIndex === state.profile.pages.length - 1;
+      $("#deletePage").disabled = state.profile.pages.length === 1;
+      $("#addTile").disabled = page.entities.length >= 4;
+      renderTiles();
+    }
+
+    function renderTiles() {
+      if (!state.profile) return;
+      const page = currentPage();
+      if (!page.entities.length) {
+        $("#tileList").innerHTML = '<div class="empty">This page is blank. Add a tile and select a Home Assistant entity.</div>';
+        return;
+      }
+      $("#tileList").innerHTML = page.entities.map((tile, index) => `
+        <article class="tile-card" data-tile="${index}">
+          <div class="tile-head"><h3>Tile ${index + 1}</h3><button class="icon danger remove-tile" title="Remove tile">×</button></div>
+          <div class="tile-body">
+            <label>Home Assistant entity
+              <input class="tile-entity" list="entityOptions" value="${escapeHtml(tile.entity_id)}" placeholder="sensor.example">
+            </label>
+            <label>Display label<input class="tile-label" maxlength="64" value="${escapeHtml(tile.label || tile.entity_id)}"></label>
+            <div class="field-grid">
+              <label>Visual
+                <select class="tile-style">
+                  ${options(["value", "gauge", "progress", "history", "qr"], tile.style || "value", styleLabel)}
+                </select>
+              </label>
+              <label>Icon
+                <select class="tile-icon">
+                  ${options(["auto","home","temperature","humidity","battery","power","solar","wifi","storage","clock","weather","rain","light","lock","alert"], tile.icon || "auto", titleCase)}
+                </select>
+              </label>
+            </div>
+            <div class="field-grid">
+              <label>Unit<input class="tile-unit" maxlength="16" value="${escapeHtml(tile.unit || "")}" placeholder="From entity"></label>
+              <span></span>
+            </div>
+            <div class="field-grid range-fields" ${(tile.style === "gauge" || tile.style === "progress") ? "" : "hidden"}>
+              <label>Minimum<input class="tile-min" type="number" step="any" value="${Number(tile.minimum ?? 0)}"></label>
+              <label>Maximum<input class="tile-max" type="number" step="any" value="${Number(tile.maximum ?? 100)}"></label>
+            </div>
+          </div>
+        </article>
+      `).join("");
+      document.querySelectorAll(".tile-card").forEach(bindTile);
+    }
+
+    function bindTile(card) {
+      const index = Number(card.dataset.tile);
+      const tile = currentPage().entities[index];
+      card.querySelector(".remove-tile").addEventListener("click", () => {
+        currentPage().entities.splice(index, 1);
+        changed();
+        renderInspector();
+        renderPages();
+      });
+      card.querySelector(".tile-entity").addEventListener("change", (event) => {
+        tile.entity_id = event.target.value.trim();
+        const entity = state.entities.find((candidate) => candidate.entity_id === tile.entity_id);
+        if (entity) {
+          tile.label = entity.label;
+          tile.unit = entity.unit;
+          if (tile.icon === "auto") tile.icon = inferIcon(entity);
+        }
+        changed();
+        renderTiles();
+      });
+      for (const [selector, field] of [
+        [".tile-label", "label"], [".tile-unit", "unit"], [".tile-icon", "icon"],
+        [".tile-style", "style"], [".tile-min", "minimum"], [".tile-max", "maximum"],
+      ]) {
+        card.querySelector(selector).addEventListener("change", (event) => {
+          tile[field] = ["minimum", "maximum"].includes(field) ? Number(event.target.value) : event.target.value;
+          changed();
+          if (field === "style") renderTiles();
+        });
+      }
+    }
+
+    function changed() {
+      state.dirty = true;
+      updateDirtyState();
+      schedulePreview();
+    }
+
+    function updateDirtyState() {
+      $("#saveState").innerHTML = state.dirty ? '<span class="dirty-dot">● Unsaved</span>' : "Saved";
+    }
+
+    function schedulePreview() {
+      clearTimeout(state.previewTimer);
+      $("#previewStatus").textContent = "Rendering…";
+      state.previewTimer = setTimeout(renderPreview, 350);
+    }
+
+    async function renderPreview() {
+      if (!state.profile) return;
+      const requestId = ++state.previewRequest;
+      $("#previewState").hidden = false;
+      $("#previewState").textContent = "Rendering live Home Assistant values…";
+      try {
+        const selected = state.devices.find((device) => device.device_id === $("#deviceSelect").value);
+        const response = await api("studio/preview", {
+          method: "POST",
+          body: {
+            model: state.model,
+            device_id: selected?.device_id || "",
+            profile: state.profile,
+            page_index: state.pageIndex,
+          },
+        });
+        if (requestId !== state.previewRequest) return;
+        const blob = await response.blob();
+        const previous = $("#previewImage").src;
+        $("#previewImage").src = URL.createObjectURL(blob);
+        $("#previewImage").onload = () => {
+          $("#previewState").hidden = true;
+          if (previous.startsWith("blob:")) URL.revokeObjectURL(previous);
+        };
+        $("#previewStatus").textContent = response.headers.get("X-FlexDisplay-Preview-HA-Error") === "true"
+          ? "Preview · HA values unavailable"
+          : "Live preview";
+      } catch (error) {
+        if (requestId !== state.previewRequest) return;
+        $("#previewState").hidden = false;
+        $("#previewState").textContent = error.message;
+        $("#previewStatus").textContent = "Needs attention";
+      }
+    }
+
+    async function saveProfile() {
+      try {
+        $("#saveProfile").disabled = true;
+        const response = await api(`studio/profiles/${encodeURIComponent(state.profile.name)}`, {
+          method: "PUT",
+          body: state.profile,
+        });
+        const result = await response.json();
+        const index = state.profiles.findIndex((profile) => profile.name === state.profile.name);
+        if (index >= 0) state.profiles[index] = result.profile;
+        else state.profiles.push(result.profile);
+        state.profile = normalizeProfile(result.profile);
+        state.dirty = false;
+        updateDirtyState();
+        toast(result.refresh_queued.length
+          ? `Saved. Refresh queued for ${result.refresh_queued.length} device${result.refresh_queued.length === 1 ? "" : "s"}.`
+          : "Dashboard profile saved.");
+        return true;
+      } catch (error) {
+        toast(error.message, true);
+        return false;
+      } finally {
+        $("#saveProfile").disabled = false;
+      }
+    }
+
+    async function assignProfile() {
+      const deviceId = $("#assignDevice").value;
+      if (!deviceId) return toast("Select a target device first.", true);
+      if (state.dirty && !await saveProfile()) return;
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}/provision`, {
+          method: "PUT",
+          body: {profile: state.profile.name},
+        });
+        toast(`Assigned ${state.profile.name} to ${deviceId}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function setModel(model) {
+      state.model = model;
+      document.querySelectorAll("[data-model]").forEach((button) =>
+        button.classList.toggle("active", button.dataset.model === model)
+      );
+      const specs = model === "X3" ? [528, 792] : [480, 800];
+      $("#deviceFrame").classList.toggle("x3", model === "X3");
+      $("#previewWrap").style.setProperty("--ratio", `${specs[0]}/${specs[1]}`);
+      $("#modelLabel").textContent = `${model} · ${specs[0]} × ${specs[1]}`;
+      schedulePreview();
+    }
+
+    function addPage() {
+      state.profile.pages.push({title: `PAGE ${state.profile.pages.length + 1}`, layout: "auto", entities: []});
+      state.pageIndex = state.profile.pages.length - 1;
+      changed();
+      renderPages();
+      renderInspector();
+    }
+
+    function movePage(delta) {
+      const target = state.pageIndex + delta;
+      if (target < 0 || target >= state.profile.pages.length) return;
+      [state.profile.pages[state.pageIndex], state.profile.pages[target]] =
+        [state.profile.pages[target], state.profile.pages[state.pageIndex]];
+      state.pageIndex = target;
+      changed();
+      renderPages();
+      renderInspector();
+    }
+
+    async function deleteProfile() {
+      if (!confirm(`Delete dashboard profile “${state.profile.name}”?`)) return;
+      try {
+        await api(`studio/profiles/${encodeURIComponent(state.profile.name)}`, {method: "DELETE"});
+        state.profiles = state.profiles.filter((profile) => profile.name !== state.profile.name);
+        chooseProfile(state.profiles[0]?.name);
+        toast("Dashboard profile deleted.");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function openNewProfile(copyCurrent = false) {
+      $("#profileName").value = "";
+      $("#profileTemplate").value = copyCurrent ? "current" : "blank";
+      $("#profileDialog").showModal();
+      setTimeout(() => $("#profileName").focus(), 50);
+    }
+
+    function createNewProfile(event) {
+      event.preventDefault();
+      const name = $("#profileName").value.trim();
+      if (!$("#profileName").checkValidity()) return $("#profileName").reportValidity();
+      if (state.profiles.some((profile) => profile.name === name)) return toast("That profile already exists.", true);
+      const profile = $("#profileTemplate").value === "current"
+        ? {...clone(state.profile), name}
+        : {name, auto_rotate_seconds: 0, pages: [defaultPage()]};
+      state.profiles.push(profile);
+      state.profile = normalizeProfile(profile);
+      state.pageIndex = 0;
+      state.dirty = true;
+      $("#profileDialog").close();
+      renderAll();
+    }
+
+    function inferIcon(entity) {
+      const identity = `${entity.entity_id} ${entity.label} ${entity.device_class}`.toLowerCase();
+      if (identity.includes("temperature")) return "temperature";
+      if (identity.includes("humidity") || identity.includes("moisture")) return "humidity";
+      if (identity.includes("battery")) return "battery";
+      if (identity.includes("solar")) return "solar";
+      if (identity.includes("power") || ["w", "kw"].includes(entity.unit.toLowerCase())) return "power";
+      if (entity.domain === "weather") return "weather";
+      if (entity.domain === "light") return "light";
+      if (entity.domain === "lock") return "lock";
+      return "auto";
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[character]);
+    }
+    const titleCase = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+    const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code"})[value] || titleCase(value);
+    const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid"})[value] || "Automatic";
+    const options = (values, selected, labeler) => values.map((value) =>
+      `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
+    ).join("");
+
+    $("#unlockButton").addEventListener("click", () => {
+      sessionStorage.setItem("flexdisplayBridgeKey", $("#apiKey").value);
+      load();
+    });
+    $("#profileSelect").addEventListener("change", (event) => {
+      if (state.dirty && !confirm("Discard the unsaved changes to this profile?")) {
+        event.target.value = state.profile.name;
+        return;
+      }
+      chooseProfile(event.target.value);
+    });
+    $("#saveProfile").addEventListener("click", saveProfile);
+    $("#newProfile").addEventListener("click", () => openNewProfile(false));
+    $("#duplicateProfile").addEventListener("click", () => openNewProfile(true));
+    $("#deleteProfile").addEventListener("click", deleteProfile);
+    $("#profileForm").addEventListener("submit", createNewProfile);
+    $("#cancelProfile").addEventListener("click", () => $("#profileDialog").close());
+    $("#addPage").addEventListener("click", addPage);
+    $("#movePageUp").addEventListener("click", () => movePage(-1));
+    $("#movePageDown").addEventListener("click", () => movePage(1));
+    $("#deletePage").addEventListener("click", () => {
+      if (state.profile.pages.length === 1) return;
+      state.profile.pages.splice(state.pageIndex, 1);
+      state.pageIndex = Math.min(state.pageIndex, state.profile.pages.length - 1);
+      changed(); renderPages(); renderInspector();
+    });
+    $("#addTile").addEventListener("click", () => {
+      if (currentPage().entities.length >= 4) return;
+      currentPage().entities.push({
+        entity_id: "sensor.example",
+        label: "New tile",
+        unit: "",
+        icon: "auto",
+        style: "value",
+        minimum: 0,
+        maximum: 100,
+      });
+      changed(); renderInspector(); renderPages();
+    });
+    $("#pageTitle").addEventListener("input", (event) => {
+      currentPage().title = event.target.value.toUpperCase();
+      $("#inspectorTitle").textContent = currentPage().title;
+      changed(); renderPages();
+    });
+    $("#pageLayout").addEventListener("change", (event) => {
+      currentPage().layout = event.target.value;
+      changed(); renderPages();
+    });
+    $("#autoRotate").addEventListener("change", (event) => {
+      state.profile.auto_rotate_seconds = Number(event.target.value);
+      changed();
+    });
+    $("#assignProfile").addEventListener("click", assignProfile);
+    $("#deviceSelect").addEventListener("change", (event) => {
+      const selected = state.devices.find((device) => device.device_id === event.target.value);
+      if (selected?.model) setModel(selected.model.toUpperCase().includes("4") ? "X4" : "X3");
+      else schedulePreview();
+    });
+    document.querySelectorAll("[data-model]").forEach((button) =>
+      button.addEventListener("click", () => setModel(button.dataset.model))
+    );
+    window.addEventListener("beforeunload", (event) => {
+      if (!state.dirty) return;
+      event.preventDefault();
+      event.returnValue = "";
+    });
+    setModel("X4");
+    load();
+  </script>
+</body>
+</html>

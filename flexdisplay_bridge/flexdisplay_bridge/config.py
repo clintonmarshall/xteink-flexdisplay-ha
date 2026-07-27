@@ -20,12 +20,17 @@ class EntityConfig:
     entity_id: str
     label: str
     unit: str = ""
+    icon: str = "auto"
+    style: str = "value"
+    minimum: float = 0.0
+    maximum: float = 100.0
 
 
 @dataclass(frozen=True)
 class DashboardPageConfig:
     title: str
     entities: tuple[EntityConfig, ...] = ()
+    layout: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -167,10 +172,18 @@ class BridgeConfig:
 
 
 def _entity(value: dict[str, Any]) -> EntityConfig:
+    minimum = float(value.get("minimum", 0))
+    maximum = float(value.get("maximum", 100))
+    if maximum <= minimum:
+        maximum = minimum + 1
     return EntityConfig(
         entity_id=str(value["entity_id"]),
         label=str(value.get("label") or value["entity_id"]),
         unit=str(value.get("unit") or ""),
+        icon=str(value.get("icon") or "auto"),
+        style=str(value.get("style") or "value"),
+        minimum=minimum,
+        maximum=maximum,
     )
 
 
@@ -187,6 +200,7 @@ def _profile(name: str, value: dict[str, Any]) -> DashboardProfileConfig:
         DashboardPageConfig(
             title=str(page.get("title") or f"PAGE {index + 1}").upper(),
             entities=tuple(_page_entity(item) for item in page.get("entities", [])),
+            layout=str(page.get("layout") or "auto"),
         )
         for index, page in enumerate(value.get("pages", []))
         if isinstance(page, dict)
