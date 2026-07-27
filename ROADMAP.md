@@ -46,14 +46,34 @@ Delivery: Bridge/HACS/Firmware `0.17.0`.
 
 ## v0.18 — Photo Frame media pipeline
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS/Firmware `0.18.0`.
 
 - JPEG, PNG, WebP, and BMP upload and conversion.
 - E-ink crop, rotation, resize, and dithering previews.
 - Albums, shuffle, schedules, captions, and Home Assistant media sources.
 
-## v0.19 — Six-device Fleet Canvas
+## v0.19 — Fleet recovery and OTA observability
+
+Status: implemented, pending release and Home Assistant deployment.
+Delivery: Bridge/HACS/Firmware `0.19.0`.
+
+- Cancel queued or already-delivered firmware commands safely.
+- Retry failed updates with bounded attempts and configurable backoff.
+- Reset a blocked rollout while preserving a bounded audit history.
+- Reconcile a USB-recovered device automatically after its next check-in.
+- Report preflight, download, validation, flash, reboot, and failure progress.
+- Mirror and verify release firmware on the local Bridge before device delivery.
+
+## v0.20 — Device health and screen history
+
+Status: queued.
+
+- Reset/crash diagnostics, SD-card health, Wi-Fi history, and battery prediction.
+- Last rendered screen, recent screen history, and fleet freshness overview.
+- Configurable maintenance windows and stale-device alerts.
+
+## v0.21 — Six-device Fleet Canvas
 
 Status: queued.
 
@@ -61,11 +81,10 @@ Status: queued.
 - Server-side image tiling and synchronized queued refresh.
 - Canvas health, partial-update recovery, and mixed-model calibration.
 
-## v0.20 — Security, diagnostics, and stronger OTA
+## v0.22 — Security and release channels
 
 Status: queued.
 
 - Per-device credentials and signed firmware manifests.
 - Stable, beta, and development release channels.
-- Boot health checks, automatic rollback, and maintenance windows.
-- Reset/crash diagnostics, SD health, Wi-Fi history, and battery prediction.
+- Boot health checks and automatic rollback.

@@ -12,15 +12,24 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.18.0",
+    "firmware_version": "1.4.1-flexdisplay.0.19.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/firmware-v0.18.0/firmware.bin"
+        "releases/download/firmware-v0.19.0/firmware.bin"
     ),
-    "firmware_sha256": "fc40c84a6106447fc3caf26bb373bf922fae5d3300f4aab5eb6cbcbe1a05cc90",
-    "firmware_size": 5_487_184,
+    "firmware_sha256": "812e07bfd9b7c0d67f1446609d2040b0ca876ba94c04ede76f7f290e072af3fb",
+    "firmware_size": 5_489_488,
 }
 LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.4.1-flexdisplay.0.18.0",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+            "releases/download/firmware-v0.18.0/firmware.bin"
+        ),
+        "firmware_sha256": "fc40c84a6106447fc3caf26bb373bf922fae5d3300f4aab5eb6cbcbe1a05cc90",
+        "firmware_size": 5_487_184,
+    },
     {
         "firmware_version": "1.4.1-flexdisplay.0.17.0",
         "firmware_url": (
@@ -102,6 +111,18 @@ def main() -> None:
     )
     os.environ["FLEXDISPLAY_FIRMWARE_MAX_PARALLEL"] = option(
         options, "firmware_max_parallel", 1
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_RETRY_LIMIT"] = option(
+        options, "firmware_retry_limit", 3
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_RETRY_BACKOFF_SECONDS"] = option(
+        options, "firmware_retry_backoff_seconds", 300
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MIRROR_ENABLED"] = option(
+        options, "firmware_mirror_enabled", True
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MIRROR_RETRY_SECONDS"] = option(
+        options, "firmware_mirror_retry_seconds", 300
     )
 
     if not CONFIG_PATH.exists():

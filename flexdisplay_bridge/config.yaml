@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.18.0"
+version: "0.19.0"
 slug: flexdisplay_bridge
 description: Render Home Assistant dashboards and manage XTEINK X3/X4 FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay
@@ -30,14 +30,18 @@ options:
   mqtt_username: flexdisplay
   mqtt_password: ""
   bridge_api_key: ""
-  firmware_version: 1.4.1-flexdisplay.0.18.0
-  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/firmware-v0.18.0/firmware.bin
-  firmware_sha256: fc40c84a6106447fc3caf26bb373bf922fae5d3300f4aab5eb6cbcbe1a05cc90
-  firmware_size: 5487184
+  firmware_version: 1.4.1-flexdisplay.0.19.0
+  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/firmware-v0.19.0/firmware.bin
+  firmware_sha256: 812e07bfd9b7c0d67f1446609d2040b0ca876ba94c04ede76f7f290e072af3fb
+  firmware_size: 5489488
   firmware_minimum_battery: 40
   firmware_canary_required: true
   firmware_require_usb_for_canary: true
   firmware_max_parallel: 1
+  firmware_retry_limit: 3
+  firmware_retry_backoff_seconds: 300
+  firmware_mirror_enabled: true
+  firmware_mirror_retry_seconds: 300
 schema:
   dashboard_title: str
   mqtt_enabled: bool
@@ -54,3 +58,7 @@ schema:
   firmware_canary_required: bool
   firmware_require_usb_for_canary: bool
   firmware_max_parallel: int(1,10)
+  firmware_retry_limit: int(0,10)
+  firmware_retry_backoff_seconds: int(0,86400)
+  firmware_mirror_enabled: bool
+  firmware_mirror_retry_seconds: int(30,86400)

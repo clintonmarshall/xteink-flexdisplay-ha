@@ -61,9 +61,21 @@
       "firmware_rollout_status": {
         "name": "Firmware rollout status"
       },
-      "firmware_update_status": {
-        "name": "Firmware update status"
-      },
+            "firmware_update_status": {
+                "name": "Firmware update status"
+            },
+            "firmware_update_stage": {
+                "name": "Firmware update stage"
+            },
+            "firmware_update_progress": {
+                "name": "Firmware update progress"
+            },
+            "firmware_update_error": {
+                "name": "Firmware update error"
+            },
+            "firmware_update_error_at": {
+                "name": "Firmware update error time"
+            },
       "power_state": {
         "name": "Power state"
       },
@@ -157,9 +169,15 @@
       "restart": {
         "name": "Restart"
       },
-      "cancel_commands": {
-        "name": "Cancel pending commands"
-      },
+            "cancel_commands": {
+                "name": "Cancel active commands"
+            },
+            "retry_firmware": {
+                "name": "Retry firmware update"
+            },
+            "reset_firmware_rollout": {
+                "name": "Reset firmware rollout"
+            },
       "verify_usb_recovery": {
         "name": "Verify USB firmware recovery"
       }

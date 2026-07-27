@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.19.0
+
+- Added Home Assistant controls to cancel active commands, retry failed
+  firmware updates, reset a blocked rollout, and verify USB recovery.
+- Cancellation now covers both queued and already-delivered durable commands,
+  with device-side checks before validation and flashing.
+- Added firmware stages and percentages for preflight, download, validation,
+  flash, reboot, completion, cancellation, and exact failure reporting.
+- Added bounded retry attempts and configurable backoff without weakening the
+  canary-first rollout gate.
+- Added automatic reconciliation when a USB-recovered device reports the exact
+  target firmware at its next Bridge check-in.
+- Added a Bridge-local firmware mirror that validates the configured file's
+  exact byte size and SHA-256 before serving it to devices.
+- Added bounded rollout audit history and Home Assistant firmware stage,
+  progress, error, and error-time sensors.
+
 ## 0.18.0
 
 - Added a persistent Dashboard Studio Photo Frame library with albums and

@@ -163,21 +163,112 @@ class DeviceStore:
                 record["dispatched_commands"] = commands
                 record["dispatched_command_id"] = record.pop("pending_command_id", None)
                 record["command_dispatched_at"] = utc_now()
+                if "install" in commands:
+                    record["firmware_update_status"] = "dispatched"
+                    record["firmware_update_stage"] = "dispatched"
+                    record["firmware_update_percent"] = 1
+                    record["firmware_update_stage_at"] = record["command_dispatched_at"]
                 record["render_revision"] = int(record.get("render_revision", 0)) + 1
                 self._save()
             return commands
 
-    def clear_commands(self, device_id: str) -> dict[str, Any] | None:
-        """Cancel commands that have not yet been delivered to a device."""
+    def clear_commands(
+        self,
+        device_id: str,
+        *,
+        include_dispatched: bool = True,
+    ) -> dict[str, Any] | None:
+        """Cancel queued commands and optionally stop durable command retries."""
         with self._lock:
             record = self._state["devices"].get(device_id)
             if not record:
                 return None
+            now = utc_now()
+            cancelled_pending = list(record.get("pending_commands") or [])
+            cancelled_dispatched = (
+                list(record.get("dispatched_commands") or []) if include_dispatched else []
+            )
+            cancelled_id = str(
+                record.get("dispatched_command_id")
+                or record.get("pending_command_id")
+                or ""
+            )
             record["pending_commands"] = []
             record.pop("pending_command_id", None)
-            record["commands_cancelled_at"] = utc_now()
+            if include_dispatched:
+                record["dispatched_commands"] = []
+                record.pop("dispatched_command_id", None)
+            record["commands_cancelled_at"] = now
+            record["last_cancelled_commands"] = list(
+                dict.fromkeys(cancelled_pending + cancelled_dispatched)
+            )
+            record["last_cancelled_command_id"] = cancelled_id[:96]
+            if "install" in cancelled_pending or "install" in cancelled_dispatched:
+                record["firmware_update_status"] = "cancelled"
+                record["firmware_update_stage"] = "cancelled"
+                record["firmware_update_percent"] = 0
+                record["firmware_update_stage_at"] = now
+                record["firmware_update_error"] = "install:cancelled"
+                record["firmware_update_error_at"] = now
+                rollout = self._state.get("firmware_rollout") or {}
+                if rollout.get("target_version") == record.get("firmware_update_target"):
+                    rollout["last_cancelled_device_id"] = device_id
+                    rollout["last_cancelled_at"] = now
+                    if rollout.get("canary_device_id") == device_id:
+                        rollout["status"] = "awaiting_canary"
+                        rollout.pop("canary_device_id", None)
+                        rollout.pop("canary_started_at", None)
             self._save()
             return deepcopy(record)
+
+    def record_firmware_progress(
+        self,
+        device_id: str,
+        command_id: str,
+        stage: str,
+        percent: int,
+        detail: str = "",
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Record OTA progress and tell a device whether its command was cancelled."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None, True
+            active_id = str(record.get("dispatched_command_id") or "")
+            active = bool(
+                command_id
+                and active_id == command_id
+                and "install" in (record.get("dispatched_commands") or [])
+            )
+            if not active:
+                record["last_cancelled_progress_command_id"] = command_id[:96]
+                record["last_cancelled_progress_at"] = utc_now()
+                self._save()
+                return deepcopy(record), True
+
+            now = utc_now()
+            record["firmware_update_status"] = stage
+            record["firmware_update_stage"] = stage
+            record["firmware_update_percent"] = max(0, min(100, int(percent)))
+            record["firmware_update_stage_at"] = now
+            if detail:
+                record["firmware_update_detail"] = detail[:160]
+            if stage == "failed":
+                record["firmware_update_error"] = detail[:160] or "install:failed"
+                record["firmware_update_error_at"] = now
+            history = record.setdefault("firmware_progress_history", [])
+            history.append(
+                {
+                    "command_id": command_id[:96],
+                    "stage": stage,
+                    "percent": record["firmware_update_percent"],
+                    "detail": detail[:160],
+                    "at": now,
+                }
+            )
+            record["firmware_progress_history"] = history[-24:]
+            self._save()
+            return deepcopy(record), False
 
     def acknowledge(self, device_id: str, result: str, command_id: str = "") -> bool:
         if not result:
@@ -222,16 +313,253 @@ class DeviceStore:
         with self._lock:
             return deepcopy(self._state.get("firmware_rollout") or {})
 
+    def reset_firmware_rollout(
+        self,
+        target_version: str,
+        *,
+        canary_required: bool,
+    ) -> dict[str, Any]:
+        """Cancel active installs and create a clean rollout for the same release."""
+        if not target_version:
+            raise ValueError("A target firmware version is required")
+        with self._lock:
+            now = utc_now()
+            previous = deepcopy(self._state.get("firmware_rollout") or {})
+            history = list(self._state.get("firmware_rollout_history") or [])
+            if previous:
+                previous["archived_at"] = now
+                history.append(previous)
+                self._state["firmware_rollout_history"] = history[-12:]
+
+            for record in self._state["devices"].values():
+                pending = list(record.get("pending_commands") or [])
+                dispatched = list(record.get("dispatched_commands") or [])
+                if "install" in pending:
+                    record["pending_commands"] = [
+                        command for command in pending if command != "install"
+                    ]
+                    if not record["pending_commands"]:
+                        record.pop("pending_command_id", None)
+                if "install" in dispatched:
+                    record["dispatched_commands"] = [
+                        command for command in dispatched if command != "install"
+                    ]
+                    if not record["dispatched_commands"]:
+                        record.pop("dispatched_command_id", None)
+                if "install" in pending or "install" in dispatched:
+                    record["firmware_update_status"] = "cancelled"
+                    record["firmware_update_stage"] = "cancelled"
+                    record["firmware_update_percent"] = 0
+                    record["firmware_update_stage_at"] = now
+                    record["firmware_update_error"] = "install:rollout-reset"
+                    record["firmware_update_error_at"] = now
+
+            rollout = {
+                "target_version": target_version,
+                "status": "awaiting_canary" if canary_required else "fleet_active",
+                "started_at": now,
+                "reset_at": now,
+                "updated_devices": [],
+            }
+            self._state["firmware_rollout"] = rollout
+            self._save()
+            return deepcopy(rollout)
+
+    def retry_firmware_install(
+        self,
+        device_id: str,
+        target_version: str,
+        *,
+        canary_required: bool,
+        max_parallel: int,
+        retry_limit: int,
+        retry_backoff_seconds: int,
+    ) -> dict[str, Any]:
+        """Retry one failed install while preserving canary and concurrency gates."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                raise ValueError("Device has not checked in")
+            if record.get("firmware_update_status") not in {"failed", "cancelled"}:
+                raise ValueError(
+                    "The device has no failed or cancelled firmware update to retry"
+                )
+            retry_count = int(record.get("firmware_retry_count") or 0)
+            if retry_count >= retry_limit:
+                raise ValueError(f"Firmware retry limit of {retry_limit} has been reached")
+            last_attempt = record.get("firmware_last_retry_at") or record.get(
+                "firmware_update_error_at"
+            )
+            if retry_backoff_seconds > 0 and last_attempt:
+                try:
+                    elapsed = (
+                        datetime.now(UTC) - datetime.fromisoformat(str(last_attempt))
+                    ).total_seconds()
+                    if elapsed < retry_backoff_seconds:
+                        remaining = max(1, int(retry_backoff_seconds - elapsed))
+                        raise ValueError(
+                            f"Firmware retry is delayed for {remaining} seconds"
+                        )
+                except ValueError as err:
+                    if "delayed" in str(err):
+                        raise
+
+            rollout = self._state.get("firmware_rollout") or {}
+            if rollout.get("target_version") != target_version:
+                rollout = {
+                    "target_version": target_version,
+                    "status": "awaiting_canary" if canary_required else "fleet_active",
+                    "started_at": utc_now(),
+                    "updated_devices": [],
+                }
+                self._state["firmware_rollout"] = rollout
+            elif rollout.get("status") == "failed":
+                if canary_required:
+                    rollout["status"] = "canary_active"
+                    rollout["canary_device_id"] = device_id
+                    rollout["canary_started_at"] = utc_now()
+                else:
+                    rollout["status"] = "fleet_active"
+                rollout["retry_resumed_at"] = utc_now()
+                rollout["retry_device_id"] = device_id
+
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
+            record["firmware_retry_count"] = retry_count + 1
+            record["firmware_last_retry_at"] = utc_now()
+            self._save()
+            return self.queue_firmware_install(
+                device_id,
+                target_version,
+                canary_required=canary_required,
+                max_parallel=max_parallel,
+            )
+
+    def reconcile_running_firmware(
+        self,
+        device_id: str,
+        target_version: str,
+        *,
+        canary_required: bool,
+        require_usb_for_canary: bool,
+        method: str = "device_checkin",
+    ) -> dict[str, Any] | None:
+        """Reconcile an exact target version reported after OTA or a USB flash."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record or not target_version or record.get("firmware") != target_version:
+                return deepcopy(record) if record else None
+            if record.get("firmware_update_status") == "verified":
+                return deepcopy(record)
+
+            tracked_target = str(record.get("firmware_update_target") or "")
+            rollout = self._state.get("firmware_rollout") or {}
+            rollout_matches = rollout.get("target_version") == target_version
+            was_tracked = bool(
+                tracked_target == target_version
+                or "install" in (record.get("pending_commands") or [])
+                or "install" in (record.get("dispatched_commands") or [])
+                or record.get("firmware_update_status")
+                in {
+                    "queued",
+                    "dispatched",
+                    "downloading",
+                    "validating",
+                    "flashing",
+                    "rebooting",
+                    "failed",
+                    "cancelled",
+                }
+            )
+            if not was_tracked:
+                return deepcopy(record)
+
+            usb_eligible = record.get("usb_connected") is True
+            can_recover_rollout = rollout_matches and (
+                not canary_required
+                or rollout.get("canary_device_id") in {None, "", device_id}
+                and (not require_usb_for_canary or usb_eligible)
+            )
+            now = utc_now()
+            reconciled_command_id = str(
+                record.get("dispatched_command_id")
+                or record.get("pending_command_id")
+                or record.get("last_command_id")
+                or ""
+            )
+            record["pending_commands"] = [
+                command
+                for command in (record.get("pending_commands") or [])
+                if command != "install"
+            ]
+            if not record["pending_commands"]:
+                record.pop("pending_command_id", None)
+            record["dispatched_commands"] = [
+                command
+                for command in (record.get("dispatched_commands") or [])
+                if command != "install"
+            ]
+            if not record["dispatched_commands"]:
+                record.pop("dispatched_command_id", None)
+            record["firmware_update_target"] = target_version
+            record["firmware_update_status"] = "verified"
+            record["firmware_update_stage"] = "verified"
+            record["firmware_update_percent"] = 100
+            record["firmware_update_stage_at"] = now
+            record["firmware_verified_at"] = now
+            record["firmware_verification_method"] = method
+            if reconciled_command_id:
+                record["last_command_id"] = reconciled_command_id[:96]
+                record["last_command_result"] = "install:boot-reconciled"
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
+
+            if rollout_matches:
+                updated = rollout.setdefault("updated_devices", [])
+                if device_id not in updated:
+                    updated.append(device_id)
+                if can_recover_rollout and canary_required:
+                    rollout["canary_device_id"] = device_id
+                    rollout["status"] = "canary_verified"
+                    rollout["canary_verified_at"] = now
+                elif not canary_required and rollout.get("status") != "failed":
+                    rollout["status"] = "fleet_active"
+                rollout["last_verified_at"] = now
+                rollout["last_verified_device_id"] = device_id
+                rollout["last_verification_method"] = method
+                if (
+                    rollout.get("status") == "failed"
+                    and rollout.get("last_failed_device_id") == device_id
+                    and can_recover_rollout
+                ):
+                    rollout["status"] = (
+                        "canary_verified" if canary_required else "fleet_active"
+                    )
+
+            history = record.setdefault("command_history", [])
+            history.append(
+                {
+                    "command_id": reconciled_command_id[:96],
+                    "result": "install:boot-reconciled",
+                    "verification_method": method,
+                    "completed_at": now,
+                }
+            )
+            record["command_history"] = history[-16:]
+            self._save()
+            return deepcopy(record)
+
     def verify_usb_recovery(
         self,
         device_id: str,
         target_version: str,
         expected_command_id: str,
         *,
+        canary_required: bool = True,
         max_checkin_age_seconds: int = 600,
         external_usb_evidence: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """Reconcile a physically verified USB recovery without forging a device ACK."""
+        """Reconcile a physical USB flash even when no durable install remains."""
         with self._lock:
             record = self._state["devices"].get(device_id)
             if not record:
@@ -254,17 +582,6 @@ class DeviceStore:
             blockers: list[str] = []
             if not target_version:
                 blockers.append("A target firmware version is required")
-            if rollout.get("target_version") != target_version:
-                blockers.append("The active rollout does not match the requested target")
-            rollout_status = str(rollout.get("status") or "")
-            is_active_canary = (
-                rollout_status == "canary_active"
-                and rollout.get("canary_device_id") == device_id
-            )
-            if rollout_status == "canary_active" and not is_active_canary:
-                blockers.append("This device is not the active canary")
-            elif rollout_status not in {"canary_active", "canary_verified", "fleet_active"}:
-                blockers.append("The rollout is not accepting verified USB recoveries")
             if record.get("firmware") != target_version:
                 blockers.append("The device is not reporting the exact target firmware")
             if record.get("usb_connected") is not True and not external_usb_valid:
@@ -273,11 +590,17 @@ class DeviceStore:
                 )
             if record.get("sd_ready") is not True:
                 blockers.append("The device SD card is not ready")
-            if record.get("pending_commands"):
-                blockers.append("The device has pending commands")
-            if dispatched != ["install"]:
-                blockers.append("The only dispatched command must be the stuck install")
-            if not expected_command_id or dispatched_id != expected_command_id:
+            if any(
+                command != "install"
+                for command in (record.get("pending_commands") or [])
+            ) or any(command != "install" for command in dispatched):
+                blockers.append("The device has an unrelated command in progress")
+            known_command_id = dispatched_id or str(record.get("last_command_id") or "")
+            if (
+                expected_command_id
+                and known_command_id
+                and known_command_id != expected_command_id
+            ):
                 blockers.append("The expected command ID does not match the stuck install")
 
             last_seen = record.get("last_seen")
@@ -301,6 +624,16 @@ class DeviceStore:
                 raise ValueError("; ".join(blockers))
 
             verified_at = utc_now()
+            if rollout.get("target_version") != target_version:
+                rollout = {
+                    "target_version": target_version,
+                    "status": "awaiting_canary" if canary_required else "fleet_active",
+                    "started_at": verified_at,
+                    "updated_devices": [],
+                }
+                self._state["firmware_rollout"] = rollout
+            existing_canary = str(rollout.get("canary_device_id") or "")
+            is_active_canary = canary_required and existing_canary in {"", device_id}
             verification_evidence = {
                 "method": "usb_recovery",
                 "role": "canary" if is_active_canary else "fleet",
@@ -310,7 +643,7 @@ class DeviceStore:
                 "observed_usb_connected": record.get("usb_connected") is True,
                 "observed_sd_ready": True,
                 "observed_last_seen": last_seen,
-                "reconciled_command_id": dispatched_id,
+                "reconciled_command_id": dispatched_id or expected_command_id,
                 "verified_at": verified_at,
             }
             if external_usb_valid:
@@ -322,19 +655,27 @@ class DeviceStore:
                     "observed_at": evidence_observed_at,
                 }
 
+            record["pending_commands"] = []
+            record.pop("pending_command_id", None)
             record["dispatched_commands"] = []
             record.pop("dispatched_command_id", None)
-            record["last_command_id"] = dispatched_id[:96]
+            record["last_command_id"] = (dispatched_id or expected_command_id)[:96]
             record["last_command_result"] = "install:usb-recovery-verified"
             record["command_completed_at"] = verified_at
             record["firmware_update_status"] = "verified"
+            record["firmware_update_stage"] = "verified"
+            record["firmware_update_percent"] = 100
+            record["firmware_update_stage_at"] = verified_at
             record["firmware_verification_method"] = "usb_recovery"
             record["firmware_verified_at"] = verified_at
+            record["firmware_update_target"] = target_version
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
             record["last_usb_recovery_verification"] = verification_evidence
             history = record.setdefault("command_history", [])
             history.append(
                 {
-                    "command_id": dispatched_id[:96],
+                    "command_id": (dispatched_id or expected_command_id)[:96],
                     "result": "install:usb-recovery-verified",
                     "verification_method": "usb_recovery",
                     "completed_at": verified_at,
@@ -349,6 +690,7 @@ class DeviceStore:
             if device_id not in updated:
                 updated.append(device_id)
             if is_active_canary:
+                rollout["canary_device_id"] = device_id
                 rollout["status"] = "canary_verified"
                 rollout["canary_verified_at"] = verified_at
             elif rollout.get("status") == "canary_verified":
@@ -411,7 +753,10 @@ class DeviceStore:
                 status = str(rollout.get("status") or "awaiting_canary")
                 canary_id = str(rollout.get("canary_device_id") or "")
                 if status == "failed":
-                    raise ValueError("Firmware rollout failed; configure a new release before continuing")
+                    raise ValueError(
+                        "Firmware rollout failed; retry the device, reset the rollout, "
+                        "or configure a new release"
+                    )
                 if status in {"awaiting_canary", "canary_active"}:
                     if canary_id and canary_id != device_id:
                         raise ValueError(f"Waiting for canary {canary_id} to boot and acknowledge")
@@ -427,6 +772,12 @@ class DeviceStore:
             record["firmware_update_role"] = "canary" if is_canary else "fleet"
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
+            record["firmware_update_stage"] = "queued"
+            record["firmware_update_percent"] = 0
+            record["firmware_update_stage_at"] = utc_now()
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
+            record.pop("firmware_update_detail", None)
             if not is_canary and rollout.get("status") == "canary_verified":
                 rollout["status"] = "fleet_active"
             self._save()
@@ -445,6 +796,11 @@ class DeviceStore:
         successful = result in {"install:complete", "install:boot-confirmed"} and running == target
         if successful:
             record["firmware_update_status"] = "verified"
+            record["firmware_update_stage"] = "verified"
+            record["firmware_update_percent"] = 100
+            record["firmware_update_stage_at"] = utc_now()
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
             updated = rollout.setdefault("updated_devices", [])
             if device_id not in updated:
                 updated.append(device_id)
@@ -457,7 +813,11 @@ class DeviceStore:
             return
 
         record["firmware_update_status"] = "failed"
+        record["firmware_update_stage"] = "failed"
+        record["firmware_update_percent"] = 0
+        record["firmware_update_stage_at"] = utc_now()
         record["firmware_update_error"] = result
+        record["firmware_update_error_at"] = utc_now()
         rollout["last_failed_device_id"] = device_id
         rollout["last_failure"] = result
         rollout["last_failed_at"] = utc_now()

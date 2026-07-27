@@ -117,6 +117,30 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("firmware_update_status") or "idle",
     ),
     FlexDisplaySensorDescription(
+        key="firmware_update_stage",
+        translation_key="firmware_update_stage",
+        value_fn=lambda record: record.get("firmware_update_stage") or "idle",
+    ),
+    FlexDisplaySensorDescription(
+        key="firmware_update_percent",
+        translation_key="firmware_update_progress",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda record: record.get("firmware_update_percent", 0),
+    ),
+    FlexDisplaySensorDescription(
+        key="firmware_update_error",
+        translation_key="firmware_update_error",
+        value_fn=lambda record: record.get("firmware_update_error") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="firmware_update_error_at",
+        translation_key="firmware_update_error_at",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda record: parse_datetime(
+            record.get("firmware_update_error_at", "")
+        ),
+    ),
+    FlexDisplaySensorDescription(
         key="power_state",
         translation_key="power_state",
         value_fn=lambda record: record.get("power_state") or "offline",

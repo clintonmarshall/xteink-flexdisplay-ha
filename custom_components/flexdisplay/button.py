@@ -59,7 +59,7 @@ class FlexDisplayCommandButton(FlexDisplayEntity, ButtonEntity):
 
 
 class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
-    """Cancel commands that have not yet reached the device."""
+    """Cancel queued commands and stop durable retries."""
 
     _attr_translation_key = "cancel_commands"
 
@@ -67,9 +67,59 @@ class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_cancel_commands"
 
+    @property
+    def available(self) -> bool:
+        """Expose cancellation only while the device has active commands."""
+        return super().available and bool(
+            self.record.get("pending_commands")
+            or self.record.get("dispatched_commands")
+        )
+
     async def async_press(self) -> None:
-        """Clear the Bridge's pending command queue."""
+        """Clear queued commands and their durable retry state."""
         await self.coordinator.client.cancel_commands(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayRetryFirmwareButton(FlexDisplayEntity, ButtonEntity):
+    """Retry one failed firmware installation."""
+
+    _attr_translation_key = "retry_firmware"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_retry_firmware"
+
+    @property
+    def available(self) -> bool:
+        """Expose retry only after the Bridge's backoff and safety checks pass."""
+        return super().available and bool(self.record.get("firmware_retry_ready"))
+
+    async def async_press(self) -> None:
+        """Retry the configured release for this device."""
+        await self.coordinator.client.retry_firmware(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayResetRolloutButton(FlexDisplayEntity, ButtonEntity):
+    """Reset a failed or stuck firmware rollout."""
+
+    _attr_translation_key = "reset_firmware_rollout"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_reset_firmware_rollout"
+
+    @property
+    def available(self) -> bool:
+        """Expose reset only while the configured rollout needs intervention."""
+        return super().available and bool(
+            self.record.get("firmware_rollout_reset_ready")
+        )
+
+    async def async_press(self) -> None:
+        """Reset the global rollout and return it to the canary gate."""
+        await self.coordinator.client.reset_firmware_rollout()
         await self.coordinator.async_request_refresh()
 
 
@@ -113,6 +163,8 @@ async def async_setup_entry(
                 for description in DESCRIPTIONS
             ),
             FlexDisplayCancelCommandsButton(coordinator, device_id),
+            FlexDisplayRetryFirmwareButton(coordinator, device_id),
+            FlexDisplayResetRolloutButton(coordinator, device_id),
             FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
         ),
     )

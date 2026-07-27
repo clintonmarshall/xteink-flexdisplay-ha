@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import hashlib
 import json
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -1533,7 +1534,10 @@ def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
         screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert screen.headers["x-flexdisplay-commands"] == "install"
         assert screen.headers["x-flexdisplay-latest-firmware"] == "0.6.0"
-        assert screen.headers["x-flexdisplay-firmware-url"] == firmware.url
+        assert (
+            screen.headers["x-flexdisplay-firmware-url"]
+            == "http://testserver/api/v1/firmware/current.bin"
+        )
         assert screen.headers["x-flexdisplay-firmware-sha256"] == firmware.sha256
         assert screen.headers["x-flexdisplay-firmware-size"] == str(firmware.size)
         assert screen.headers["x-flexdisplay-firmware-min-battery"] == "45"
@@ -1691,7 +1695,10 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
         )
         assert recovered_checkin.status_code == 200
         ready = client.get("/api/v1/devices/X4-USB001").json()
-        assert ready["usb_recovery_verification_ready"] is True
+        assert ready["usb_recovery_verification_ready"] is False
+        assert ready["firmware_update_status"] == "verified"
+        assert ready["firmware_verification_method"] == "device_checkin"
+        assert ready["firmware_rollout_status"] == "canary_verified"
 
         unauthenticated = client.post(
             "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
@@ -1702,7 +1709,7 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
         )
         assert unauthenticated.status_code == 401
 
-        wrong_command = client.post(
+        already_verified = client.post(
             "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
             headers=authorized,
             json={
@@ -1710,34 +1717,18 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
                 "expected_command_id": "X4-USB001-wrong",
             },
         )
-        assert wrong_command.status_code == 409
-        assert "command ID" in wrong_command.json()["detail"]
-
-        verified = client.post(
-            "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
-            headers=authorized,
-            json={
-                "expected_target_version": firmware.version,
-                "expected_command_id": command_id,
-            },
-        )
-        assert verified.status_code == 200
-        payload = verified.json()
-        assert payload["verified"] is True
-        assert payload["verification_method"] == "usb_recovery"
-        assert payload["audit"]["reconciled_command_id"] == command_id
-        assert payload["audit"]["observed_firmware"] == firmware.version
+        assert already_verified.status_code == 409
+        assert "already verified" in already_verified.json()["detail"]
 
         record = client.get("/api/v1/devices/X4-USB001").json()
         assert record["firmware_update_status"] == "verified"
-        assert record["firmware_verification_method"] == "usb_recovery"
+        assert record["firmware_verification_method"] == "device_checkin"
         assert record["firmware_rollout_status"] == "canary_verified"
         assert record["firmware_canary_verified"] is True
         assert record["dispatched_commands"] == []
         assert record.get("dispatched_command_id") is None
-        assert record["last_command_result"] == "install:usb-recovery-verified"
+        assert record["last_command_result"] == "install:boot-reconciled"
         assert record["usb_recovery_verification_ready"] is False
-        assert record["usb_recovery_history"][-1]["reconciled_command_id"] == command_id
 
 
 def test_usb_recovery_accepts_recent_matching_macos_evidence(tmp_path: Path) -> None:
@@ -1882,22 +1873,15 @@ def test_usb_recovery_verifies_stuck_fleet_device_after_canary(tmp_path: Path) -
             },
         )
         ready = client.get("/api/v1/devices/X3-FLEET01").json()
-        assert ready["usb_recovery_verification_ready"] is True
-
-        verified = client.post(
-            "/api/v1/devices/X3-FLEET01/firmware/verify-usb-recovery",
-            json={
-                "expected_target_version": firmware.version,
-                "expected_command_id": fleet_command_id,
-            },
-        )
-        assert verified.status_code == 200
-        record = verified.json()["device"]
+        assert ready["usb_recovery_verification_ready"] is False
+        record = ready
         assert record["firmware_update_status"] == "verified"
+        assert record["firmware_verification_method"] == "device_checkin"
         assert record["firmware_rollout_status"] == "fleet_active"
         assert record["firmware_canary_device_id"] == "X4-CANARY"
         assert record["dispatched_commands"] == []
-        assert record["last_usb_recovery_verification"]["role"] == "fleet"
+        assert record["last_command_id"] == fleet_command_id
+        assert record["last_command_result"] == "install:boot-reconciled"
 
 
 def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Path) -> None:
@@ -2007,3 +1991,183 @@ def test_dashboard_pages_group_home_assistant_values() -> None:
         "CONNECTIVITY",
     ]
     assert all(len(page.entities) <= 4 for page in pages)
+
+
+def test_cancel_stops_dispatched_install_and_device_retry(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.19.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        mirror_enabled=False,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        telemetry = {
+            "X-FlexDisplay-ID": "X4-CANCEL",
+            "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
+            "X-FlexDisplay-SD-Ready": "true",
+            "X-FlexDisplay-USB-Connected": "true",
+        }
+        client.get("/api/v1/screen", headers=telemetry)
+        assert client.post("/api/v1/devices/X4-CANCEL/commands/install").status_code == 200
+        delivery = client.get("/api/v1/screen", headers=telemetry)
+        command_id = delivery.headers["x-flexdisplay-command-id"]
+
+        cancelled = client.delete("/api/v1/devices/X4-CANCEL/commands")
+        assert cancelled.status_code == 200
+        assert cancelled.json()["device"]["firmware_update_status"] == "cancelled"
+        assert cancelled.json()["device"]["dispatched_commands"] == []
+
+        progress = client.get(
+            "/api/v1/devices/X4-CANCEL/firmware/progress",
+            headers={
+                "X-FlexDisplay-ID": "X4-CANCEL",
+                "X-FlexDisplay-Command-ID": command_id,
+                "X-FlexDisplay-Firmware-Stage": "validating",
+                "X-FlexDisplay-Firmware-Percent": "65",
+            },
+        )
+        assert progress.status_code == 200
+        assert progress.json()["cancel_requested"] is True
+        assert "install" not in client.get(
+            "/api/v1/screen", headers=telemetry
+        ).headers.get("x-flexdisplay-commands", "")
+
+
+def test_failed_rollout_can_reset_and_retry_with_backoff(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.19.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        retry_limit=1,
+        retry_backoff_seconds=0,
+        mirror_enabled=False,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        telemetry = {
+            "X-FlexDisplay-ID": "X3-RETRY1",
+            "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
+            "X-FlexDisplay-SD-Ready": "true",
+            "X-FlexDisplay-USB-Connected": "true",
+        }
+        client.get("/api/v1/screen", headers=telemetry)
+        client.post("/api/v1/devices/X3-RETRY1/commands/install")
+        first = client.get("/api/v1/screen", headers=telemetry)
+        client.get(
+            "/api/v1/screen",
+            headers={
+                **telemetry,
+                "X-FlexDisplay-Command-ID": first.headers["x-flexdisplay-command-id"],
+                "X-FlexDisplay-Command-Result": "install:download-failed",
+            },
+        )
+        failed = client.get("/api/v1/devices/X3-RETRY1").json()
+        assert failed["firmware_rollout_status"] == "failed"
+        assert failed["firmware_update_error_at"]
+
+        retried = client.post("/api/v1/devices/X3-RETRY1/firmware/retry")
+        assert retried.status_code == 200
+        assert retried.json()["device"]["firmware_retry_count"] == 1
+        assert retried.json()["device"]["firmware_update_status"] == "queued"
+
+        client.delete("/api/v1/devices/X3-RETRY1/commands")
+        limited = client.post("/api/v1/devices/X3-RETRY1/firmware/retry")
+        assert limited.status_code == 409
+        assert "retry limit" in limited.json()["detail"]
+
+        reset = client.post("/api/v1/firmware/rollout/reset")
+        assert reset.status_code == 200
+        assert reset.json()["rollout"]["status"] == "awaiting_canary"
+        record = client.get("/api/v1/devices/X3-RETRY1").json()
+        assert record["pending_commands"] == []
+        assert record["dispatched_commands"] == []
+
+
+def test_exact_target_usb_checkin_auto_reconciles_failed_update(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.19.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        mirror_enabled=False,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        telemetry = {
+            "X-FlexDisplay-ID": "X4-RECOVER",
+            "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
+            "X-FlexDisplay-SD-Ready": "true",
+            "X-FlexDisplay-USB-Connected": "true",
+        }
+        client.get("/api/v1/screen", headers=telemetry)
+        client.post("/api/v1/devices/X4-RECOVER/commands/install")
+        delivery = client.get("/api/v1/screen", headers=telemetry)
+        client.get(
+            "/api/v1/screen",
+            headers={
+                **telemetry,
+                "X-FlexDisplay-Command-ID": delivery.headers[
+                    "x-flexdisplay-command-id"
+                ],
+                "X-FlexDisplay-Command-Result": "install:download-failed",
+            },
+        )
+        client.get(
+            "/api/v1/screen",
+            headers={
+                **telemetry,
+                "X-FlexDisplay-Firmware": firmware.version,
+            },
+        )
+        recovered = client.get("/api/v1/devices/X4-RECOVER").json()
+        assert recovered["firmware_update_status"] == "verified"
+        assert recovered["firmware_update_stage"] == "verified"
+        assert recovered["firmware_update_percent"] == 100
+        assert recovered["firmware_verification_method"] == "device_checkin"
+        assert recovered["firmware_rollout_status"] == "canary_verified"
+        assert recovered["update_available"] is False
+
+
+def test_firmware_mirror_downloads_verifies_and_serves_release(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    payload = b"firmware-image" * 8192
+    digest = hashlib.sha256(payload).hexdigest()
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size: int):
+            del chunk_size
+            yield payload
+
+    monkeypatch.setattr(
+        "flexdisplay_bridge.firmware_mirror.requests.get",
+        lambda *args, **kwargs: FakeResponse(),
+    )
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.19.0",
+        url="https://example.test/firmware.bin",
+        sha256=digest,
+        size=len(payload),
+        mirror_enabled=True,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        response = client.get("/api/v1/firmware/current.bin")
+        assert response.status_code == 200
+        assert response.content == payload
+        assert response.headers["x-flexdisplay-firmware-sha256"] == digest
+        health = client.get("/healthz").json()
+        assert health["firmware_mirror"]["ready"] is True

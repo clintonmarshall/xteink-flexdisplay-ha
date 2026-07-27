@@ -44,7 +44,25 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
         """Return whether an install is queued or dispatched."""
         pending = self.record.get("pending_commands") or []
         dispatched = self.record.get("dispatched_commands") or []
-        return "install" in pending or "install" in dispatched
+        return (
+            "install" in pending
+            or "install" in dispatched
+            or self.record.get("firmware_update_stage")
+            in {"downloading", "validating", "flashing", "rebooting"}
+        )
+
+    @property
+    def update_percentage(self) -> int | None:
+        """Expose device-reported OTA progress."""
+        if not self.in_progress:
+            return None
+        try:
+            return max(
+                0,
+                min(100, int(self.record.get("firmware_update_percent") or 0)),
+            )
+        except (TypeError, ValueError):
+            return None
 
     @property
     def release_summary(self) -> str | None:
@@ -56,6 +74,11 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
             return "Canary update: the fleet remains blocked until this device boots and acknowledges."
         if self.record.get("firmware_canary_verified"):
             return "Canary verified. This device is eligible for the staged fleet rollout."
+        if self.record.get("firmware_update_status") == "failed":
+            return (
+                "Update failed: "
+                + str(self.record.get("firmware_update_error") or "unknown error")
+            )
         return "The first eligible device becomes the USB-powered canary."
 
     @property
@@ -69,6 +92,19 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
             "canary_verified": self.record.get("firmware_canary_verified", False),
             "update_role": self.record.get("firmware_update_role"),
             "update_status": self.record.get("firmware_update_status"),
+            "update_stage": self.record.get("firmware_update_stage"),
+            "update_percent": self.record.get("firmware_update_percent"),
+            "update_detail": self.record.get("firmware_update_detail"),
+            "last_error": self.record.get("firmware_update_error"),
+            "last_error_at": self.record.get("firmware_update_error_at"),
+            "stage_changed_at": self.record.get("firmware_update_stage_at"),
+            "retry_ready": self.record.get("firmware_retry_ready", False),
+            "retry_blockers": self.record.get("firmware_retry_blockers") or [],
+            "retry_count": self.record.get("firmware_retry_count", 0),
+            "retry_limit": self.record.get("firmware_retry_limit", 0),
+            "retry_backoff_seconds": self.record.get(
+                "firmware_retry_backoff_seconds", 0
+            ),
             "command_id": self.record.get("dispatched_command_id")
             or self.record.get("pending_command_id"),
             "last_command_id": self.record.get("last_command_id"),

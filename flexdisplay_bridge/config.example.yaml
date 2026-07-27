@@ -50,6 +50,10 @@ firmware:
   canary_required: true
   require_usb_for_canary: true
   max_parallel: 1
+  retry_limit: 3
+  retry_backoff_seconds: 300
+  mirror_enabled: true
+  mirror_retry_seconds: 300
 
 dashboard:
   title: HOME ASSISTANT

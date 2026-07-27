@@ -56,8 +56,20 @@ class FlexDisplayApiClient:
         await self._request("POST", f"/api/v1/devices/{device_id}/commands/{command}")
 
     async def cancel_commands(self, device_id: str) -> None:
-        """Cancel commands that have not yet reached a device."""
+        """Cancel queued commands and stop retries for delivered durable commands."""
         await self._request("DELETE", f"/api/v1/devices/{device_id}/commands")
+
+    async def retry_firmware(self, device_id: str) -> None:
+        """Retry a failed firmware installation under the Bridge safety gates."""
+        await self._request("POST", f"/api/v1/devices/{device_id}/firmware/retry")
+
+    async def reset_firmware_rollout(self) -> None:
+        """Reset the configured release rollout and cancel active installs."""
+        await self._request("POST", "/api/v1/firmware/rollout/reset")
+
+    async def refresh_firmware_mirror(self) -> None:
+        """Refresh and verify the Bridge's local firmware mirror."""
+        await self._request("POST", "/api/v1/firmware/mirror/refresh")
 
     async def verify_usb_recovery(
         self,

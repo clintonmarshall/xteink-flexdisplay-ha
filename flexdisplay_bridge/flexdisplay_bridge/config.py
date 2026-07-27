@@ -131,6 +131,10 @@ class FirmwareConfig:
     canary_required: bool = True
     require_usb_for_canary: bool = True
     max_parallel: int = 1
+    retry_limit: int = 3
+    retry_backoff_seconds: int = 300
+    mirror_enabled: bool = True
+    mirror_retry_seconds: int = 300
 
 
 @dataclass(frozen=True)
@@ -375,6 +379,46 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
                     os.getenv(
                         "FLEXDISPLAY_FIRMWARE_MAX_PARALLEL",
                         firmware_raw.get("max_parallel", 1),
+                    )
+                ),
+            ),
+        ),
+        retry_limit=max(
+            0,
+            min(
+                10,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_RETRY_LIMIT",
+                        firmware_raw.get("retry_limit", 3),
+                    )
+                ),
+            ),
+        ),
+        retry_backoff_seconds=max(
+            0,
+            min(
+                86400,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_RETRY_BACKOFF_SECONDS",
+                        firmware_raw.get("retry_backoff_seconds", 300),
+                    )
+                ),
+            ),
+        ),
+        mirror_enabled=_env_bool(
+            "FLEXDISPLAY_FIRMWARE_MIRROR_ENABLED",
+            bool(firmware_raw.get("mirror_enabled", True)),
+        ),
+        mirror_retry_seconds=max(
+            30,
+            min(
+                86400,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_MIRROR_RETRY_SECONDS",
+                        firmware_raw.get("mirror_retry_seconds", 300),
                     )
                 ),
             ),

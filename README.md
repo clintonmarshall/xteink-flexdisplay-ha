@@ -171,6 +171,14 @@ Home Assistant camera/image entities, configure active hours and shuffle, then
 assign an album to any fleet device. Devices fetch one server-rendered BMP,
 retain it while asleep, and wake at the album interval or next active window.
 
+Firmware, Bridge, and integration `0.19.0` make fleet updates recoverable and
+observable. Home Assistant can cancel queued or delivered updates, retry a
+failed update with bounded backoff, reset a blocked rollout, and verify a USB
+recovery. Devices report preflight, download, validation, flash, reboot, and
+failure progress with exact timestamps. The Bridge downloads the configured
+release once, verifies its size and SHA-256, then serves the trusted local copy
+to X3 and X4 devices while preserving canary-first rollout gating.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

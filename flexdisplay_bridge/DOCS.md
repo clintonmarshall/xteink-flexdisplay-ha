@@ -110,6 +110,13 @@ Options:
 - `firmware_canary_required`: require a verified canary before fleet installs.
 - `firmware_require_usb_for_canary`: require external power for the canary.
 - `firmware_max_parallel`: maximum simultaneous queued/dispatched installs.
+- `firmware_retry_limit`: maximum automatic/manual retries after a failed
+  install.
+- `firmware_retry_backoff_seconds`: minimum delay before another retry.
+- `firmware_mirror_enabled`: download and verify the configured firmware once,
+  then serve the trusted copy from the local Bridge.
+- `firmware_mirror_retry_seconds`: delay before retrying a failed mirror
+  download.
 
 ## Zero-touch provisioning
 
@@ -160,7 +167,9 @@ area, and timezone without editing an SD-card file.
 
 Commands sent while a device is sleeping remain queued until its timer or a
 physical button wakes it. **Power off until button wake** intentionally disables
-the timer. **Cancel pending commands** removes commands not yet delivered.
+the timer. **Cancel active commands** removes both queued commands and durable
+commands already delivered to a device. Firmware `0.19.0` polls the Bridge
+during an update and honours cancellation before validation or flashing.
 
 ## Safer firmware rollout
 
@@ -175,15 +184,31 @@ firmware and acknowledges completion. Further installs run one at a time by
 default, and any failure pauses the rollout until a new release is configured.
 
 The Firmware entity shows install blockers, rollout state, canary identity,
-update role, update status, and command-ID diagnostics in its attributes.
+update role, update status, stage, percentage, exact failure, failure time, and
+command-ID diagnostics in its attributes. Separate sensors expose the stage,
+percentage, error, and error timestamp.
+
+Firmware and Bridge `0.19.0` add bounded retry and recovery controls. **Retry
+firmware** becomes available after the configured backoff while the retry limit
+has not been reached. **Reset firmware rollout** cancels outstanding install
+commands and starts a fresh canary gate for the same release while retaining
+the previous rollout in bounded audit history.
+
+With `firmware_mirror_enabled`, the Bridge downloads the configured application
+image, verifies its exact size and SHA-256, caches it atomically, and gives
+devices a local Bridge URL. A failed mirror never replaces a previously
+verified image. Its status is available from the Bridge health endpoint, and
+the authenticated mirror-refresh API forces another verification attempt.
 
 If an old canary firmware consumes an install but cannot acknowledge it, first
 make and verify a complete flash backup, install the exact configured target
 over USB, and confirm the device checks in with USB power and a ready SD card.
 The **Verify USB firmware recovery** button becomes available only while all
-those conditions pass and the matching stuck install command is still active.
-Pressing it records separate USB-recovery evidence in the Bridge audit history;
-it does not impersonate a device acknowledgement.
+those conditions pass. A `0.19.0` Bridge also automatically reconciles a device
+that checks in over USB with the exact target firmware, even if its earlier
+durable command was lost. Manual verification records separate USB-recovery
+evidence in the Bridge audit history; neither route impersonates a device
+acknowledgement.
 
 Some X4 revisions stop reporting USB power after charging completes even while
 their USB serial connection remains active. The recovery API can additionally

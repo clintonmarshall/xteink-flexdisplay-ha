@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import re
 from contextlib import asynccontextmanager
@@ -30,6 +31,7 @@ from .dashboard_store import (
     profile_payload,
 )
 from .dashboards import build_dashboard_pages, select_active_pages
+from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
 from .home_assistant import HomeAssistantClient
 from .mqtt_service import MqttService
 from .photo_frame import (
@@ -58,6 +60,15 @@ SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_fr
 OTA_PARTITION_SIZE = 0x640000
 MINIMUM_FIRMWARE_SIZE = 64 * 1024
 USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS = 600
+FIRMWARE_PROGRESS_STAGES = {
+    "preflight",
+    "downloading",
+    "validating",
+    "flashing",
+    "rebooting",
+    "failed",
+    "cancelled",
+}
 
 
 def _valid_external_usb_evidence(device_id: str, evidence: Any) -> bool:
@@ -135,7 +146,7 @@ def _firmware_install_blockers(
         if status == "failed":
             failed_id = str(rollout.get("last_failed_device_id") or "a fleet device")
             blockers.append(
-                f"Rollout paused after failure on {failed_id}; configure a new release before continuing"
+                f"Rollout paused after failure on {failed_id}; retry or reset the rollout"
             )
         elif (
             firmware.canary_required
@@ -158,6 +169,60 @@ def _firmware_install_blockers(
     return blockers
 
 
+def _firmware_retry_blockers(
+    record: dict[str, Any],
+    settings: BridgeConfig,
+    store: DeviceStore,
+) -> list[str]:
+    """Explain why a failed device cannot be retried yet."""
+    blockers: list[str] = []
+    error = _firmware_metadata_error(settings)
+    if error:
+        return [error]
+    if record.get("firmware_update_status") not in {"failed", "cancelled"}:
+        blockers.append("The device has no failed or cancelled firmware update to retry")
+    if _firmware_version(settings.firmware.version) <= _firmware_version(
+        str(record.get("firmware") or "")
+    ):
+        blockers.append("Device already runs this release or a newer release")
+    if record.get("sd_ready") is not True:
+        blockers.append("Device SD card is not ready")
+    battery = record.get("battery_percent")
+    if record.get("usb_connected") is not True and (
+        battery is None or float(battery) < settings.firmware.minimum_battery_percent
+    ):
+        blockers.append(
+            f"Connect USB or charge the device to {settings.firmware.minimum_battery_percent}%"
+        )
+    if record.get("pending_commands") or record.get("dispatched_commands"):
+        blockers.append("Cancel the existing command before retrying")
+    retries = int(record.get("firmware_retry_count") or 0)
+    if retries >= settings.firmware.retry_limit:
+        blockers.append(
+            f"Firmware retry limit of {settings.firmware.retry_limit} has been reached"
+        )
+    last_attempt = record.get("firmware_last_retry_at") or record.get(
+        "firmware_update_error_at"
+    )
+    if settings.firmware.retry_backoff_seconds > 0 and last_attempt:
+        try:
+            elapsed = (
+                datetime.now(UTC) - datetime.fromisoformat(str(last_attempt))
+            ).total_seconds()
+            if elapsed < settings.firmware.retry_backoff_seconds:
+                blockers.append(
+                    "Retry backoff is active for "
+                    f"{max(1, int(settings.firmware.retry_backoff_seconds - elapsed))} seconds"
+                )
+        except ValueError:
+            pass
+    if store.active_firmware_installs() >= settings.firmware.max_parallel:
+        blockers.append(
+            f"Maximum of {settings.firmware.max_parallel} concurrent firmware install(s) reached"
+        )
+    return blockers
+
+
 def _usb_recovery_blockers(
     record: dict[str, Any],
     settings: BridgeConfig,
@@ -166,21 +231,23 @@ def _usb_recovery_blockers(
 ) -> list[str]:
     """Explain why an operator cannot reconcile a USB-recovered device."""
     target = settings.firmware.version
-    rollout = store.firmware_rollout()
     blockers: list[str] = []
     if not target:
         blockers.append("No target firmware release is configured")
-    if rollout.get("target_version") != target:
-        blockers.append("The active rollout does not match the configured target")
-    rollout_status = str(rollout.get("status") or "")
-    is_active_canary = (
-        rollout_status == "canary_active"
-        and rollout.get("canary_device_id") == record.get("device_id")
+    rollout = store.firmware_rollout()
+    rollout_still_blocked = (
+        rollout.get("target_version") == target
+        and rollout.get("status") in {"awaiting_canary", "canary_active", "failed"}
     )
-    if rollout_status == "canary_active" and not is_active_canary:
-        blockers.append("This device is not the active canary")
-    elif rollout_status not in {"canary_active", "canary_verified", "fleet_active"}:
-        blockers.append("The rollout is not accepting verified USB recoveries")
+    if record.get("firmware_update_status") == "verified" and not rollout_still_blocked:
+        blockers.append("This firmware installation is already verified")
+    tracked = bool(
+        record.get("firmware_update_target") == target
+        or "install" in (record.get("pending_commands") or [])
+        or "install" in (record.get("dispatched_commands") or [])
+    )
+    if not tracked:
+        blockers.append("The device has no tracked firmware installation to recover")
     if record.get("firmware") != target:
         blockers.append("The device is not reporting the exact target firmware")
     if record.get("usb_connected") is not True and not _valid_external_usb_evidence(
@@ -190,12 +257,12 @@ def _usb_recovery_blockers(
         blockers.append("The device is not reporting USB power")
     if record.get("sd_ready") is not True:
         blockers.append("The device SD card is not ready")
-    if record.get("pending_commands"):
-        blockers.append("The device has pending commands")
-    if list(record.get("dispatched_commands") or []) != ["install"]:
-        blockers.append("The only dispatched command must be the stuck install")
-    if not record.get("dispatched_command_id"):
-        blockers.append("The stuck install has no durable command ID")
+    if any(
+        command != "install" for command in (record.get("pending_commands") or [])
+    ) or any(
+        command != "install" for command in (record.get("dispatched_commands") or [])
+    ):
+        blockers.append("The device has an unrelated command in progress")
     try:
         seen = datetime.fromisoformat(str(record.get("last_seen")))
         age = (datetime.now(UTC) - seen).total_seconds()
@@ -294,6 +361,21 @@ def _decorate_device(
         result["firmware_canary_verified"] = (
             rollout.get("target_version") == settings.firmware.version
             and rollout.get("status") == "canary_verified"
+        )
+        retry_blockers = _firmware_retry_blockers(result, settings, store)
+        result["firmware_retry_blockers"] = retry_blockers
+        result["firmware_retry_ready"] = (
+            result["update_available"]
+            and result.get("firmware_update_status") in {"failed", "cancelled"}
+            and not retry_blockers
+        )
+        result["firmware_retry_limit"] = settings.firmware.retry_limit
+        result["firmware_retry_backoff_seconds"] = (
+            settings.firmware.retry_backoff_seconds
+        )
+        result["firmware_rollout_reset_ready"] = (
+            rollout.get("target_version") == settings.firmware.version
+            and rollout.get("status") in {"failed", "canary_active"}
         )
         recovery_blockers = _usb_recovery_blockers(result, settings, store)
         result["usb_recovery_verification_blockers"] = recovery_blockers
@@ -605,6 +687,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     photo_frames = PhotoFrameMediaStore(
         settings.state_path.with_name("flexdisplay-photo-frame.json")
     )
+    firmware_mirror = FirmwareMirror(
+        settings.state_path.with_name("firmware-cache")
+    )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
 
@@ -614,11 +699,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     mqtt = MqttService(settings.mqtt, queue_from_mqtt)
 
+    async def warm_firmware_mirror() -> None:
+        try:
+            await asyncio.to_thread(firmware_mirror.prepare, settings.firmware)
+        except FirmwareMirrorError:
+            # Health/status endpoints expose the bounded failure and next retry.
+            pass
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
         mqtt.start()
+        mirror_task = None
+        if settings.firmware.mirror_enabled:
+            mirror_task = asyncio.create_task(warm_firmware_mirror())
         yield
+        if mirror_task and not mirror_task.done():
+            mirror_task.cancel()
         mqtt.stop()
 
     app = FastAPI(title="FlexDisplay Home Assistant Bridge", version=__version__, lifespan=lifespan)
@@ -626,7 +723,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.store = store
     app.state.dashboards = dashboards
     app.state.photo_frames = photo_frames
+    app.state.firmware_mirror = firmware_mirror
     app.state.mqtt = mqtt
+
+    def firmware_delivery_url(request: Request) -> str:
+        if settings.firmware.mirror_enabled:
+            return str(request.url_for("firmware_binary"))
+        return settings.firmware.url
 
     @app.middleware("http")
     async def normalize_ingress_path(request: Request, call_next):
@@ -647,6 +750,37 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "home_assistant_configured": ha.configured,
             "mqtt_enabled": settings.mqtt.enabled,
             "mqtt_connected": mqtt.connected,
+            "firmware_mirror": firmware_mirror.status(settings.firmware),
+        }
+
+    @app.get("/api/v1/firmware/current.bin", name="firmware_binary")
+    def firmware_binary() -> FileResponse:
+        try:
+            path = firmware_mirror.prepare(settings.firmware)
+        except FirmwareMirrorError as err:
+            raise HTTPException(status_code=503, detail=str(err)) from err
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            filename=f"flexdisplay-{settings.firmware.version}.bin",
+            headers={
+                "X-FlexDisplay-Firmware-Version": settings.firmware.version,
+                "X-FlexDisplay-Firmware-SHA256": settings.firmware.sha256,
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    @app.post("/api/v1/firmware/mirror/refresh")
+    def refresh_firmware_mirror(request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            path = firmware_mirror.prepare(settings.firmware, force=True)
+        except FirmwareMirrorError as err:
+            raise HTTPException(status_code=503, detail=str(err)) from err
+        return {
+            "refreshed": True,
+            "path": str(path),
+            "mirror": firmware_mirror.status(settings.firmware),
         }
 
     @app.get("/api/v1/devices")
@@ -1139,15 +1273,91 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return {"queued": command, "device": record}
 
     @app.delete("/api/v1/devices/{device_id}/commands")
-    def cancel_commands(device_id: str, request: Request) -> dict[str, Any]:
+    def cancel_commands(
+        device_id: str,
+        request: Request,
+        include_dispatched: bool = True,
+    ) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
-        record = store.clear_commands(selected)
+        record = store.clear_commands(
+            selected,
+            include_dispatched=include_dispatched,
+        )
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
         return {
             "cancelled": True,
+            "include_dispatched": include_dispatched,
             "device": _decorate_device(record, settings, store, dashboards.names()),
+        }
+
+    @app.post("/api/v1/devices/{device_id}/firmware/retry")
+    def retry_firmware(device_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        blockers = _firmware_retry_blockers(current, settings, store)
+        if blockers:
+            raise HTTPException(status_code=409, detail="; ".join(blockers))
+        try:
+            record = store.retry_firmware_install(
+                selected,
+                settings.firmware.version,
+                canary_required=settings.firmware.canary_required,
+                max_parallel=settings.firmware.max_parallel,
+                retry_limit=settings.firmware.retry_limit,
+                retry_backoff_seconds=settings.firmware.retry_backoff_seconds,
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {
+            "retried": True,
+            "device": _decorate_device(record, settings, store, dashboards.names()),
+        }
+
+    @app.post("/api/v1/firmware/rollout/reset")
+    def reset_firmware_rollout(request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            rollout = store.reset_firmware_rollout(
+                settings.firmware.version,
+                canary_required=settings.firmware.canary_required,
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {"reset": True, "rollout": rollout}
+
+    @app.get("/api/v1/devices/{device_id}/firmware/progress")
+    def firmware_progress(
+        device_id: str,
+        x_flexdisplay_id: str | None = Header(default=None),
+        x_flexdisplay_command_id: str | None = Header(default=None),
+        x_flexdisplay_firmware_stage: str | None = Header(default=None),
+        x_flexdisplay_firmware_percent: str | None = Header(default=None),
+        x_flexdisplay_firmware_detail: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        selected = _device_id(device_id)
+        if _device_id(x_flexdisplay_id) != selected:
+            raise HTTPException(status_code=409, detail="Device identity mismatch")
+        stage = str(x_flexdisplay_firmware_stage or "").strip().lower()
+        if stage not in FIRMWARE_PROGRESS_STAGES:
+            raise HTTPException(status_code=400, detail="Unsupported firmware progress stage")
+        record, cancel_requested = store.record_firmware_progress(
+            selected,
+            str(x_flexdisplay_command_id or ""),
+            stage,
+            _integer(x_flexdisplay_firmware_percent, 0, 0, 100),
+            str(x_flexdisplay_firmware_detail or ""),
+        )
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {
+            "recorded": not cancel_requested,
+            "cancel_requested": cancel_requested,
+            "stage": stage,
         }
 
     @app.post("/api/v1/devices/{device_id}/firmware/verify-usb-recovery")
@@ -1180,6 +1390,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 selected,
                 target,
                 command_id,
+                canary_required=settings.firmware.canary_required,
                 max_checkin_age_seconds=USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS,
                 external_usb_evidence=(
                     external_usb_evidence if isinstance(external_usb_evidence, dict) else None
@@ -1274,6 +1485,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.get("/api/v1/screen")
     def screen(
         response: Response,
+        request: Request,
         x_flexdisplay_id: str | None = Header(default=None),
         x_flexdisplay_width: str | None = Header(default=None),
         x_flexdisplay_height: str | None = Header(default=None),
@@ -1357,6 +1569,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             device_id,
             x_flexdisplay_command_result or "",
             x_flexdisplay_command_id or "",
+        )
+        record = (
+            store.reconcile_running_firmware(
+                device_id,
+                settings.firmware.version,
+                canary_required=settings.firmware.canary_required,
+                require_usb_for_canary=settings.firmware.require_usb_for_canary,
+            )
+            or record
         )
         profile: DeviceConfig = _effective_device(configured, record)
         commands = store.consume_commands(device_id)
@@ -1482,7 +1703,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if settings.firmware.version:
                 response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
             if "install" in commands:
-                response.headers["X-FlexDisplay-Firmware-URL"] = settings.firmware.url
+                response.headers["X-FlexDisplay-Firmware-URL"] = (
+                    firmware_delivery_url(request)
+                )
                 response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
                 response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
                 response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
@@ -1629,7 +1852,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if settings.firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
         if "install" in commands:
-            response.headers["X-FlexDisplay-Firmware-URL"] = settings.firmware.url
+            response.headers["X-FlexDisplay-Firmware-URL"] = (
+                firmware_delivery_url(request)
+            )
             response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
             response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
             response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(

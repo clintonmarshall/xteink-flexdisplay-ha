@@ -30,6 +30,13 @@ entities, select crop/contain and rotation, add captions, preview the exact
 intervals, timezone-aware active windows, and unchanged-image sleep handling
 run in the Bridge so each device downloads only its final monochrome BMP.
 
+FlexDisplay `0.19.0` adds recoverable fleet updates. Home Assistant shows
+device-reported OTA stages, percentages, exact failures, and timestamps, with
+guarded controls to cancel active commands, retry after bounded backoff, reset
+a blocked rollout, and verify USB recovery. The Bridge verifies and mirrors the
+configured release locally before giving its URL to devices; canary-first
+gating remains enabled by default.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
