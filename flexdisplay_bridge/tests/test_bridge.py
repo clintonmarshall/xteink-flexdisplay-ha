@@ -140,6 +140,120 @@ def test_home_assistant_fetch_skips_local_device_pseudo_entities() -> None:
     assert session.urls == ["http://homeassistant.test/api/states/sensor.room_temperature"]
 
 
+def test_image_tiles_fetch_ha_entity_picture_with_auth_but_external_urls_without_it() -> None:
+    image_output = io.BytesIO()
+    Image.new("RGB", (48, 32), (80, 150, 210)).save(image_output, format="PNG")
+    image_content = image_output.getvalue()
+
+    class Response:
+        def __init__(self, *, payload: dict | None = None, content: bytes = b"", url: str):
+            self.payload = payload
+            self.content = content
+            self.url = url
+            self.headers = {
+                "Content-Type": "image/png",
+                "Content-Length": str(len(content)),
+            } if content else {}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            assert self.payload is not None
+            return self.payload
+
+        def iter_content(self, chunk_size: int):
+            for offset in range(0, len(self.content), chunk_size):
+                yield self.content[offset : offset + chunk_size]
+
+    class Session:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def get(self, url: str, **kwargs) -> Response:
+            self.calls.append((url, kwargs))
+            if url.endswith("/api/states/camera.front_door"):
+                return Response(
+                    url=url,
+                    payload={
+                        "state": "streaming",
+                        "attributes": {"entity_picture": "/api/camera_proxy/camera.front_door"},
+                    },
+                )
+            return Response(url=url, content=image_content)
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://homeassistant.test:8123", token="secret")
+    )
+    session = Session()
+    client.session = session
+    states, error = client.fetch(
+        (
+            EntityConfig(
+                "camera.front_door",
+                "Front Door",
+                style="image",
+                image_fit="contain",
+            ),
+            EntityConfig(
+                "image_url.page_1_tile_2",
+                "Weather Map",
+                style="image",
+                image_url="https://images.example.test/map.png",
+            ),
+        )
+    )
+
+    assert error == ""
+    assert len(states) == 2
+    assert all(state.available and state.image_bytes == image_content for state in states)
+    assert states[0].image_fit == "contain"
+    ha_picture_call = next(call for call in session.calls if "/api/camera_proxy/" in call[0])
+    external_call = next(call for call in session.calls if "images.example.test" in call[0])
+    assert ha_picture_call[1]["headers"]["Authorization"] == "Bearer secret"
+    assert "Authorization" not in external_call[1]["headers"]
+
+
+def test_external_image_tile_works_without_a_home_assistant_token() -> None:
+    image_output = io.BytesIO()
+    Image.new("L", (24, 24), 128).save(image_output, format="PNG")
+    image_content = image_output.getvalue()
+
+    class Response:
+        url = "http://display.local/photo.png"
+        headers = {"Content-Type": "image/png"}
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def iter_content(self, chunk_size: int):
+            del chunk_size
+            yield image_content
+
+    class Session:
+        def get(self, url: str, **kwargs) -> Response:
+            assert url == Response.url
+            assert "Authorization" not in kwargs["headers"]
+            return Response()
+
+    client = HomeAssistantClient(HomeAssistantConfig(token=""))
+    client.session = Session()
+    states, error = client.fetch(
+        (
+            EntityConfig(
+                "image_url.page_1_tile_1",
+                "Local Photo",
+                style="image",
+                image_url=Response.url,
+            ),
+        )
+    )
+
+    assert error == ""
+    assert states[0].available is True
+    assert states[0].image_bytes == image_content
+
+
 def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) -> None:
     profile = DashboardProfileConfig(name="wall")
     config = BridgeConfig(
@@ -718,6 +832,53 @@ def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
             },
         )
         assert invalid_condition.status_code == 400
+        embedded_credentials = client.put(
+            "/api/v1/studio/profiles/wall",
+            json={
+                "pages": [
+                    {
+                        "title": "Camera",
+                        "entities": [
+                            {
+                                "entity_id": "",
+                                "style": "image",
+                                "image_url": "https://user:secret@example.test/camera.jpg",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert embedded_credentials.status_code == 400
+
+
+def test_dashboard_studio_accepts_an_external_image_without_an_ha_entity(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    profile = {
+        "pages": [
+            {
+                "title": "Photo",
+                "layout": "single",
+                "entities": [
+                    {
+                        "entity_id": "",
+                        "label": "Showroom",
+                        "style": "image",
+                        "image_url": "http://media.local/showroom.jpg",
+                        "image_fit": "contain",
+                    }
+                ],
+            }
+        ]
+    }
+    with TestClient(create_app(config)) as client:
+        saved = client.put("/api/v1/studio/profiles/photos", json=profile)
+
+    assert saved.status_code == 200
+    tile = saved.json()["profile"]["pages"][0]["entities"][0]
+    assert tile["entity_id"] == "image_url.page_1_tile_1"
+    assert tile["image_url"] == "http://media.local/showroom.jpg"
+    assert tile["image_fit"] == "contain"
 
 
 def test_state_aware_alert_priority_expiry_and_scheduled_sets() -> None:
@@ -891,6 +1052,41 @@ def test_dashboard_renderer_supports_visual_tile_styles() -> None:
         with Image.open(io.BytesIO(image)) as rendered:
             assert rendered.size == (480, 800)
             assert rendered.mode == "1"
+
+
+def test_dashboard_renderer_crops_and_dithers_image_tiles() -> None:
+    source = io.BytesIO()
+    gradient = Image.new("L", (180, 80))
+    for x in range(gradient.width):
+        for y in range(gradient.height):
+            gradient.putpixel((x, y), round(255 * x / gradient.width))
+    gradient.save(source, format="PNG")
+    renderer = DashboardRenderer()
+
+    for fit in ("cover", "contain"):
+        image = renderer.render(
+            title="CAMERA",
+            device={"device_id": "X3-PREVIEW", "battery_percent": 80, "rssi": -50},
+            width=528,
+            height=792,
+            entities=(
+                EntityState(
+                    "camera.showroom",
+                    "Showroom Camera",
+                    "Image",
+                    "",
+                    True,
+                    style="image",
+                    image_bytes=source.getvalue(),
+                    image_fit=fit,
+                ),
+            ),
+            layout="single",
+        )
+        with Image.open(io.BytesIO(image)) as rendered:
+            assert rendered.size == (528, 792)
+            assert rendered.mode == "1"
+            assert rendered.getextrema() == (0, 255)
 
 
 def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:

@@ -3,11 +3,17 @@ from __future__ import annotations
 from collections.abc import Iterable
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from io import BytesIO
 from typing import Any
+from urllib.parse import urljoin, urlparse
 
 import requests
+from PIL import Image, UnidentifiedImageError
 
 from .config import EntityConfig, HomeAssistantConfig
+
+MAX_IMAGE_BYTES = 8 * 1024 * 1024
+MAX_IMAGE_PIXELS = 20_000_000
 
 
 @dataclass(frozen=True)
@@ -23,6 +29,8 @@ class EntityState:
     maximum: float = 100.0
     history: tuple[float, ...] = ()
     last_changed: datetime | None = None
+    image_bytes: bytes = b""
+    image_fit: str = "cover"
 
 
 class HomeAssistantClient:
@@ -37,37 +45,30 @@ class HomeAssistantClient:
     def fetch(self, entities: Iterable[EntityConfig]) -> tuple[list[EntityState], str]:
         selected_entities = tuple(entities)
         results: list[EntityState] = []
-        if not self.config.token:
-            for entity in selected_entities:
-                results.append(
-                    EntityState(
-                        entity.entity_id,
-                        entity.label,
-                        "--",
-                        entity.unit,
-                        False,
-                        entity.icon,
-                        entity.style,
-                        entity.minimum,
-                        entity.maximum,
-                    )
-                )
-            needs_home_assistant = any(
-                not entity.entity_id.startswith("device.") for entity in selected_entities
-            )
-            return results, "HA token not configured" if needs_home_assistant else ""
-
-        headers = {"Authorization": f"Bearer {self.config.token}", "Content-Type": "application/json"}
         error = ""
         for entity in selected_entities:
             # device.* values are synthetic FlexDisplay telemetry. They are
             # resolved by dashboards.py and must never be requested from HA.
             if entity.entity_id.startswith("device."):
                 continue
+            if entity.style == "image" and entity.image_url:
+                try:
+                    image = self._download_image(entity.image_url, authenticated=False)
+                    results.append(self._image_state(entity, image))
+                except (requests.RequestException, ValueError) as exc:
+                    if not error:
+                        error = f"Image request failed: {exc}"
+                    results.append(self._unavailable(entity))
+                continue
+            if not self.config.token:
+                if not error:
+                    error = "HA token not configured"
+                results.append(self._unavailable(entity))
+                continue
             try:
                 response = self.session.get(
                     f"{self.config.base_url}/api/states/{entity.entity_id}",
-                    headers=headers,
+                    headers=self._headers(),
                     timeout=self.config.timeout_seconds,
                     verify=self.config.verify_tls,
                 )
@@ -75,6 +76,16 @@ class HomeAssistantClient:
                 payload: dict[str, Any] = response.json()
                 attributes = payload.get("attributes") or {}
                 unit = entity.unit or str(attributes.get("unit_of_measurement") or "")
+                image = b""
+                if entity.style == "image":
+                    entity_picture = str(attributes.get("entity_picture") or "")
+                    if not entity_picture:
+                        raise ValueError(f"{entity.entity_id} does not expose an entity picture")
+                    image_url = urljoin(f"{self.config.base_url}/", entity_picture)
+                    image = self._download_image(
+                        image_url,
+                        authenticated=self._same_origin(image_url, self.config.base_url),
+                    )
                 results.append(
                     EntityState(
                         entity.entity_id,
@@ -88,25 +99,105 @@ class HomeAssistantClient:
                         entity.maximum,
                         self._history(entity.entity_id) if entity.style == "history" else (),
                         self._timestamp(payload.get("last_changed")),
+                        image,
+                        entity.image_fit,
                     )
                 )
             except (requests.RequestException, ValueError) as exc:
                 if not error:
                     error = f"Home Assistant request failed: {exc}"
-                results.append(
-                    EntityState(
-                        entity.entity_id,
-                        entity.label,
-                        "--",
-                        entity.unit,
-                        False,
-                        entity.icon,
-                        entity.style,
-                        entity.minimum,
-                        entity.maximum,
-                    )
-                )
+                results.append(self._unavailable(entity))
         return results, error
+
+    @staticmethod
+    def _same_origin(first: str, second: str) -> bool:
+        left = urlparse(first)
+        right = urlparse(second)
+        return (
+            left.scheme.lower(),
+            left.hostname,
+            left.port or (443 if left.scheme.lower() == "https" else 80),
+        ) == (
+            right.scheme.lower(),
+            right.hostname,
+            right.port or (443 if right.scheme.lower() == "https" else 80),
+        )
+
+    def _download_image(self, url: str, *, authenticated: bool) -> bytes:
+        parsed = urlparse(url)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            raise ValueError("image URL must use http:// or https://")
+        response = self.session.get(
+            url,
+            headers=self._headers() if authenticated else {"Accept": "image/*"},
+            timeout=self.config.timeout_seconds,
+            verify=self.config.verify_tls,
+            stream=True,
+        )
+        response.raise_for_status()
+        final_url = str(getattr(response, "url", url))
+        if urlparse(final_url).scheme not in {"http", "https"}:
+            raise ValueError("image redirect used an unsupported URL scheme")
+        content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        if content_type and not content_type.startswith("image/"):
+            raise ValueError(f"image URL returned {content_type}")
+        content_length = response.headers.get("Content-Length")
+        if content_length and int(content_length) > MAX_IMAGE_BYTES:
+            raise ValueError("image is larger than 8 MB")
+        content = bytearray()
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            content.extend(chunk)
+            if len(content) > MAX_IMAGE_BYTES:
+                raise ValueError("image is larger than 8 MB")
+        if not content:
+            raise ValueError("image response was empty")
+        try:
+            with Image.open(BytesIO(content)) as image:
+                width, height = image.size
+                if width <= 0 or height <= 0 or width * height > MAX_IMAGE_PIXELS:
+                    raise ValueError("image dimensions are too large")
+                image.verify()
+        except (UnidentifiedImageError, OSError) as exc:
+            raise ValueError("response was not a readable image") from exc
+        return bytes(content)
+
+    @staticmethod
+    def _image_state(entity: EntityConfig, image: bytes) -> EntityState:
+        return EntityState(
+            entity.entity_id,
+            entity.label,
+            "Image",
+            "",
+            True,
+            entity.icon,
+            entity.style,
+            entity.minimum,
+            entity.maximum,
+            (),
+            None,
+            image,
+            entity.image_fit,
+        )
+
+    @staticmethod
+    def _unavailable(entity: EntityConfig) -> EntityState:
+        return EntityState(
+            entity.entity_id,
+            entity.label,
+            "--",
+            entity.unit,
+            False,
+            entity.icon,
+            entity.style,
+            entity.minimum,
+            entity.maximum,
+            (),
+            None,
+            b"",
+            entity.image_fit,
+        )
 
     @staticmethod
     def _timestamp(value: Any) -> datetime | None:

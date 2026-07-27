@@ -24,6 +24,8 @@ class EntityConfig:
     style: str = "value"
     minimum: float = 0.0
     maximum: float = 100.0
+    image_url: str = ""
+    image_fit: str = "cover"
 
 
 @dataclass(frozen=True)
@@ -197,6 +199,8 @@ def _entity(value: dict[str, Any]) -> EntityConfig:
         style=str(value.get("style") or "value"),
         minimum=minimum,
         maximum=maximum,
+        image_url=str(value.get("image_url") or ""),
+        image_fit=str(value.get("image_fit") or "cover"),
     )
 
 

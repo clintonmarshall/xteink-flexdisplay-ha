@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.13.0
+
+- Added first-class Dashboard Studio image tiles sourced from Home Assistant
+  `camera.*` and `image.*` entities or direct HTTP(S) image URLs.
+- Added crop-to-fill and fit-whole-image controls with a live 1-bit X3/X4
+  preview using the same e-paper dithering as the device render.
+- Added bounded image downloads, format and dimension validation, and explicit
+  credential isolation so the Home Assistant bearer token is never attached to
+  direct external image URLs.
+- Direct URL image tiles remain usable when Home Assistant entity access is not
+  configured.
+
 ## 0.12.0
 
 - Added priority alert pages driven by Home Assistant entity state, including

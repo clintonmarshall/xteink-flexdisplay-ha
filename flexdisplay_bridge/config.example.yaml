@@ -114,6 +114,20 @@ dashboard:
               label: Front Door
               icon: alert
               style: value
+        # Image tiles can instead reference a camera/image entity:
+        # - title: Camera
+        #   layout: single
+        #   entities:
+        #     - entity_id: camera.front_door
+        #       label: Front Door
+        #       style: image
+        #       image_fit: cover
+        # Or use a URL reachable from the Bridge:
+        #     - entity_id: image_url.showroom
+        #       label: Showroom
+        #       style: image
+        #       image_url: https://example.test/showroom.jpg
+        #       image_fit: contain
 
 devices:
   X4-DEMO01:

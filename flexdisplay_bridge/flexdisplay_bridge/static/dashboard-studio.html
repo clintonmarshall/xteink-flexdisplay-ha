@@ -183,7 +183,7 @@
     }
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
-    .range-fields[hidden] { display: none; }
+    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .url-source[hidden] { display: none; }
     .rule-fields[hidden] { display: none; }
     .rule-fields { display: grid; gap: 10px; margin-top: 10px; }
     .rule-badge {
@@ -641,27 +641,50 @@
         $("#tileList").innerHTML = '<div class="empty">This page is blank. Add a tile and select a Home Assistant entity.</div>';
         return;
       }
-      $("#tileList").innerHTML = page.entities.map((tile, index) => `
+      $("#tileList").innerHTML = page.entities.map((tile, index) => {
+        const isImage = tile.style === "image";
+        const imageSource = tile.image_url || tile.entity_id?.startsWith("image_url.")
+          ? "url"
+          : "entity";
+        return `
         <article class="tile-card" data-tile="${index}">
           <div class="tile-head"><h3>Tile ${index + 1}</h3><button class="icon danger remove-tile" title="Remove tile">×</button></div>
           <div class="tile-body">
-            <label>Home Assistant entity
+            <label class="entity-source" ${isImage && imageSource === "url" ? "hidden" : ""}>${isImage ? "Home Assistant image or camera entity" : "Home Assistant entity"}
               <input class="tile-entity" list="entityOptions" value="${escapeHtml(tile.entity_id)}" placeholder="sensor.example">
             </label>
+            <div class="image-fields" ${isImage ? "" : "hidden"}>
+              <div class="field-grid">
+                <label>Image source
+                  <select class="tile-image-source">
+                    ${options(["entity", "url"], imageSource, (value) => value === "entity" ? "Home Assistant entity" : "Image URL")}
+                  </select>
+                </label>
+                <label>Image fit
+                  <select class="tile-image-fit">
+                    ${options(["cover", "contain"], tile.image_fit || "cover", (value) => value === "cover" ? "Crop to fill" : "Fit whole image")}
+                  </select>
+                </label>
+              </div>
+              <label class="url-source" ${imageSource === "url" ? "" : "hidden"}>HTTP(S) image URL
+                <input class="tile-image-url" type="url" maxlength="2048" value="${escapeHtml(tile.image_url || "")}" placeholder="https://example.com/image.jpg">
+              </label>
+              <span class="small muted">The preview shows the same monochrome conversion sent to the X3/X4.</span>
+            </div>
             <label>Display label<input class="tile-label" maxlength="64" value="${escapeHtml(tile.label || tile.entity_id)}"></label>
             <div class="field-grid">
               <label>Visual
                 <select class="tile-style">
-                  ${options(["value", "gauge", "progress", "history", "qr"], tile.style || "value", styleLabel)}
+                  ${options(["value", "gauge", "progress", "history", "qr", "image"], tile.style || "value", styleLabel)}
                 </select>
               </label>
-              <label>Icon
+              <label class="standard-fields" ${isImage ? "hidden" : ""}>Icon
                 <select class="tile-icon">
                   ${options(["auto","home","temperature","humidity","battery","power","solar","wifi","storage","clock","weather","rain","light","lock","alert"], tile.icon || "auto", titleCase)}
                 </select>
               </label>
             </div>
-            <div class="field-grid">
+            <div class="field-grid standard-fields" ${isImage ? "hidden" : ""}>
               <label>Unit<input class="tile-unit" maxlength="16" value="${escapeHtml(tile.unit || "")}" placeholder="From entity"></label>
               <span></span>
             </div>
@@ -671,7 +694,7 @@
             </div>
           </div>
         </article>
-      `).join("");
+      `}).join("");
       document.querySelectorAll(".tile-card").forEach(bindTile);
     }
 
@@ -695,12 +718,33 @@
         changed();
         renderTiles();
       });
+      card.querySelector(".tile-image-source").addEventListener("change", (event) => {
+        if (event.target.value === "url") {
+          tile.entity_id = `image_url.page_${state.pageIndex + 1}_tile_${index + 1}`;
+          tile.image_url ||= "";
+          if (!tile.label || tile.label === "New tile") tile.label = "Image";
+        } else {
+          tile.image_url = "";
+          if (tile.entity_id.startsWith("image_url.")) tile.entity_id = "image.example";
+        }
+        changed();
+        renderTiles();
+      });
+      card.querySelector(".tile-image-url").addEventListener("change", (event) => {
+        tile.image_url = event.target.value.trim();
+        changed();
+      });
+      card.querySelector(".tile-image-fit").addEventListener("change", (event) => {
+        tile.image_fit = event.target.value;
+        changed();
+      });
       for (const [selector, field] of [
         [".tile-label", "label"], [".tile-unit", "unit"], [".tile-icon", "icon"],
         [".tile-style", "style"], [".tile-min", "minimum"], [".tile-max", "maximum"],
       ]) {
         card.querySelector(selector).addEventListener("change", (event) => {
           tile[field] = ["minimum", "maximum"].includes(field) ? Number(event.target.value) : event.target.value;
+          if (field === "style" && tile.style === "image") tile.image_fit ||= "cover";
           changed();
           if (field === "style") renderTiles();
         });
@@ -944,7 +988,7 @@
       })[character]);
     }
     const titleCase = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-    const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code"})[value] || titleCase(value);
+    const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code", image:"Image"})[value] || titleCase(value);
     const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid"})[value] || "Automatic";
     const options = (values, selected, labeler) => values.map((value) =>
       `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
@@ -986,6 +1030,8 @@
         style: "value",
         minimum: 0,
         maximum: 100,
+        image_url: "",
+        image_fit: "cover",
       });
       changed(); renderInspector(); renderPages();
     });
