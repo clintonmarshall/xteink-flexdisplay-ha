@@ -86,6 +86,10 @@ dashboard:
               maximum: 100
         - title: Energy
           layout: rows
+          activation:
+            type: schedule
+            start: "06:00"
+            end: "22:00"
           entities:
             - entity_id: sensor.solar_power
               label: Solar
@@ -97,6 +101,19 @@ dashboard:
               unit: kW
               icon: power
               style: history
+        - title: Door Alert
+          layout: single
+          activation:
+            type: condition
+            entity_id: binary_sensor.front_door
+            operator: "on"
+            priority: 90
+            expires_after_seconds: 300
+          entities:
+            - entity_id: binary_sensor.front_door
+              label: Front Door
+              icon: alert
+              style: value
 
 devices:
   X4-DEMO01:

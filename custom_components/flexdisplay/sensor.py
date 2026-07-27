@@ -73,6 +73,11 @@ DESCRIPTIONS = (
         ),
     ),
     FlexDisplaySensorDescription(
+        key="dashboard_selection",
+        translation_key="dashboard_selection",
+        value_fn=lambda record: record.get("dashboard_selection") or "default",
+    ),
+    FlexDisplaySensorDescription(
         key="pending_commands",
         translation_key="pending_commands",
         value_fn=lambda record: ", ".join(record.get("pending_commands") or []) or "none",

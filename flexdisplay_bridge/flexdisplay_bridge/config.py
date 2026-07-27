@@ -27,10 +27,23 @@ class EntityConfig:
 
 
 @dataclass(frozen=True)
+class PageActivationConfig:
+    type: str = "always"
+    entity_id: str = ""
+    operator: str = "equals"
+    value: str = ""
+    priority: int = 0
+    expires_after_seconds: int = 0
+    start: str = "06:00"
+    end: str = "22:00"
+
+
+@dataclass(frozen=True)
 class DashboardPageConfig:
     title: str
     entities: tuple[EntityConfig, ...] = ()
     layout: str = "auto"
+    activation: PageActivationConfig = PageActivationConfig()
 
 
 @dataclass(frozen=True)
@@ -195,12 +208,30 @@ def _page_entity(value: Any) -> EntityConfig:
     raise ValueError("Dashboard page entities must be entity IDs or mappings")
 
 
+def _page_activation(value: Any) -> PageActivationConfig:
+    selected = value if isinstance(value, dict) else {}
+    return PageActivationConfig(
+        type=str(selected.get("type") or "always"),
+        entity_id=str(selected.get("entity_id") or ""),
+        operator=str(selected.get("operator") or "equals"),
+        value=str(selected.get("value") or ""),
+        priority=max(0, min(100, int(selected.get("priority", 0)))),
+        expires_after_seconds=max(
+            0,
+            min(86400, int(selected.get("expires_after_seconds", 0))),
+        ),
+        start=_clock(selected.get("start"), "06:00"),
+        end=_clock(selected.get("end"), "22:00"),
+    )
+
+
 def _profile(name: str, value: dict[str, Any]) -> DashboardProfileConfig:
     pages = tuple(
         DashboardPageConfig(
             title=str(page.get("title") or f"PAGE {index + 1}").upper(),
             entities=tuple(_page_entity(item) for item in page.get("entities", [])),
             layout=str(page.get("layout") or "auto"),
+            activation=_page_activation(page.get("activation")),
         )
         for index, page in enumerate(value.get("pages", []))
         if isinstance(page, dict)

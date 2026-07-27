@@ -20,7 +20,7 @@ from .dashboard_store import (
     parse_profile,
     profile_payload,
 )
-from .dashboards import build_dashboard_pages
+from .dashboards import build_dashboard_pages, select_active_pages
 from .home_assistant import HomeAssistantClient
 from .mqtt_service import MqttService
 from .renderer import DashboardRenderer
@@ -650,6 +650,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "capabilities": {
                 "layouts": ["auto", "single", "rows", "columns", "grid"],
                 "styles": ["value", "gauge", "progress", "history", "qr"],
+                "activation_types": ["always", "schedule", "condition"],
+                "condition_operators": [
+                    "equals",
+                    "not_equals",
+                    "above",
+                    "below",
+                    "contains",
+                    "on",
+                    "off",
+                    "unavailable",
+                ],
+                "templates": ["doorbell", "alarm", "energy", "appliance", "weather_alert"],
                 "icons": [
                     "auto",
                     "home",
@@ -1049,13 +1061,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             ),
         )
         entity_states, ha_error = ha.fetch(profile.entities)
-        pages = build_dashboard_pages(
+        configured_pages = build_dashboard_pages(
             entity_states,
             record,
             dashboard_profile.pages if dashboard_profile else (),
         )
+        pages, page_selection = select_active_pages(
+            configured_pages,
+            entity_states,
+            record,
+            profile.timezone,
+        )
         page_index = int(record.get("dashboard_page_index") or 0) % len(pages)
-        if "next" in commands:
+        selection_changed = bool(record.get("dashboard_selection")) and (
+            record.get("dashboard_selection") != page_selection
+        )
+        if page_selection == "alert" or selection_changed:
+            page_index = 0
+        elif "next" in commands:
             page_index = (page_index + 1) % len(pages)
         elif "previous" in commands:
             page_index = (page_index - 1) % len(pages)
@@ -1080,6 +1103,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             page.title,
             [candidate.title for candidate in pages],
             profile.profile,
+            page_selection,
         ) or record
         image = renderer.render(
             title=page.title,
@@ -1152,6 +1176,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
         response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))
         response.headers["X-FlexDisplay-Page-Title"] = page.title
+        response.headers["X-FlexDisplay-Page-Selection"] = page_selection
         if settings.firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
         if "install" in commands:

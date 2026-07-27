@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import io
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -15,8 +15,13 @@ from flexdisplay_bridge.config import (
     EntityConfig,
     FirmwareConfig,
     HomeAssistantConfig,
+    PageActivationConfig,
 )
-from flexdisplay_bridge.dashboards import build_dashboard_pages
+from flexdisplay_bridge.dashboards import (
+    DashboardPage,
+    build_dashboard_pages,
+    select_active_pages,
+)
 from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
@@ -554,6 +559,11 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
             {
                 "title": "Showroom",
                 "layout": "rows",
+                "activation": {
+                    "type": "schedule",
+                    "start": "07:00",
+                    "end": "21:00",
+                },
                 "entities": [
                     {
                         "entity_id": "device.battery",
@@ -591,6 +601,7 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
         )
         assert saved.status_code == 200
         assert saved.json()["profile"]["pages"][0]["layout"] == "rows"
+        assert saved.json()["profile"]["pages"][0]["activation"]["type"] == "schedule"
         preview = client.post(
             "/api/v1/studio/preview",
             headers=headers,
@@ -605,6 +616,8 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
         (tmp_path / "flexdisplay-dashboards.json").read_text(encoding="utf-8")
     )
     assert persisted["profiles"]["showroom"]["auto_rotate_seconds"] == 300
+    assert persisted["version"] == 2
+    assert persisted["profiles"]["showroom"]["pages"][0]["activation"]["start"] == "07:00"
 
     with TestClient(create_app(config)) as client:
         studio = client.get("/api/v1/studio", headers=headers).json()
@@ -687,6 +700,169 @@ def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
             },
         )
         assert too_many_tiles.status_code == 400
+        invalid_condition = client.put(
+            "/api/v1/studio/profiles/wall",
+            json={
+                "pages": [
+                    {
+                        "title": "Alert",
+                        "activation": {
+                            "type": "condition",
+                            "entity_id": "not-an-entity",
+                            "operator": "equals",
+                            "value": "on",
+                        },
+                        "entities": [],
+                    }
+                ]
+            },
+        )
+        assert invalid_condition.status_code == 400
+
+
+def test_state_aware_alert_priority_expiry_and_scheduled_sets() -> None:
+    now = datetime(2026, 7, 27, 0, 0, tzinfo=UTC)  # 10:00 Australia/Melbourne
+    pages = (
+        DashboardPage("DEFAULT", (), activation=PageActivationConfig()),
+        DashboardPage(
+            "DAYTIME",
+            (),
+            activation=PageActivationConfig(type="schedule", start="06:00", end="18:00"),
+        ),
+        DashboardPage(
+            "DOOR OPEN",
+            (),
+            activation=PageActivationConfig(
+                type="condition",
+                entity_id="binary_sensor.front_door",
+                operator="on",
+                priority=80,
+                expires_after_seconds=300,
+            ),
+        ),
+        DashboardPage(
+            "FIRE ALARM",
+            (),
+            activation=PageActivationConfig(
+                type="condition",
+                entity_id="binary_sensor.fire_alarm",
+                operator="on",
+                priority=100,
+            ),
+        ),
+    )
+    states = [
+        EntityState(
+            "binary_sensor.front_door",
+            "Front Door",
+            "on",
+            "",
+            True,
+            last_changed=now - timedelta(seconds=60),
+        ),
+        EntityState(
+            "binary_sensor.fire_alarm",
+            "Fire Alarm",
+            "on",
+            "",
+            True,
+            last_changed=now - timedelta(seconds=30),
+        ),
+    ]
+
+    active, reason = select_active_pages(
+        pages,
+        states,
+        {},
+        "Australia/Melbourne",
+        now,
+    )
+    assert reason == "alert"
+    assert [page.title for page in active] == ["FIRE ALARM", "DOOR OPEN", "DAYTIME"]
+
+    expired_states = [
+        EntityState(
+            "binary_sensor.front_door",
+            "Front Door",
+            "on",
+            "",
+            True,
+            last_changed=now - timedelta(seconds=301),
+        ),
+        EntityState(
+            "binary_sensor.fire_alarm",
+            "Fire Alarm",
+            "off",
+            "",
+            True,
+            last_changed=now,
+        ),
+    ]
+    scheduled, reason = select_active_pages(
+        pages,
+        expired_states,
+        {},
+        "Australia/Melbourne",
+        now,
+    )
+    assert reason == "schedule"
+    assert [page.title for page in scheduled] == ["DAYTIME"]
+
+
+def test_state_aware_device_alert_restores_default_playlist(tmp_path: Path) -> None:
+    profile = DashboardProfileConfig(
+        name="aware",
+        pages=(
+            DashboardPageConfig("OVERVIEW"),
+            DashboardPageConfig(
+                "LOW BATTERY",
+                (
+                    EntityConfig(
+                        "device.battery",
+                        "Display Battery",
+                        "%",
+                        "battery",
+                        "gauge",
+                    ),
+                ),
+                "single",
+                PageActivationConfig(
+                    type="condition",
+                    entity_id="device.battery",
+                    operator="below",
+                    value="20",
+                    priority=90,
+                ),
+            ),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        profiles={"aware": profile},
+        default_profile="aware",
+    )
+    with TestClient(create_app(config)) as client:
+        alert = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-AWARE1",
+                "X-FlexDisplay-Battery-Percent": "12",
+            },
+        )
+        assert alert.headers["x-flexdisplay-page-selection"] == "alert"
+        assert alert.headers["x-flexdisplay-page-title"] == "LOW BATTERY"
+        assert alert.headers["x-flexdisplay-page-count"] == "2"
+
+        restored = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-AWARE1",
+                "X-FlexDisplay-Battery-Percent": "82",
+            },
+        )
+        assert restored.headers["x-flexdisplay-page-selection"] == "default"
+        assert restored.headers["x-flexdisplay-page-title"] == "OVERVIEW"
+        assert restored.headers["x-flexdisplay-page-count"] == "1"
 
 
 def test_dashboard_renderer_supports_visual_tile_styles() -> None:

@@ -7,7 +7,12 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .config import DashboardPageConfig, DashboardProfileConfig, EntityConfig
+from .config import (
+    DashboardPageConfig,
+    DashboardProfileConfig,
+    EntityConfig,
+    PageActivationConfig,
+)
 
 PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 LAYOUTS = {"auto", "single", "rows", "columns", "grid"}
@@ -29,6 +34,17 @@ ICONS = {
     "lock",
     "alert",
 }
+ACTIVATION_TYPES = {"always", "schedule", "condition"}
+CONDITION_OPERATORS = {
+    "equals",
+    "not_equals",
+    "above",
+    "below",
+    "contains",
+    "on",
+    "off",
+    "unavailable",
+}
 
 
 class DashboardValidationError(ValueError):
@@ -45,6 +61,65 @@ def _number(value: Any, fallback: float) -> float:
         return float(value)
     except (TypeError, ValueError):
         return fallback
+
+
+def _integer(value: Any, fallback: int, minimum: int, maximum: int) -> int:
+    try:
+        return max(minimum, min(maximum, int(value)))
+    except (TypeError, ValueError):
+        return fallback
+
+
+def _clock(value: Any, fallback: str) -> str:
+    candidate = str(value or fallback)
+    try:
+        hour, minute = (int(part) for part in candidate.split(":", 1))
+    except (TypeError, ValueError):
+        return fallback
+    if not 0 <= hour <= 23 or not 0 <= minute <= 59:
+        return fallback
+    return f"{hour:02d}:{minute:02d}"
+
+
+def _activation(raw: Any, page_number: int) -> PageActivationConfig:
+    value = raw if isinstance(raw, dict) else {}
+    activation_type = str(value.get("type") or "always")
+    if activation_type not in ACTIVATION_TYPES:
+        raise DashboardValidationError(
+            f"Page {page_number} has an unsupported activation type"
+        )
+    entity_id = _bounded_text(value.get("entity_id"), "", 128)
+    operator = str(value.get("operator") or "equals")
+    if activation_type == "condition":
+        if not entity_id or "." not in entity_id:
+            raise DashboardValidationError(
+                f"Page {page_number} condition needs a Home Assistant entity ID"
+            )
+        if operator not in CONDITION_OPERATORS:
+            raise DashboardValidationError(
+                f"Page {page_number} has an unsupported condition operator"
+            )
+    start = _clock(value.get("start"), "06:00")
+    end = _clock(value.get("end"), "22:00")
+    if activation_type == "schedule" and start == end:
+        raise DashboardValidationError(
+            f"Page {page_number} schedule start and end must differ"
+        )
+    return PageActivationConfig(
+        type=activation_type,
+        entity_id=entity_id,
+        operator=operator,
+        value=_bounded_text(value.get("value"), "", 128),
+        priority=_integer(value.get("priority"), 50, 0, 100),
+        expires_after_seconds=_integer(
+            value.get("expires_after_seconds"),
+            0,
+            0,
+            86400,
+        ),
+        start=start,
+        end=end,
+    )
 
 
 def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
@@ -105,6 +180,7 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                 title=_bounded_text(raw_page.get("title"), f"PAGE {page_index + 1}", 40).upper(),
                 entities=tuple(entities),
                 layout=layout,
+                activation=_activation(raw_page.get("activation"), page_index + 1),
             )
         )
 
@@ -127,6 +203,7 @@ def profile_payload(profile: DashboardProfileConfig) -> dict[str, Any]:
             {
                 "title": page.title,
                 "layout": page.layout,
+                "activation": asdict(page.activation),
                 "entities": [asdict(entity) for entity in page.entities],
             }
             for page in profile.pages
@@ -186,7 +263,7 @@ class DashboardProfileStore:
         temporary.write_text(
             json.dumps(
                 {
-                    "version": 1,
+                    "version": 2,
                     "profiles": {
                         name: profile_payload(profile)
                         for name, profile in sorted(self._profiles.items())
@@ -240,4 +317,13 @@ class DashboardProfileStore:
         for page in profile.pages:
             for entity in page.entities:
                 unique[entity.entity_id] = entity
+            if (
+                page.activation.type == "condition"
+                and page.activation.entity_id
+                and page.activation.entity_id not in unique
+            ):
+                unique[page.activation.entity_id] = EntityConfig(
+                    page.activation.entity_id,
+                    page.activation.entity_id,
+                )
         return tuple(unique.values())

@@ -19,3 +19,20 @@ does not require a long-lived access token in its options.
 
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
+
+## State-aware pages
+
+Dashboard Studio can make a page part of the normal playlist, a scheduled page
+set, or a priority alert. Scheduled sets use each device's configured timezone
+and support overnight ranges such as `22:00` to `06:00`.
+
+Alert pages watch a Home Assistant entity and can match exact text, numeric
+thresholds, text fragments, on/off-style states, or unavailability. When
+several alerts are active, the highest priority appears first. An optional
+expiry is measured from the entity's `last_changed` time; after expiry the
+normal or scheduled playlist resumes, and the alert rearms when the entity
+changes again.
+
+The Dashboard Studio includes starting templates for doorbells, alarms,
+daytime energy, running appliances, and weather alerts. Replace their example
+entity IDs with entities from your Home Assistant before saving.
