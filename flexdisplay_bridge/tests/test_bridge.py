@@ -905,6 +905,25 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
         assert [item["name"] for item in studio["profiles"]] == ["default", "showroom"]
 
 
+def test_dashboard_studio_uses_searchable_full_catalogue_entity_picker(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+
+    with TestClient(create_app(config)) as client:
+        response = client.get("/studio/")
+
+    assert response.status_code == 200
+    assert "function searchEntities" in response.text
+    assert "function bindEntityPicker" in response.text
+    assert "entity-picker-results" in response.text
+    assert "keep typing to narrow" in response.text
+    assert 'list="entityOptions"' not in response.text
+
+
 def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",

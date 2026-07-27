@@ -2,6 +2,8 @@
 
 ## 0.17.0
 
+- Replaced the browser-native Dashboard Studio entity list with a searchable
+  full-catalogue picker that remains usable on large Home Assistant installs.
 - Added per-device short-, double-, and long-press mappings for Confirm, Left,
   Right, Up, and Down in Home Assistant mode.
 - Added Dashboard Studio controls for default/no-op behavior, page navigation,
