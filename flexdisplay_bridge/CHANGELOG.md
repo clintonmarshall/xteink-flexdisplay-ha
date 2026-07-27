@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.18.0
+
+- Added a persistent Dashboard Studio Photo Frame library with albums and
+  per-device assignment.
+- Added bounded JPEG, PNG, WebP, and BMP uploads plus Home Assistant
+  `camera.*`/`image.*` snapshot capture.
+- Added exact X3/X4 monochrome previews with crop/contain, rotation, captions,
+  resize, and Floyd–Steinberg dithering.
+- Added ordered or deterministic shuffled playback, configurable intervals,
+  timezone-aware active windows, and wake-at-next-window scheduling.
+- Added Bridge-served one-bit BMP playback with unchanged-image hashing,
+  intelligent sleep, queued next/previous controls, and physical-button
+  navigation.
+- Extended the local SD Photo Frame activity to catalogue and convert JPEG and
+  PNG files alongside BMP images.
+- Added Home Assistant sensors for the current Photo Frame album, image, and
+  album position.
+
 ## 0.17.0
 
 - Replaced the browser-native Dashboard Studio entity list with a searchable

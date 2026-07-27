@@ -22,7 +22,7 @@ from .button_actions import (
     normalize_mappings,
     resolve_action,
 )
-from .config import BridgeConfig, DeviceConfig, load_config
+from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
 from .dashboard_store import (
     DashboardProfileStore,
     DashboardValidationError,
@@ -32,6 +32,11 @@ from .dashboard_store import (
 from .dashboards import build_dashboard_pages, select_active_pages
 from .home_assistant import HomeAssistantClient
 from .mqtt_service import MqttService
+from .photo_frame import (
+    MAX_IMAGE_BYTES,
+    PhotoFrameMediaStore,
+    PhotoFrameValidationError,
+)
 from .renderer import DashboardRenderer
 from .store import DeviceStore
 
@@ -370,7 +375,8 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
 
 
 def _header_value(value: Any) -> str:
-    return str(value or "").replace("\r", " ").replace("\n", " ")[:160]
+    selected = str(value or "").replace("\r", " ").replace("\n", " ")[:160]
+    return selected.encode("latin-1", errors="replace").decode("latin-1")
 
 
 def _integer(value: str | None, default: int, minimum: int, maximum: int) -> int:
@@ -596,6 +602,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.profiles,
         settings.default_profile,
     )
+    photo_frames = PhotoFrameMediaStore(
+        settings.state_path.with_name("flexdisplay-photo-frame.json")
+    )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
 
@@ -616,6 +625,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.config = settings
     app.state.store = store
     app.state.dashboards = dashboards
+    app.state.photo_frames = photo_frames
     app.state.mqtt = mqtt
 
     @app.middleware("http")
@@ -802,6 +812,212 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         services, error = ha.service_catalog()
         return {"services": services, "error": error}
+
+    @app.get("/api/v1/photo-frame")
+    def photo_frame_library(request: Request) -> dict[str, Any]:
+        authorize(request)
+        payload = photo_frames.payload()
+        payload["capabilities"] = {
+            "formats": ["JPEG", "PNG", "WebP", "BMP"],
+            "fits": ["cover", "contain"],
+            "rotations": [0, 90, 180, 270],
+            "models": {
+                "X3": {"width": 528, "height": 792},
+                "X4": {"width": 480, "height": 800},
+            },
+            "maximum_image_bytes": MAX_IMAGE_BYTES,
+        }
+        return payload
+
+    @app.put("/api/v1/photo-frame/albums/{album_id}")
+    def save_photo_frame_album(
+        album_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            album = photo_frames.put_album(album_id, payload)
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"album_id": album_id, "album": album}
+
+    @app.delete("/api/v1/photo-frame/albums/{album_id}")
+    def delete_photo_frame_album(album_id: str, request: Request) -> dict[str, str]:
+        authorize(request)
+        try:
+            photo_frames.delete_album(album_id)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Album not found") from err
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {"deleted": album_id}
+
+    @app.post("/api/v1/photo-frame/albums/{album_id}/images")
+    async def upload_photo_frame_image(
+        album_id: str,
+        request: Request,
+        x_flexdisplay_filename: str | None = Header(default=None),
+        x_flexdisplay_caption: str | None = Header(default=None),
+        x_flexdisplay_image_fit: str | None = Header(default="cover"),
+        x_flexdisplay_rotation: int | None = Header(default=0),
+    ) -> dict[str, Any]:
+        authorize(request)
+        content_length = _integer(request.headers.get("Content-Length"), 0, 0, MAX_IMAGE_BYTES + 1)
+        if content_length > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Images may not exceed 8 MB")
+        content = await request.body()
+        try:
+            item = photo_frames.add_image(
+                album_id,
+                content,
+                filename=x_flexdisplay_filename or "photo",
+                caption=x_flexdisplay_caption or "",
+                fit=x_flexdisplay_image_fit or "cover",
+                rotation=x_flexdisplay_rotation or 0,
+            )
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Album not found") from err
+        except PhotoFrameValidationError as err:
+            status = 413 if len(content) > MAX_IMAGE_BYTES else 400
+            raise HTTPException(status_code=status, detail=str(err)) from err
+        return {"album_id": album_id, "image": item}
+
+    @app.post("/api/v1/photo-frame/albums/{album_id}/home-assistant")
+    def import_photo_frame_home_assistant_image(
+        album_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        entity_id = str(payload.get("entity_id") or "")
+        if not entity_id.startswith(("camera.", "image.")):
+            raise HTTPException(
+                status_code=400,
+                detail="Choose a Home Assistant camera.* or image.* entity",
+            )
+        states, error = ha.fetch(
+            (
+                EntityConfig(
+                    entity_id,
+                    str(payload.get("caption") or entity_id),
+                    style="image",
+                    image_fit=str(payload.get("fit") or "cover"),
+                ),
+            )
+        )
+        if error or not states or not states[0].available or not states[0].image_bytes:
+            raise HTTPException(
+                status_code=502,
+                detail=error or "Home Assistant image source is unavailable",
+            )
+        try:
+            item = photo_frames.add_image(
+                album_id,
+                states[0].image_bytes,
+                filename=f"{entity_id}.image",
+                caption=str(payload.get("caption") or states[0].label),
+                fit=str(payload.get("fit") or "cover"),
+                rotation=_integer(str(payload.get("rotation") or 0), 0, 0, 270),
+                source=entity_id,
+            )
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Album not found") from err
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"album_id": album_id, "image": item}
+
+    @app.put("/api/v1/photo-frame/albums/{album_id}/images/{item_id}")
+    def update_photo_frame_image(
+        album_id: str,
+        item_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            item = photo_frames.update_image(album_id, item_id, payload)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Photo not found") from err
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"album_id": album_id, "image": item}
+
+    @app.delete("/api/v1/photo-frame/albums/{album_id}/images/{item_id}")
+    def delete_photo_frame_image(
+        album_id: str,
+        item_id: str,
+        request: Request,
+    ) -> dict[str, str]:
+        authorize(request)
+        try:
+            photo_frames.delete_image(album_id, item_id)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Photo not found") from err
+        return {"deleted": item_id}
+
+    @app.get("/api/v1/photo-frame/albums/{album_id}/images/{item_id}/preview")
+    def preview_photo_frame_image(
+        album_id: str,
+        item_id: str,
+        request: Request,
+        model: str = "X4",
+        width: int | None = None,
+        height: int | None = None,
+    ) -> Response:
+        authorize(request)
+        selected_model = model.upper()
+        default_width, default_height = (528, 792) if selected_model == "X3" else (480, 800)
+        try:
+            content = photo_frames.render(
+                album_id,
+                item_id,
+                _integer(str(width or default_width), default_width, 240, 1200),
+                _integer(str(height or default_height), default_height, 240, 1600),
+            )
+        except (KeyError, OSError) as err:
+            raise HTTPException(status_code=404, detail="Photo not found") from err
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return Response(content=content, media_type="image/png")
+
+    @app.put("/api/v1/photo-frame/devices/{device_id}")
+    def assign_photo_frame_album(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, str]:
+        authorize(request)
+        selected = _device_id(device_id)
+        try:
+            assignment = photo_frames.assign(selected, str(payload.get("album_id") or "default"))
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Album not found") from err
+        store.provision(selected, {"assigned_mode": "photo_frame"})
+        store.queue_command(selected, "refresh")
+        return assignment
+
+    @app.get("/api/v1/photo-frame/devices/{device_id}/image")
+    def photo_frame_device_image(
+        device_id: str,
+        request: Request,
+        direction: str = "auto",
+        x_flexdisplay_width: str | None = Header(default=None),
+        x_flexdisplay_height: str | None = Header(default=None),
+    ) -> Response:
+        selected = _device_id(device_id)
+        width = _integer(x_flexdisplay_width, 480, 240, 1200)
+        height = _integer(x_flexdisplay_height, 800, 240, 1600)
+        try:
+            content, headers = photo_frames.next_for_device(
+                selected,
+                width=width,
+                height=height,
+                direction=direction,
+            )
+        except PhotoFrameValidationError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return Response(content=content, media_type="image/bmp", headers=headers)
 
     @app.put("/api/v1/studio/profiles/{profile_name}")
     def save_studio_profile(
@@ -1153,6 +1369,130 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record = store.get(device_id) or record
             commands = list(record.get("dispatched_commands") or [])
         command_id = str(record.get("dispatched_command_id") or "") if commands else ""
+        if profile.mode == "photo_frame":
+            direction = "auto"
+            if "next" in commands:
+                direction = "next"
+            elif "previous" in commands:
+                direction = "previous"
+            elif "refresh" in commands or "full-refresh" in commands:
+                direction = "current"
+            for event in new_button_events:
+                if event.get("mode") != "photo_frame" or event.get("gesture") != "short":
+                    continue
+                if event.get("button") in {"right", "down"}:
+                    direction = "next"
+                elif event.get("button") in {"left", "up"}:
+                    direction = "previous"
+            try:
+                image, photo_headers = photo_frames.next_for_device(
+                    device_id,
+                    width=width,
+                    height=height,
+                    direction=direction,
+                )
+            except PhotoFrameValidationError as err:
+                raise HTTPException(status_code=409, detail=str(err)) from err
+            digest = hashlib.sha256(image).hexdigest()
+            image_unchanged = bool(
+                x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest
+            )
+            interval = _integer(
+                photo_headers.get("X-FlexDisplay-Refresh-Interval"),
+                profile.refresh_interval_seconds,
+                60,
+                86400,
+            )
+            profile = replace(
+                profile,
+                refresh_interval_seconds=interval,
+                active_start=photo_headers["X-FlexDisplay-Photo-Start"],
+                active_end=photo_headers["X-FlexDisplay-Photo-End"],
+                timezone=photo_headers["X-FlexDisplay-Photo-Timezone"],
+            )
+            sleep_plan = _sleep_plan(
+                profile,
+                _number(x_flexdisplay_battery_percent),
+                bool(_boolean(x_flexdisplay_usb_connected)),
+                image_unchanged,
+            )
+            if "power-off" in commands:
+                sleep_plan = {
+                    **sleep_plan,
+                    "sleep_action": "power_off",
+                    "sleep_seconds": 0,
+                    "sleep_reason": "remote_command",
+                    "next_wake_at": None,
+                }
+            elif "sleep" in commands or "clear" in commands:
+                sleep_plan = {
+                    **sleep_plan,
+                    "sleep_action": "scheduled",
+                    "sleep_seconds": profile.manual_sleep_seconds,
+                    "sleep_reason": "remote_command",
+                    "next_wake_at": (
+                        datetime.now(UTC) + timedelta(seconds=profile.manual_sleep_seconds)
+                    ).isoformat(timespec="seconds"),
+                }
+            record = store.touch(
+                device_id,
+                {
+                    **sleep_plan,
+                    "photo_album": photo_headers["X-FlexDisplay-Photo-Album"],
+                    "photo_id": photo_headers["X-FlexDisplay-Photo-ID"],
+                    "photo_filename": photo_headers["X-FlexDisplay-Photo-Filename"],
+                    "photo_index": int(photo_headers["X-FlexDisplay-Photo-Index"]),
+                    "photo_count": int(photo_headers["X-FlexDisplay-Photo-Count"]),
+                    "last_image_sha256": digest,
+                },
+            )
+            mqtt.publish_device(device_id, profile, {**record, "name": profile.name})
+            for name, value in photo_headers.items():
+                response.headers[name] = _header_value(value)
+            response.headers["ETag"] = f'"{digest}"'
+            response.headers["X-FlexDisplay-Image-SHA256"] = digest
+            response.headers["X-FlexDisplay-Image-Unchanged"] = (
+                "true" if image_unchanged else "false"
+            )
+            response.headers["X-FlexDisplay-Sleep-Action"] = sleep_plan["sleep_action"]
+            response.headers["X-FlexDisplay-Sleep-Seconds"] = str(sleep_plan["sleep_seconds"])
+            response.headers["X-FlexDisplay-Sleep-Reason"] = sleep_plan["sleep_reason"]
+            response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
+                profile.manual_wake_grace_seconds
+            )
+            if settings.provisioning.enabled:
+                response.headers["X-FlexDisplay-Provisioned"] = "true"
+                response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)
+                response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)
+                response.headers["X-FlexDisplay-Profile"] = _header_value(profile.profile)
+                response.headers["X-FlexDisplay-Assigned-Mode"] = "photo_frame"
+                response.headers["X-FlexDisplay-Auto-Start"] = (
+                    "true" if profile.auto_start else "false"
+                )
+                response.headers["X-FlexDisplay-Live-Mode"] = (
+                    "true" if profile.live_mode else "false"
+                )
+            response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
+            if command_id:
+                response.headers["X-FlexDisplay-Command-ID"] = command_id
+            if x_flexdisplay_command_result:
+                response.headers["X-FlexDisplay-Command-Acknowledged"] = (
+                    "true" if command_acknowledged else "false"
+                )
+            if settings.firmware.version:
+                response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
+            if "install" in commands:
+                response.headers["X-FlexDisplay-Firmware-URL"] = settings.firmware.url
+                response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
+                response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
+                response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
+                    settings.firmware.minimum_battery_percent
+                )
+            return Response(
+                content=image,
+                media_type="image/bmp",
+                headers=dict(response.headers),
+            )
         dashboard_profile = dashboards.resolve(profile.profile)
         profile = replace(
             profile,

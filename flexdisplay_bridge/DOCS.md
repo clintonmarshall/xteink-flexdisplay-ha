@@ -46,6 +46,29 @@ Saving a profile queues a refresh for every device currently assigned to it.
 Sleeping devices receive that refresh on their next scheduled or physical
 button wake.
 
+## Photo Frame media library
+
+Open **Photo Frame** in Dashboard Studio to create and manage server-side
+albums. The library accepts JPEG, PNG, WebP, and BMP files up to 8 MB and 20
+megapixels. It also captures the current image from a Home Assistant
+`camera.*` or `image.*` entity. Source files stay in the App data volume and
+survive upgrades.
+
+Each image supports a caption, 90-degree rotation steps, and either crop-to-fill
+or fit-whole-image rendering. The X3/X4 preview uses the same resize,
+autocontrast, caption, and Floyd–Steinberg dithering path used for the device
+BMP.
+
+Albums support ordered or deterministic shuffled playback, a rotation interval,
+timezone, and an active window, including overnight windows. Outside the active
+window the current e-paper image remains visible and the Bridge schedules the
+device's next wake for the beginning of the next window.
+
+Assigning an album changes that device to `photo_frame` mode and queues a
+refresh. Short Right/Down presses request the next image; Left/Up request the
+previous image. The Home Assistant integration exposes the current album,
+filename, and position after the device checks in.
+
 ## Physical-button actions
 
 Firmware, Bridge, and integration `0.17.0` classify short, double, and long

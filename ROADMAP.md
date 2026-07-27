@@ -27,7 +27,7 @@ Delivery: Bridge/HACS `0.12.0`; existing device firmware `0.14.0` is compatible.
 
 ## v0.16.1 — Dashboard image tiles
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS `0.13.0`; existing device firmware `0.14.0` is compatible.
 
 - Home Assistant camera and image entity selection in Dashboard Studio.
@@ -37,7 +37,8 @@ Delivery: Bridge/HACS `0.13.0`; existing device firmware `0.14.0` is compatible.
 
 ## v0.17 — Configurable physical-button actions
 
-Status: queued.
+Status: released and deployed.
+Delivery: Bridge/HACS/Firmware `0.17.0`.
 
 - Per-device short-, double-, and long-press mappings.
 - Home Assistant service, scene, script, and automation targets.
@@ -45,7 +46,8 @@ Status: queued.
 
 ## v0.18 — Photo Frame media pipeline
 
-Status: queued.
+Status: implemented, pending release and Home Assistant deployment.
+Delivery: Bridge/HACS/Firmware `0.18.0`.
 
 - JPEG, PNG, WebP, and BMP upload and conversion.
 - E-ink crop, rotation, resize, and dithering previews.

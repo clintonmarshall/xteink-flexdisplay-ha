@@ -78,6 +78,25 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("dashboard_selection") or "default",
     ),
     FlexDisplaySensorDescription(
+        key="photo_album",
+        translation_key="photo_album",
+        value_fn=lambda record: record.get("photo_album") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="photo_filename",
+        translation_key="photo_filename",
+        value_fn=lambda record: record.get("photo_filename") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="photo_position",
+        translation_key="photo_position",
+        value_fn=lambda record: (
+            f"{int(record.get('photo_index', 0)) + 1}/{record.get('photo_count', 0)}"
+            if record.get("photo_count")
+            else "none"
+        ),
+    ),
+    FlexDisplaySensorDescription(
         key="pending_commands",
         translation_key="pending_commands",
         value_fn=lambda record: ", ".join(record.get("pending_commands") or []) or "none",
