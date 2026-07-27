@@ -16,6 +16,7 @@ from flexdisplay_bridge.config import (
     EntityConfig,
     FirmwareConfig,
     HomeAssistantConfig,
+    MqttConfig,
     PageActivationConfig,
 )
 from flexdisplay_bridge.dashboards import (
@@ -24,6 +25,7 @@ from flexdisplay_bridge.dashboards import (
     select_active_pages,
 )
 from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
+from flexdisplay_bridge.mqtt_service import MqttService
 from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
@@ -105,6 +107,228 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert record["rssi"] == -54
         assert record["provisioned"] is True
         assert record["assigned_name"] == "Test X4"
+
+
+def test_v020_screen_history_can_preview_and_resend_exact_image(tmp_path: Path) -> None:
+    profile = DashboardProfileConfig(
+        name="two-pages",
+        pages=(
+            DashboardPageConfig(title="FIRST"),
+            DashboardPageConfig(title="SECOND"),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        profiles={"two-pages": profile},
+        default_profile="two-pages",
+        devices={
+            "X4-HISTORY": DeviceConfig(
+                name="History X4",
+                model="X4",
+                profile="two-pages",
+            )
+        },
+    )
+    headers = {
+        "X-FlexDisplay-ID": "X4-HISTORY",
+        "X-FlexDisplay-Width": "480",
+        "X-FlexDisplay-Height": "800",
+        "X-FlexDisplay-SD-Ready": "true",
+    }
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers=headers)
+        assert first.status_code == 200
+        client.post("/api/v1/devices/X4-HISTORY/commands/next")
+        second = client.get("/api/v1/screen", headers=headers)
+        assert second.status_code == 200
+        assert first.content != second.content
+
+        listing = client.get("/api/v1/devices/X4-HISTORY/screens").json()
+        assert len(listing["screens"]) == 2
+        assert listing["screens"][0]["title"] == "SECOND"
+        assert listing["screens"][1]["title"] == "FIRST"
+
+        current = client.get("/api/v1/devices/X4-HISTORY/screens/current")
+        assert current.status_code == 200
+        assert current.content == second.content
+        current_png = client.get(
+            "/api/v1/devices/X4-HISTORY/screens/current.png"
+        )
+        assert current_png.status_code == 200
+        assert current_png.headers["content-type"] == "image/png"
+        assert current_png.content == second.content
+
+        older = listing["screens"][1]
+        queued = client.post(
+            f"/api/v1/devices/X4-HISTORY/screens/{older['id']}/resend"
+        )
+        assert queued.status_code == 200
+        restored = client.get("/api/v1/screen", headers=headers)
+        assert restored.status_code == 200
+        assert restored.content == first.content
+        assert restored.headers["x-flexdisplay-screen-restored"] == older["id"]
+
+
+def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False):
+            self.messages.append((topic, payload, retain))
+
+    state = {
+        "device_id": "X4-MQTT01",
+        "model": "X4",
+        "firmware": "1.4.1-flexdisplay.0.19.0",
+        "latest_firmware": "1.4.1-flexdisplay.0.20.0",
+        "available_profiles": ["default", "energy"],
+        "available_modes": ["home_assistant", "photo_frame"],
+    }
+    service = MqttService(
+        MqttConfig(enabled=True, entity_source="mqtt"),
+        lambda device_id, command, payload: None,
+    )
+    client = FakeClient()
+    service.client = client
+    service.connected = True
+    service.publish_device(
+        "X4-MQTT01",
+        DeviceConfig(name="MQTT X4", model="X4"),
+        state,
+    )
+    service.publish_screen("X4-MQTT01", b"png-screen")
+
+    topics = {message[0]: message[1] for message in client.messages}
+    assert "homeassistant/update/x4_mqtt01/firmware/config" in topics
+    assert "homeassistant/event/x4_mqtt01/physical_button/config" in topics
+    assert "homeassistant/select/x4_mqtt01/profile/config" in topics
+    assert "homeassistant/number/x4_mqtt01/refresh_interval/config" in topics
+    assert "homeassistant/switch/x4_mqtt01/intelligent_sleep/config" in topics
+    assert "homeassistant/text/x4_mqtt01/timezone/config" in topics
+    assert "homeassistant/number/x4_mqtt01/manual_wake_grace/config" in topics
+    assert "homeassistant/image/x4_mqtt01/current_screen/config" in topics
+    assert topics["flexdisplay/X4-MQTT01/screen"] == b"png-screen"
+    assert json.loads(
+        topics["homeassistant/select/x4_mqtt01/profile/config"]
+    )["options"] == ["default", "energy"]
+    assert json.loads(
+        topics["homeassistant/update/x4_mqtt01/firmware/config"]
+    )["payload_install"] == "PRESS"
+
+    cleanup = MqttService(
+        MqttConfig(enabled=True, entity_source="hacs"),
+        lambda device_id, command, payload: None,
+    )
+    cleanup_client = FakeClient()
+    cleanup.client = cleanup_client
+    cleanup.connected = True
+    cleanup.publish_device(
+        "X4-MQTT01",
+        DeviceConfig(name="MQTT X4", model="X4"),
+        state,
+    )
+    discovery_payloads = [
+        payload
+        for topic, payload, retain in cleanup_client.messages
+        if topic.startswith("homeassistant/") and topic.endswith("/config") and retain
+    ]
+    assert discovery_payloads
+    assert set(discovery_payloads) == {""}
+
+
+def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        mqtt=MqttConfig(enabled=False, entity_source="mqtt"),
+        profiles={
+            "default": DashboardProfileConfig(
+                name="default",
+                pages=(DashboardPageConfig(title="OVERVIEW"),),
+            )
+        },
+    )
+    headers = {
+        "X-FlexDisplay-ID": "X3-APPMQTT",
+        "X-FlexDisplay-Width": "528",
+        "X-FlexDisplay-Height": "792",
+    }
+    app = create_app(config)
+    with TestClient(app) as client:
+        client.get("/api/v1/screen", headers=headers)
+        app.state.mqtt.on_command("X3-APPMQTT", "set-refresh-interval", "1800")
+        app.state.mqtt.on_command("X3-APPMQTT", "set-mode", "photo_frame")
+        app.state.mqtt.on_command("X3-APPMQTT", "set-active-start", "07:30")
+
+        device = client.get("/api/v1/devices/X3-APPMQTT").json()
+        assert device["assigned_refresh_interval_seconds"] == 1800
+        assert device["assigned_mode"] == "photo_frame"
+        assert device["assigned_active_start"] == "07:30"
+        assert device["last_management_action"] == "set-active-start"
+        assert device["last_management_action_success"] is True
+
+
+def test_v020_stale_install_is_released_and_audited(tmp_path: Path) -> None:
+    old = (datetime.now(UTC) - timedelta(hours=2)).isoformat(timespec="seconds")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "devices": {
+                    "X3-STALE1": {
+                        "device_id": "X3-STALE1",
+                        "pending_commands": [],
+                        "dispatched_commands": ["install"],
+                        "dispatched_command_id": "X3-STALE1-00000001",
+                        "firmware_update_target": "1.0.0",
+                        "firmware_update_stage_at": old,
+                    }
+                },
+                "firmware_rollout": {
+                    "target_version": "1.0.0",
+                    "status": "canary_active",
+                    "canary_device_id": "X3-STALE1",
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = DeviceStore(state_path)
+
+    assert store.expire_stale_firmware_installs(1800) == ["X3-STALE1"]
+    record = store.get("X3-STALE1")
+    assert record is not None
+    assert record["dispatched_commands"] == []
+    assert record["firmware_update_status"] == "failed"
+    assert record["firmware_update_error"] == "install:stale-timeout"
+    assert store.firmware_rollout()["status"] == "failed"
+
+
+def test_v020_queued_install_can_wait_for_a_sleeping_device(tmp_path: Path) -> None:
+    old = (datetime.now(UTC) - timedelta(days=1)).isoformat(timespec="seconds")
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "devices": {
+                    "X3-SLEEP1": {
+                        "device_id": "X3-SLEEP1",
+                        "pending_commands": ["install"],
+                        "pending_command_id": "X3-SLEEP1-00000001",
+                        "dispatched_commands": [],
+                        "firmware_update_stage_at": old,
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    store = DeviceStore(state_path)
+
+    assert store.expire_stale_firmware_installs(1800) == []
+    assert store.get("X3-SLEEP1")["pending_commands"] == ["install"]
 
 
 def test_home_assistant_fetch_skips_local_device_pseudo_entities() -> None:
@@ -876,6 +1100,8 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
         doubled_ingress = client.get("http://testserver//studio/")
         assert doubled_ingress.status_code == 200
         assert "FlexDisplay Dashboard Studio" in doubled_ingress.text
+        assert "Fleet health v0.20" in doubled_ingress.text
+        assert "data-resend-screen" in doubled_ingress.text
         assert client.get("/api/v1/studio").status_code == 401
         saved = client.put(
             "/api/v1/studio/profiles/showroom",

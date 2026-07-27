@@ -249,6 +249,19 @@
     .photo-card img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #f4f4ef; }
     .photo-card-body { display: grid; gap: 8px; padding: 10px; }
     .photo-meta { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .fleet-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; padding: 20px; }
+    .fleet-card { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #0d151d; }
+    .fleet-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
+    .fleet-card-body { display: grid; grid-template-columns: 112px 1fr; gap: 12px; padding: 12px; }
+    .fleet-preview { width: 112px; aspect-ratio: 3 / 5; object-fit: contain; background: #f4f4ef; border-radius: 6px; }
+    .fleet-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-content: start; }
+    .fleet-fact { padding: 7px; border-radius: 7px; background: var(--panel-2); }
+    .fleet-fact strong { display: block; font-size: 12px; }
+    .health-badge { padding: 3px 8px; border-radius: 999px; color: #08130f; background: var(--accent-2); font-size: 10px; font-weight: 850; text-transform: uppercase; }
+    .health-badge.needs_attention, .health-badge.offline { color: #24100f; background: var(--danger); }
+    .screen-strip { display: flex; gap: 7px; padding: 0 12px 12px; overflow-x: auto; }
+    .screen-thumb { flex: 0 0 58px; padding: 0; overflow: hidden; border-radius: 6px; }
+    .screen-thumb img { display: block; width: 58px; height: 90px; object-fit: contain; background: #f4f4ef; }
     .upload-drop {
       display: grid; gap: 8px; padding: 14px; border: 1px dashed #607383;
       border-radius: 10px; background: rgba(103,214,193,.04); text-align: center;
@@ -268,6 +281,7 @@
       .tile-list { grid-template-columns: 1fr; }
       .library-shell { grid-template-columns: 1fr; }
       .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
+      .fleet-grid { grid-template-columns: 1fr; padding: 14px; }
     }
   </style>
 </head>
@@ -307,6 +321,12 @@
           <button id="deleteProfile" class="danger">Delete</button>
         </div>
         <p class="small muted" style="margin:12px 0 0">Profiles are stored in the Bridge data directory and survive App upgrades and restarts.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Fleet health</h2><span class="rule-badge">v0.20</span></div>
+        <button id="openFleetHealth" style="width:100%">Open fleet health</button>
+        <p class="small muted" style="margin:10px 0 0">Check battery, connectivity, update state, and recent screens across every X3/X4.</p>
       </div>
 
       <div class="section">
@@ -602,6 +622,18 @@
       <div id="photoGallery" class="library-gallery"></div>
     </div>
   </dialog>
+  <dialog id="fleetHealthDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Fleet health v0.20</div><h2 style="font-size:20px">XTEINK devices</h2></div>
+      <div class="button-row">
+        <button id="refreshFleetHealth">Refresh</button>
+        <button id="closeFleetHealth" class="icon" title="Close">×</button>
+      </div>
+    </div>
+    <div id="fleetHealthGrid" class="fleet-grid">
+      <div class="empty">Loading fleet health…</div>
+    </div>
+  </dialog>
   <div id="toast" role="status"></div>
 
   <script>
@@ -652,6 +684,95 @@
       node.className = `${error ? "error " : ""}show`;
       clearTimeout(node.timer);
       node.timer = setTimeout(() => node.className = "", 3200);
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"']/g, (character) => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
+      })[character]);
+    }
+
+    async function loadFleetHealth() {
+      const grid = $("#fleetHealthGrid");
+      grid.innerHTML = '<div class="empty">Loading fleet health…</div>';
+      try {
+        const response = await api("devices");
+        const payload = await response.json();
+        state.devices = payload.devices || [];
+        const histories = await Promise.all(state.devices.map(async (device) => {
+          try {
+            const result = await api(`devices/${encodeURIComponent(device.device_id)}/screens`);
+            return [device.device_id, (await result.json()).screens || []];
+          } catch (_) {
+            return [device.device_id, []];
+          }
+        }));
+        const historyByDevice = Object.fromEntries(histories);
+        if (!state.devices.length) {
+          grid.innerHTML = '<div class="empty">No FlexDisplay device has checked in yet.</div>';
+          return;
+        }
+        grid.innerHTML = state.devices.map((device) => {
+          const id = escapeHtml(device.device_id);
+          const history = historyByDevice[device.device_id] || [];
+          const preview = history[0]
+            ? `<img class="fleet-preview" src="${API(`devices/${encodeURIComponent(device.device_id)}/screens/current`)}" alt="Current ${id} screen">`
+            : '<div class="fleet-preview empty">No screen yet</div>';
+          const screens = history.map((item) => `
+            <button class="screen-thumb" data-resend-device="${id}" data-resend-screen="${escapeHtml(item.id)}" title="Resend ${escapeHtml(item.title || item.captured_at)}">
+              <img src="${API(`devices/${encodeURIComponent(device.device_id)}/screens/${encodeURIComponent(item.id)}`)}" alt="${escapeHtml(item.title || "Saved screen")}">
+            </button>`).join("");
+          return `
+            <article class="fleet-card">
+              <div class="fleet-card-head">
+                <div><strong>${escapeHtml(device.name || device.device_id)}</strong><div class="small muted">${id} · ${escapeHtml(device.model || "X3")}</div></div>
+                <span class="health-badge ${escapeHtml(device.health_state)}">${escapeHtml(device.health_state || "unknown")}</span>
+              </div>
+              <div class="fleet-card-body">
+                ${preview}
+                <div>
+                  <div class="fleet-facts">
+                    <div class="fleet-fact"><span class="small muted">Battery</span><strong>${escapeHtml(device.battery_percent ?? "—")}%</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Wi-Fi</span><strong>${escapeHtml(device.rssi ?? "—")} dBm</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Power</span><strong>${escapeHtml(device.power_state || "unknown")}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Firmware</span><strong>${escapeHtml(device.firmware || "unknown")}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Page</span><strong>${escapeHtml(device.dashboard_page_title || device.photo_filename || "—")}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Next wake</span><strong>${escapeHtml(device.next_wake_at || "manual")}</strong></div>
+                  </div>
+                  <div class="button-row" style="margin-top:10px">
+                    <button data-fleet-command="refresh" data-fleet-device="${id}">Refresh</button>
+                    <button data-fleet-command="next" data-fleet-device="${id}">Next</button>
+                    <button data-fleet-command="restart" data-fleet-device="${id}">Restart</button>
+                  </div>
+                </div>
+              </div>
+              <div class="screen-strip">${screens || '<span class="small muted">Screen history will appear after the next refresh.</span>'}</div>
+            </article>`;
+        }).join("");
+        populateDevices();
+      } catch (error) {
+        grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function fleetCommand(deviceId, command) {
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}/commands/${encodeURIComponent(command)}`, {method: "POST"});
+        toast(`${command} queued for ${deviceId}.`);
+        await loadFleetHealth();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function resendFleetScreen(deviceId, screenId) {
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}/screens/${encodeURIComponent(screenId)}/resend`, {method: "POST"});
+        toast(`Saved screen queued for ${deviceId}.`);
+        await loadFleetHealth();
+      } catch (error) {
+        toast(error.message, true);
+      }
     }
 
     function defaultActivation() {
@@ -1744,6 +1865,18 @@
       if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
     });
     $("#openPhotoLibrary").addEventListener("click", openPhotoLibrary);
+    $("#openFleetHealth").addEventListener("click", () => {
+      $("#fleetHealthDialog").showModal();
+      loadFleetHealth();
+    });
+    $("#refreshFleetHealth").addEventListener("click", loadFleetHealth);
+    $("#closeFleetHealth").addEventListener("click", () => $("#fleetHealthDialog").close());
+    $("#fleetHealthGrid").addEventListener("click", (event) => {
+      const command = event.target.closest("[data-fleet-command]");
+      if (command) return fleetCommand(command.dataset.fleetDevice, command.dataset.fleetCommand);
+      const screen = event.target.closest("[data-resend-screen]");
+      if (screen) resendFleetScreen(screen.dataset.resendDevice, screen.dataset.resendScreen);
+    });
     $("#closePhotoLibrary").addEventListener("click", () => $("#photoLibraryDialog").close());
     $("#photoAlbum").addEventListener("change", renderPhotoAlbum);
     $("#savePhotoAlbum").addEventListener("click", savePhotoAlbum);

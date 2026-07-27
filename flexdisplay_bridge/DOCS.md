@@ -100,6 +100,15 @@ Options:
 - `mqtt_enabled`: publish optional MQTT Discovery entities.
 - `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`: dedicated broker
   connection.
+- `home_assistant_entity_source`: use `hacs` for the existing custom
+  integration, `mqtt` for the v0.20 App-only experience, or `both` only during
+  a short migration test. The default is `hacs`, which actively removes
+  retained FlexDisplay MQTT Discovery configurations to prevent duplicate
+  entities.
+- `screen_history_enabled`: retain recent e-paper output in the App data
+  volume.
+- `screen_history_limit`: number of rendered screens retained per device,
+  between 1 and 20.
 - `bridge_api_key`: protects bridge command endpoints and should also be
   entered in the HACS integration.
 - `firmware_version`: latest FlexDisplay application version offered to devices.
@@ -117,6 +126,46 @@ Options:
   then serve the trusted copy from the local Bridge.
 - `firmware_mirror_retry_seconds`: delay before retrying a failed mirror
   download.
+- `firmware_stale_install_seconds`: release and audit an install that has
+  stopped reporting progress for this many seconds.
+
+## App-only Home Assistant installation
+
+FlexDisplay v0.20 can create its complete Home Assistant device through MQTT,
+so HACS is optional. First install and configure the Mosquitto broker and Home
+Assistant MQTT integration. In the FlexDisplay Bridge App configuration:
+
+1. Enable MQTT and enter the broker connection.
+2. Change **Home Assistant entity source** from `hacs` to `mqtt`.
+3. Save and restart the Bridge App.
+4. Wake each X3/X4 once so its complete device and retained state are
+   published.
+
+Existing HACS users should leave the source set to `hacs` until they are ready
+to migrate. Remove the existing FlexDisplay integration entry, change the App
+source to `mqtt`, restart the Bridge, and wake the displays. Home Assistant
+will create MQTT-backed devices; dashboard cards that referenced old entity
+IDs may need to be pointed at the replacement entities. Do not leave `both`
+enabled permanently because it intentionally creates parallel entity sets.
+
+App-only discovery includes fleet health, page navigation, refresh, sleep,
+restart, provisioning switches and numbers, profile/mode selectors, physical
+button events, a current-screen Image entity, and a native firmware update
+entity with live percentage progress. Commands remain durable in the Bridge
+while a display sleeps.
+
+## Fleet health and screen history
+
+Open **Fleet health** in Dashboard Studio to see every display's current
+health, battery, Wi-Fi signal, power state, firmware, page, and next wake.
+Problems are summarized as SD-card, Home Assistant, low-battery, connectivity,
+or firmware-update issues.
+
+The Bridge retains the configured number of distinct rendered screens for
+each device. Selecting a thumbnail queues that exact image for a one-shot
+resend on the device's next check-in; normal dashboard or Photo Frame content
+resumes afterwards. History is stored under the App data volume and is bounded
+per device.
 
 ## Zero-touch provisioning
 

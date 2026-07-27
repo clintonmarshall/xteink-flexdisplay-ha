@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.20.0
+
+- Added an App-only Home Assistant entity path using full MQTT Discovery for
+  sensors, binary sensors, buttons, switches, numbers, selects, update
+  controls, text/timezone settings, and physical-button events.
+- Added the `home_assistant_entity_source` migration guard. Existing installs
+  default to `hacs`, `mqtt` enables the App-only device, and `both` is reserved
+  for short migration testing.
+- Added a Fleet Health workspace with power, battery, Wi-Fi, firmware,
+  dashboard, next-wake, and actionable problem states.
+- Added bounded, durable X3/X4 screen history with current-screen previews and
+  exact one-shot resend from either the API or Fleet Health.
+- Added a retained MQTT Image entity for the current e-paper screen and native
+  firmware-update progress in the MQTT Update entity.
+- Added automatic release of stale OTA install commands after a configurable
+  timeout while preserving failure and rollout audit evidence.
+- Existing shared X3/X4 firmware `0.19.0` remains compatible; this release does
+  not require a USB reflash.
+
 ## 0.19.0
 
 - Added Home Assistant controls to cancel active commands, retry failed

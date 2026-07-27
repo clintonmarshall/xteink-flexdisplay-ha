@@ -94,6 +94,15 @@ def main() -> None:
     os.environ["FLEXDISPLAY_MQTT_PORT"] = option(options, "mqtt_port", 1883)
     os.environ["FLEXDISPLAY_MQTT_USERNAME"] = option(options, "mqtt_username", "flexdisplay")
     os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = option(options, "mqtt_password")
+    os.environ["FLEXDISPLAY_HA_ENTITY_SOURCE"] = option(
+        options, "home_assistant_entity_source", "hacs"
+    )
+    os.environ["FLEXDISPLAY_SCREEN_HISTORY_ENABLED"] = option(
+        options, "screen_history_enabled", True
+    )
+    os.environ["FLEXDISPLAY_SCREEN_HISTORY_LIMIT"] = option(
+        options, "screen_history_limit", 5
+    )
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
     firmware = firmware_options(options)
     os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = firmware["firmware_version"]
@@ -123,6 +132,9 @@ def main() -> None:
     )
     os.environ["FLEXDISPLAY_FIRMWARE_MIRROR_RETRY_SECONDS"] = option(
         options, "firmware_mirror_retry_seconds", 300
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_STALE_INSTALL_SECONDS"] = option(
+        options, "firmware_stale_install_seconds", 1800
     )
 
     if not CONFIG_PATH.exists():

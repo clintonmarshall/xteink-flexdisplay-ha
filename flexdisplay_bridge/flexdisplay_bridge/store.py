@@ -309,6 +309,134 @@ class DeviceStore:
             self._save()
             return True
 
+    def record_management_result(
+        self,
+        device_id: str,
+        action: str,
+        success: bool,
+        detail: str,
+    ) -> dict[str, Any] | None:
+        """Persist the outcome of an App-only MQTT or Studio action."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            now = utc_now()
+            result = {
+                "action": str(action)[:64],
+                "success": bool(success),
+                "detail": str(detail)[:240],
+                "at": now,
+            }
+            record["last_management_action"] = result["action"]
+            record["last_management_action_success"] = result["success"]
+            record["last_management_action_detail"] = result["detail"]
+            record["last_management_action_at"] = now
+            history = record.setdefault("management_history", [])
+            history.append(result)
+            record["management_history"] = history[-24:]
+            self._save()
+            return deepcopy(record)
+
+    def set_screen_override(
+        self,
+        device_id: str,
+        history_id: str,
+    ) -> dict[str, Any] | None:
+        """Queue an exact historical image for the device's next check-in."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            record["screen_override_id"] = str(history_id)[:96]
+            record["screen_override_queued_at"] = utc_now()
+            self._save()
+            return deepcopy(record)
+
+    def clear_screen_override(
+        self,
+        device_id: str,
+        history_id: str,
+    ) -> dict[str, Any] | None:
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            if record.get("screen_override_id") == history_id:
+                record.pop("screen_override_id", None)
+                record["screen_override_sent_at"] = utc_now()
+                self._save()
+            return deepcopy(record)
+
+    def expire_stale_firmware_installs(self, timeout_seconds: int) -> list[str]:
+        """Release installs that stopped reporting progress for a bounded time."""
+        timeout = max(300, int(timeout_seconds))
+        with self._lock:
+            now = datetime.now(UTC)
+            expired: list[str] = []
+            for device_id, record in self._state["devices"].items():
+                # A queued command may legitimately wait for a sleeping display
+                # for hours. Only expire an install after it has been delivered
+                # and the device then stops reporting progress.
+                active = "install" in (record.get("dispatched_commands") or [])
+                if not active:
+                    continue
+                last_activity = (
+                    record.get("firmware_update_stage_at")
+                    or record.get("command_dispatched_at")
+                    or record.get("command_queued_at")
+                )
+                try:
+                    age = (now - datetime.fromisoformat(str(last_activity))).total_seconds()
+                except (TypeError, ValueError):
+                    continue
+                if age < timeout:
+                    continue
+                expired.append(device_id)
+                record["pending_commands"] = [
+                    command
+                    for command in (record.get("pending_commands") or [])
+                    if command != "install"
+                ]
+                if not record["pending_commands"]:
+                    record.pop("pending_command_id", None)
+                record["dispatched_commands"] = [
+                    command
+                    for command in (record.get("dispatched_commands") or [])
+                    if command != "install"
+                ]
+                if not record["dispatched_commands"]:
+                    record.pop("dispatched_command_id", None)
+                expired_at = utc_now()
+                record["firmware_update_status"] = "failed"
+                record["firmware_update_stage"] = "failed"
+                record["firmware_update_percent"] = 0
+                record["firmware_update_stage_at"] = expired_at
+                record["firmware_update_error"] = "install:stale-timeout"
+                record["firmware_update_error_at"] = expired_at
+                record["firmware_stale_cleared_at"] = expired_at
+                record["firmware_stale_timeout_seconds"] = timeout
+                history = record.setdefault("firmware_progress_history", [])
+                history.append(
+                    {
+                        "command_id": str(record.get("last_command_id") or "")[:96],
+                        "stage": "failed",
+                        "percent": 0,
+                        "detail": "install:stale-timeout",
+                        "at": expired_at,
+                    }
+                )
+                record["firmware_progress_history"] = history[-24:]
+                rollout = self._state.get("firmware_rollout") or {}
+                if rollout.get("target_version") == record.get("firmware_update_target"):
+                    rollout["status"] = "failed"
+                    rollout["last_failed_device_id"] = device_id
+                    rollout["last_failure"] = "install:stale-timeout"
+                    rollout["last_failed_at"] = expired_at
+            if expired:
+                self._save()
+            return expired
+
     def firmware_rollout(self) -> dict[str, Any]:
         with self._lock:
             return deepcopy(self._state.get("firmware_rollout") or {})

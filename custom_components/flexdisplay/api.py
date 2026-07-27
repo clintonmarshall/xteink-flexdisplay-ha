@@ -41,6 +41,21 @@ class FlexDisplayApiClient:
         except (ClientError, ClientResponseError, TimeoutError, ValueError) as err:
             raise FlexDisplayApiError(str(err)) from err
 
+    async def _request_bytes(self, path: str) -> bytes:
+        try:
+            async with self._session.get(
+                f"{self._base_url}{path}",
+                headers=self._headers,
+                timeout=10,
+            ) as response:
+                if response.status >= 400:
+                    raise FlexDisplayApiError(response.reason)
+                return await response.read()
+        except FlexDisplayApiError:
+            raise
+        except (ClientError, ClientResponseError, TimeoutError, ValueError) as err:
+            raise FlexDisplayApiError(str(err)) from err
+
     async def health(self) -> dict[str, Any]:
         """Return bridge health."""
         return await self._request("GET", "/healthz")
@@ -50,6 +65,12 @@ class FlexDisplayApiClient:
         payload = await self._request("GET", "/api/v1/devices")
         devices = payload.get("devices", [])
         return devices if isinstance(devices, list) else []
+
+    async def current_screen(self, device_id: str) -> bytes:
+        """Return the most recent rendered screen as PNG."""
+        return await self._request_bytes(
+            f"/api/v1/devices/{device_id}/screens/current.png"
+        )
 
     async def command(self, device_id: str, command: str) -> None:
         """Queue a command for a device."""

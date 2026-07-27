@@ -228,6 +228,43 @@ DESCRIPTIONS = (
         device_class=SensorDeviceClass.TIMESTAMP,
         value_fn=lambda record: parse_datetime(record.get("next_wake_at", "")),
     ),
+    FlexDisplaySensorDescription(
+        key="health_state",
+        translation_key="health",
+        value_fn=lambda record: record.get("health_state") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="health_detail",
+        translation_key="health_detail",
+        value_fn=lambda record: record.get("health_detail") or "No issues",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_screen_refresh_at",
+        translation_key="last_screen_refresh",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda record: parse_datetime(
+            record.get("last_screen_refresh_at", "")
+        ),
+    ),
+    FlexDisplaySensorDescription(
+        key="screen_history_count",
+        translation_key="screen_history_count",
+        value_fn=lambda record: record.get("screen_history_count", 0),
+    ),
+    FlexDisplaySensorDescription(
+        key="last_management_action_detail",
+        translation_key="last_management_action",
+        value_fn=lambda record: record.get("last_management_action_detail") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="firmware_install_blockers",
+        translation_key="firmware_install_blockers",
+        value_fn=lambda record: "; ".join(
+            str(blocker)
+            for blocker in (record.get("firmware_install_blockers") or [])
+        )
+        or "none",
+    ),
 )
 
 

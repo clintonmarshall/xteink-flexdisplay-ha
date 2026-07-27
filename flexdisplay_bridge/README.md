@@ -11,8 +11,9 @@ After installation:
    assignment automatically. Standard builds can still point
    `/.crosspoint/home-assistant.json` at
    `http://HOME_ASSISTANT_IP:8099/api/v1/screen`.
-4. Install the FlexDisplay custom integration through HACS and enter the same
-   bridge URL.
+4. Either install the FlexDisplay custom integration through HACS, or enable
+   MQTT and select the v0.20 **mqtt** entity source for an App-only
+   installation.
 
 The app automatically uses Home Assistant's internal Supervisor API token. It
 does not require a long-lived access token in its options.
@@ -36,6 +37,13 @@ guarded controls to cancel active commands, retry after bounded backoff, reset
 a blocked rollout, and verify USB recovery. The Bridge verifies and mirrors the
 configured release locally before giving its URL to devices; canary-first
 gating remains enabled by default.
+
+FlexDisplay Bridge `0.20.0` makes HACS optional. Its App-only MQTT mode creates
+the complete Home Assistant device, including health, controls, configuration,
+physical-button events, and firmware updates. It also adds a Fleet Health
+workspace and a bounded history of exact rendered X3/X4 screens. Existing
+HACS users remain on the duplicate-safe `hacs` entity source until they
+explicitly migrate. Shared firmware `0.19.0` remains compatible.
 
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.

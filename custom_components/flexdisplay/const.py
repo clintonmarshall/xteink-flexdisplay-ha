@@ -10,6 +10,7 @@ PLATFORMS = [
     "binary_sensor",
     "button",
     "event",
+    "image",
     "select",
     "number",
     "switch",

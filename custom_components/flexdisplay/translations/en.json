@@ -120,6 +120,24 @@
       },
       "next_wake": {
         "name": "Next scheduled wake"
+      },
+      "health": {
+        "name": "Health"
+      },
+      "health_detail": {
+        "name": "Health detail"
+      },
+      "last_screen_refresh": {
+        "name": "Last screen refresh"
+      },
+      "screen_history_count": {
+        "name": "Saved screens"
+      },
+      "last_management_action": {
+        "name": "Last management action"
+      },
+      "firmware_install_blockers": {
+        "name": "Firmware install blockers"
       }
     },
     "binary_sensor": {
@@ -134,11 +152,25 @@
       },
       "image_unchanged": {
         "name": "Image unchanged"
+      },
+      "low_battery": {
+        "name": "Low battery"
+      },
+      "home_assistant_error": {
+        "name": "Home Assistant error"
+      },
+      "firmware_update_problem": {
+        "name": "Firmware update problem"
       }
     },
     "event": {
       "physical_button": {
         "name": "Physical button"
+      }
+    },
+    "image": {
+      "current_screen": {
+        "name": "Current screen"
       }
     },
     "button": {

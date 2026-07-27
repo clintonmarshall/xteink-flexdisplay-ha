@@ -55,7 +55,7 @@ Delivery: Bridge/HACS/Firmware `0.18.0`.
 
 ## v0.19 — Fleet recovery and OTA observability
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS/Firmware `0.19.0`.
 
 - Cancel queued or already-delivered firmware commands safely.
@@ -67,11 +67,19 @@ Delivery: Bridge/HACS/Firmware `0.19.0`.
 
 ## v0.20 — Device health and screen history
 
-Status: queued.
+Status: implemented, pending release and Home Assistant deployment.
+Delivery: Bridge/HACS `0.20.0`; existing shared firmware `0.19.0` is compatible.
 
-- Reset/crash diagnostics, SD-card health, Wi-Fi history, and battery prediction.
-- Last rendered screen, recent screen history, and fleet freshness overview.
-- Configurable maintenance windows and stale-device alerts.
+- HACS-optional App-only installation using complete MQTT Discovery.
+- Duplicate-safe `hacs`, `mqtt`, and temporary `both` migration modes.
+- Fleet Health workspace with battery, SD, Home Assistant, Wi-Fi, power,
+  firmware, page, and next-wake status.
+- Last rendered screen, bounded recent screen history, and exact one-shot
+  screen resend.
+- Automatic stale-update release with preserved device and rollout evidence.
+
+Remaining health work is carried forward: reset/crash reasons, Wi-Fi trend
+history, battery runtime prediction, and configurable maintenance windows.
 
 ## v0.21 — Six-device Fleet Canvas
 

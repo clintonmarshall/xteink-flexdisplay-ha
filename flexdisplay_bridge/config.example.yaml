@@ -39,6 +39,13 @@ mqtt:
   password_env: FLEXDISPLAY_MQTT_PASSWORD
   discovery_prefix: homeassistant
   topic_prefix: flexdisplay
+  # "hacs" avoids duplicate entities for existing integration users.
+  # Choose "mqtt" for the v0.20 App-only installation, or "both" for testing.
+  entity_source: hacs
+
+screen_history:
+  enabled: true
+  limit: 5
 
 firmware:
   # Application image used by queued Home Assistant OTA installs.
@@ -54,6 +61,7 @@ firmware:
   retry_backoff_seconds: 300
   mirror_enabled: true
   mirror_retry_seconds: 300
+  stale_install_seconds: 1800
 
 dashboard:
   title: HOME ASSISTANT

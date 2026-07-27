@@ -49,6 +49,25 @@ DESCRIPTIONS = (
         translation_key="image_unchanged",
         value_fn=lambda record: bool(record.get("image_unchanged")),
     ),
+    FlexDisplayBinarySensorDescription(
+        key="low_battery",
+        translation_key="low_battery",
+        device_class=BinarySensorDeviceClass.BATTERY,
+        value_fn=lambda record: bool(record.get("low_battery")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="ha_error",
+        translation_key="home_assistant_error",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda record: bool(record.get("ha_error")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="firmware_update_problem",
+        translation_key="firmware_update_problem",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda record: record.get("firmware_update_status")
+        in {"failed", "cancelled"},
+    ),
 )
 
 
