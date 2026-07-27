@@ -40,9 +40,12 @@ class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
                 button,
                 {
                     "action": event.data.get("action"),
+                    "gesture": event.data.get("gesture"),
+                    "mode": event.data.get("mode"),
                     "sequence": event.data.get("sequence"),
                     "device_uptime_ms": event.data.get("device_uptime_ms"),
                     "received_at": event.data.get("received_at"),
+                    "configured_action": event.data.get("configured_action"),
                 },
             )
             self.async_write_ha_state()

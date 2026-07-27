@@ -157,6 +157,13 @@ Assistant entities and direct URLs, crop/contain controls, and bounded,
 credential-isolated image retrieval. Existing firmware `0.14.0` remains
 compatible and does not need to be reflashed.
 
+Firmware, Bridge, and integration `0.17.0` add configurable short, double, and
+long physical-button actions in Home Assistant mode. Use Dashboard Studio to
+map Confirm or a direction button to dashboard navigation, entity controls,
+scenes, scripts, automations, or another Home Assistant service. Short arrows
+retain their existing page-navigation defaults; Back and Power remain reserved
+for escape, wake, and recovery.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

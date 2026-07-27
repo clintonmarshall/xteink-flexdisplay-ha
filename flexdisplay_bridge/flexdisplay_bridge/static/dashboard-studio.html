@@ -28,8 +28,8 @@
       color: var(--ink);
       font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
-    button, input, select { font: inherit; }
-    button, select, input {
+    button, input, select, textarea { font: inherit; }
+    button, select, input, textarea {
       min-height: 38px;
       border: 1px solid var(--line);
       border-radius: 9px;
@@ -42,7 +42,7 @@
       font-weight: 650;
     }
     button:hover { border-color: #607383; background: #17232e; }
-    button:focus-visible, input:focus-visible, select:focus-visible {
+    button:focus-visible, input:focus-visible, select:focus-visible, textarea:focus-visible {
       outline: 2px solid var(--accent);
       outline-offset: 2px;
     }
@@ -51,7 +51,8 @@
     button.danger { color: var(--danger); }
     button.icon { width: 38px; padding: 0; }
     button:disabled { cursor: not-allowed; opacity: .45; }
-    input, select { width: 100%; padding: 8px 10px; }
+    input, select, textarea { width: 100%; padding: 8px 10px; }
+    textarea { min-height: 78px; resize: vertical; }
     label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .035em; }
     .app {
       display: grid;
@@ -185,6 +186,13 @@
     .tile-body .field-grid { gap: 8px; }
     .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .url-source[hidden] { display: none; }
     .rule-fields[hidden] { display: none; }
+    .action-fields[hidden] { display: none; }
+    .action-summary { display: grid; gap: 6px; margin-top: 12px; }
+    .action-summary-row {
+      display: flex; justify-content: space-between; gap: 8px;
+      padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px;
+      background: #0d151d; font-size: 11px;
+    }
     .rule-fields { display: grid; gap: 10px; margin-top: 10px; }
     .rule-badge {
       display: inline-block; margin-left: 5px; padding: 1px 6px;
@@ -414,10 +422,64 @@
         <button id="assignProfile" class="primary" style="width:100%; margin-top:10px">Assign profile and refresh</button>
         <p class="small muted" style="margin:10px 0 0">Sleeping devices apply the profile at their next scheduled or physical-button wake.</p>
       </div>
+
+      <div class="section">
+        <div class="section-head">
+          <div><h2>Physical-button actions</h2><span class="small muted">Per-device · Home Assistant mode</span></div>
+        </div>
+        <label>Device<select id="buttonActionDevice"></select></label>
+        <div class="field-grid" style="margin-top:10px">
+          <label>Button
+            <select id="buttonActionButton">
+              <option value="confirm">Confirm</option>
+              <option value="left">Left</option>
+              <option value="right">Right</option>
+              <option value="up">Up</option>
+              <option value="down">Down</option>
+            </select>
+          </label>
+          <label>Gesture
+            <select id="buttonActionGesture">
+              <option value="short">Short press</option>
+              <option value="double">Double press</option>
+              <option value="long">Long press</option>
+            </select>
+          </label>
+        </div>
+        <label style="margin-top:10px">Action
+          <select id="buttonActionType">
+            <option value="default">Default behaviour</option>
+            <option value="none">Do nothing</option>
+            <option value="navigation_next">Next dashboard page</option>
+            <option value="navigation_previous">Previous dashboard page</option>
+            <option value="navigation_overview">Dashboard overview</option>
+            <option value="navigation_refresh">Refresh current page</option>
+            <option value="toggle">Toggle Home Assistant entity</option>
+            <option value="turn_on">Turn entity on</option>
+            <option value="turn_off">Turn entity off</option>
+            <option value="activate">Run scene, script, or automation</option>
+            <option value="service">Call Home Assistant service</option>
+          </select>
+        </label>
+        <div id="buttonEntityFields" class="action-fields" style="margin-top:10px" hidden>
+          <label>Target entity<input id="buttonActionEntity" list="entityOptions" placeholder="light.showroom"></label>
+        </div>
+        <div id="buttonServiceFields" class="action-fields" style="margin-top:10px" hidden>
+          <label>Service<input id="buttonActionService" list="serviceOptions" placeholder="light.toggle"></label>
+          <label style="margin-top:10px">Service data (optional JSON)<textarea id="buttonActionData" spellcheck="false" placeholder='{"brightness_pct": 50}'></textarea></label>
+        </div>
+        <div class="button-row" style="margin-top:10px">
+          <button id="saveButtonAction" class="primary">Save action</button>
+          <button id="clearButtonActions">Reset all</button>
+        </div>
+        <div id="buttonActionSummary" class="action-summary"></div>
+        <p class="small muted" style="margin:10px 0 0">Back and Power stay reserved for escape, wake, and recovery. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
+      </div>
     </aside>
   </div>
 
   <datalist id="entityOptions"></datalist>
+  <datalist id="serviceOptions"></datalist>
   <dialog id="profileDialog">
     <form id="profileForm" class="dialog-body" method="dialog">
       <div><div class="eyebrow">Create profile</div><h2 style="font-size:20px">Start a new dashboard</h2></div>
@@ -442,6 +504,8 @@
       profiles: [],
       devices: [],
       entities: [],
+      services: [],
+      buttonMappings: [],
       profile: null,
       pageIndex: 0,
       model: "X4",
@@ -516,6 +580,8 @@
         chooseProfile(state.profile?.name || state.profiles[0]?.name);
         $("#saveState").textContent = "Saved";
         loadEntities();
+        loadServices();
+        if ($("#buttonActionDevice").value) loadButtonActions($("#buttonActionDevice").value);
       } catch (error) {
         $("#saveState").textContent = "Unavailable";
         if (!String(error.message).includes("API key")) toast(error.message, true);
@@ -542,8 +608,22 @@
       }
     }
 
+    async function loadServices() {
+      try {
+        const response = await api("studio/services");
+        const payload = await response.json();
+        state.services = payload.services || [];
+        $("#serviceOptions").innerHTML = state.services.map((service) =>
+          `<option value="${escapeHtml(service)}"></option>`
+        ).join("");
+        if (payload.error) toast(`Service catalogue: ${payload.error}`, true);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
     function populateDevices() {
-      for (const id of ["deviceSelect", "assignDevice"]) {
+      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice"]) {
         const select = $(`#${id}`);
         const previous = select.value;
         select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
@@ -554,6 +634,144 @@
           select.append(option);
         });
         if ([...select.options].some((option) => option.value === previous)) select.value = previous;
+      }
+    }
+
+    async function loadButtonActions(deviceId) {
+      if (!deviceId) {
+        state.buttonMappings = [];
+        return renderButtonAction();
+      }
+      try {
+        const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`);
+        const payload = await response.json();
+        state.buttonMappings = payload.mappings || [];
+        renderButtonAction();
+      } catch (error) {
+        state.buttonMappings = [];
+        renderButtonAction();
+        toast(error.message, true);
+      }
+    }
+
+    function selectedButtonMapping() {
+      const button = $("#buttonActionButton").value;
+      const gesture = $("#buttonActionGesture").value;
+      return state.buttonMappings.find((mapping) =>
+        mapping.button === button && mapping.gesture === gesture
+      );
+    }
+
+    function actionPreset(action) {
+      if (!action) return "default";
+      if (action.type === "none") return "none";
+      if (action.type === "navigation") return `navigation_${action.command}`;
+      if (action.type !== "home_assistant") return "default";
+      if (action.service.endsWith(".toggle")) return "toggle";
+      if (action.service === "automation.trigger") return "activate";
+      if (
+        action.service.endsWith(".turn_on") &&
+        ["scene", "script"].includes((action.entity_id || "").split(".", 1)[0])
+      ) return "activate";
+      if (action.service.endsWith(".turn_on")) return "turn_on";
+      if (action.service.endsWith(".turn_off")) return "turn_off";
+      return "service";
+    }
+
+    function actionLabel(mapping) {
+      const action = mapping.action;
+      if (action.type === "none") return "Do nothing";
+      if (action.type === "navigation") return titleCase(action.command);
+      return `${action.service}${action.entity_id ? ` · ${action.entity_id}` : ""}`;
+    }
+
+    function renderButtonAction() {
+      const mapping = selectedButtonMapping();
+      const action = mapping?.action;
+      $("#buttonActionType").value = actionPreset(action);
+      $("#buttonActionEntity").value = action?.entity_id || "";
+      $("#buttonActionService").value = action?.service || "";
+      $("#buttonActionData").value = action?.data ? JSON.stringify(action.data, null, 2) : "";
+      toggleButtonActionFields();
+      $("#buttonActionSummary").innerHTML = state.buttonMappings.length
+        ? state.buttonMappings.map((item) => `
+            <div class="action-summary-row">
+              <span>${titleCase(item.button)} · ${titleCase(item.gesture)}</span>
+              <span class="muted">${escapeHtml(actionLabel(item))}</span>
+            </div>
+          `).join("")
+        : '<div class="empty">No overrides. Short arrows use normal page navigation.</div>';
+    }
+
+    function toggleButtonActionFields() {
+      const type = $("#buttonActionType").value;
+      const entityRequired = ["toggle", "turn_on", "turn_off", "activate", "service"].includes(type);
+      $("#buttonEntityFields").hidden = !entityRequired;
+      $("#buttonServiceFields").hidden = type !== "service";
+    }
+
+    function buildButtonAction() {
+      const type = $("#buttonActionType").value;
+      if (type === "default") return null;
+      if (type === "none") return {type: "none"};
+      if (type.startsWith("navigation_")) {
+        return {type: "navigation", command: type.replace("navigation_", "")};
+      }
+      const entityId = $("#buttonActionEntity").value.trim().toLowerCase();
+      if (!entityId.includes(".")) throw new Error("Choose a valid Home Assistant target entity.");
+      const domain = entityId.split(".", 1)[0];
+      let service;
+      if (type === "toggle") service = `${domain}.toggle`;
+      if (type === "turn_on") service = `${domain}.turn_on`;
+      if (type === "turn_off") service = `${domain}.turn_off`;
+      if (type === "activate") {
+        if (domain === "automation") service = "automation.trigger";
+        else if (["scene", "script"].includes(domain)) service = `${domain}.turn_on`;
+        else throw new Error("Run supports scene, script, or automation entities.");
+      }
+      if (type === "service") service = $("#buttonActionService").value.trim().toLowerCase();
+      if (!service?.includes(".")) throw new Error("Choose a valid domain.service.");
+      let data = {};
+      const encodedData = $("#buttonActionData").value.trim();
+      if (encodedData) {
+        try { data = JSON.parse(encodedData); }
+        catch (_) { throw new Error("Service data must be valid JSON."); }
+        if (!data || Array.isArray(data) || typeof data !== "object") {
+          throw new Error("Service data must be a JSON object.");
+        }
+      }
+      return {
+        type: "home_assistant",
+        service,
+        entity_id: entityId,
+        ...(Object.keys(data).length ? {data} : {}),
+      };
+    }
+
+    async function saveButtonAction(resetAll = false) {
+      const deviceId = $("#buttonActionDevice").value;
+      if (!deviceId) return toast("Select a device first.", true);
+      try {
+        let mappings = resetAll ? [] : clone(state.buttonMappings);
+        if (!resetAll) {
+          const button = $("#buttonActionButton").value;
+          const gesture = $("#buttonActionGesture").value;
+          mappings = mappings.filter((mapping) =>
+            mapping.button !== button || mapping.gesture !== gesture
+          );
+          const action = buildButtonAction();
+          if (action) mappings.push({mode: "home_assistant", button, gesture, action});
+        }
+        const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`, {
+          method: "PUT",
+          body: {mappings},
+        });
+        const payload = await response.json();
+        state.buttonMappings = payload.mappings || [];
+        renderButtonAction();
+        toast(resetAll ? "All button actions reset to defaults." : "Physical-button action saved.");
+      } catch (error) {
+        toast(error.message, true);
       }
     }
 
@@ -1069,6 +1287,14 @@
       changed();
     });
     $("#assignProfile").addEventListener("click", assignProfile);
+    $("#buttonActionDevice").addEventListener("change", (event) => loadButtonActions(event.target.value));
+    $("#buttonActionButton").addEventListener("change", renderButtonAction);
+    $("#buttonActionGesture").addEventListener("change", renderButtonAction);
+    $("#buttonActionType").addEventListener("change", toggleButtonActionFields);
+    $("#saveButtonAction").addEventListener("click", () => saveButtonAction(false));
+    $("#clearButtonActions").addEventListener("click", () => {
+      if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
+    });
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       if (selected?.model) setModel(selected.model.toUpperCase().includes("4") ? "X4" : "X3");

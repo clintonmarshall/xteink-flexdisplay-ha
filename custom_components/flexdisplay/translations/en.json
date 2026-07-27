@@ -73,6 +73,12 @@
       "last_button": {
         "name": "Last physical button"
       },
+      "last_button_gesture": {
+        "name": "Last button gesture"
+      },
+      "last_button_action_result": {
+        "name": "Last button action result"
+      },
       "last_button_at": {
         "name": "Last button time"
       },

@@ -13,6 +13,15 @@ from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 
 from . import __version__
+from .button_actions import (
+    BUTTONS as CONFIGURABLE_BUTTONS,
+    GESTURES,
+    MODE as BUTTON_ACTION_MODE,
+    ButtonActionValidationError,
+    mappings_payload,
+    normalize_mappings,
+    resolve_action,
+)
 from .config import BridgeConfig, DeviceConfig, load_config
 from .dashboard_store import (
     DashboardProfileStore,
@@ -456,11 +465,19 @@ def _sleep_plan(
     return plan("scheduled", max(60, seconds), reason)
 
 
-def _button_events(value: str | None) -> list[dict[str, Any]]:
+def _button_events(value: str | None, default_mode: str = BUTTON_ACTION_MODE) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for encoded in (value or "").split(";"):
         parts = encoded.split(",")
-        if len(parts) != 4 or parts[1] not in SUPPORTED_BUTTONS or parts[2] != "pressed":
+        if (
+            len(parts) not in {4, 5, 6}
+            or parts[1] not in SUPPORTED_BUTTONS
+            or parts[2] != "pressed"
+        ):
+            continue
+        gesture = parts[4] if len(parts) >= 5 else "short"
+        mode = parts[5] if len(parts) >= 6 else default_mode
+        if gesture not in GESTURES or mode not in SUPPORTED_MODES:
             continue
         try:
             sequence = max(0, int(parts[0]))
@@ -473,6 +490,8 @@ def _button_events(value: str | None) -> list[dict[str, Any]]:
                 "button": parts[1],
                 "action": parts[2],
                 "uptime_ms": uptime_ms,
+                "gesture": gesture,
+                "mode": mode,
             }
         )
     return result[:16]
@@ -499,15 +518,44 @@ def _new_button_events(record: dict[str, Any], events: list[dict[str, Any]]) -> 
     ]
 
 
-def _physical_page_delta(events: list[dict[str, Any]]) -> int:
-    delta = 0
+def _dispatch_button_actions(
+    device_id: str,
+    record: dict[str, Any],
+    events: list[dict[str, Any]],
+    store: DeviceStore,
+    ha: HomeAssistantClient,
+) -> tuple[list[str], dict[str, Any]]:
+    """Resolve new gesture events, execute HA calls, and return page commands."""
+    navigation: list[str] = []
+    mappings = record.get("button_action_mappings")
+    if not isinstance(mappings, dict):
+        mappings = {}
+    latest = record
     for event in events:
-        button = str(event.get("button") or "")
-        if button in {"right", "down"}:
-            delta += 1
-        elif button in {"left", "up"}:
-            delta -= 1
-    return delta
+        action = resolve_action(
+            mappings,
+            str(event.get("button") or ""),
+            str(event.get("gesture") or "short"),
+            str(event.get("mode") or BUTTON_ACTION_MODE),
+        )
+        action_type = str(action.get("type") or "none")
+        if action_type == "navigation":
+            command = str(action.get("command") or "")
+            navigation.append(command)
+            success, detail = True, f"navigation:{command}"
+        elif action_type == "home_assistant":
+            success, detail = ha.call_service(
+                str(action.get("service") or ""),
+                str(action.get("entity_id") or ""),
+                action.get("data") if isinstance(action.get("data"), dict) else None,
+            )
+        else:
+            success, detail = True, "no action"
+        latest = (
+            store.record_button_action_result(device_id, event, action, success, detail)
+            or latest
+        )
+    return navigation, latest
 
 
 def _number(value: str | None) -> float | None:
@@ -616,6 +664,40 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Device not found")
         return {"events": record.get("recent_button_events", [])}
 
+    @app.get("/api/v1/devices/{device_id}/button-actions")
+    def device_button_actions(device_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {
+            "device_id": selected,
+            "mode": BUTTON_ACTION_MODE,
+            "mappings": mappings_payload(record.get("button_action_mappings")),
+        }
+
+    @app.put("/api/v1/devices/{device_id}/button-actions")
+    def save_device_button_actions(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        try:
+            mappings = normalize_mappings(payload)
+        except ButtonActionValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        record = store.set_button_actions(selected, mappings)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {
+            "device_id": selected,
+            "mode": BUTTON_ACTION_MODE,
+            "mappings": mappings_payload(record.get("button_action_mappings")),
+        }
+
     def authorize(request: Request) -> None:
         if settings.api_key and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key:
             raise HTTPException(status_code=401, detail="Bridge API key required")
@@ -663,6 +745,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "unavailable",
                 ],
                 "templates": ["doorbell", "alarm", "energy", "appliance", "weather_alert"],
+                "button_action": {
+                    "mode": BUTTON_ACTION_MODE,
+                    "buttons": list(CONFIGURABLE_BUTTONS),
+                    "gestures": list(GESTURES),
+                },
                 "icons": [
                     "auto",
                     "home",
@@ -709,6 +796,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
         ]
         return {"entities": synthetic + entities, "error": error}
+
+    @app.get("/api/v1/studio/services")
+    def studio_services(request: Request) -> dict[str, Any]:
+        authorize(request)
+        services, error = ha.service_catalog()
+        return {"services": services, "error": error}
 
     @app.put("/api/v1/studio/profiles/{profile_name}")
     def save_studio_profile(
@@ -1031,10 +1124,19 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
                 },
             )
-        button_events = _button_events(x_flexdisplay_button_events)
+        button_events = _button_events(
+            x_flexdisplay_button_events,
+            x_flexdisplay_mode or BUTTON_ACTION_MODE,
+        )
         new_button_events = _new_button_events(record, button_events)
-        physical_page_delta = _physical_page_delta(new_button_events)
         record = store.record_button_events(device_id, button_events) or record
+        physical_navigation, record = _dispatch_button_actions(
+            device_id,
+            record,
+            new_button_events,
+            store,
+            ha,
+        )
         command_acknowledged = store.acknowledge(
             device_id,
             x_flexdisplay_command_result or "",
@@ -1092,8 +1194,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             if requested_page:
                 page_index = (int(requested_page.removeprefix("page-")) - 1) % len(pages)
-            elif physical_page_delta:
-                page_index = (page_index + physical_page_delta) % len(pages)
+            elif physical_navigation:
+                for navigation in physical_navigation:
+                    if navigation == "next":
+                        page_index = (page_index + 1) % len(pages)
+                    elif navigation == "previous":
+                        page_index = (page_index - 1) % len(pages)
+                    elif navigation == "overview":
+                        page_index = 0
             elif dashboard_profile and _auto_rotate_due(record, dashboard_profile.auto_rotate_seconds):
                 page_index = (page_index + 1) % len(pages)
         page = pages[page_index]
