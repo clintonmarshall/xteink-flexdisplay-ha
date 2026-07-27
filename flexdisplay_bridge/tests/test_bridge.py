@@ -580,6 +580,9 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
     headers = {"X-FlexDisplay-Bridge-Key": "studio-secret"}
     with TestClient(create_app(config)) as client:
         assert client.get("/studio/").status_code == 200
+        doubled_ingress = client.get("http://testserver//studio/")
+        assert doubled_ingress.status_code == 200
+        assert "FlexDisplay Dashboard Studio" in doubled_ingress.text
         assert client.get("/api/v1/studio").status_code == 401
         saved = client.put(
             "/api/v1/studio/profiles/showroom",

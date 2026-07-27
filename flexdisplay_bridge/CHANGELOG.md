@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.11.1
+
+- Fixed the Home Assistant ingress entry so Dashboard Studio opens at
+  `/studio/` instead of the invalid `//studio/` path.
+- Added server-side normalization for doubled leading slashes to keep the web
+  GUI usable while Home Assistant refreshes add-on metadata.
+
 ## 0.11.0
 
 - Adds Dashboard Studio to the Home Assistant App with a responsive editor and
