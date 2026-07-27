@@ -239,8 +239,21 @@
       border: 1px solid var(--line); border-radius: 14px; background: var(--panel); color: var(--ink);
       box-shadow: var(--shadow);
     }
+    dialog.library-dialog { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
     dialog::backdrop { background: rgba(0,0,0,.62); backdrop-filter: blur(4px); }
     .dialog-body { display: grid; gap: 16px; padding: 20px; }
+    .library-shell { display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 18px; padding: 20px; }
+    .library-controls { display: grid; align-content: start; gap: 12px; }
+    .library-gallery { display: grid; grid-template-columns: repeat(3, minmax(170px, 1fr)); gap: 12px; align-content: start; }
+    .photo-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #0d151d; }
+    .photo-card img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #f4f4ef; }
+    .photo-card-body { display: grid; gap: 8px; padding: 10px; }
+    .photo-meta { overflow: hidden; color: var(--muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-drop {
+      display: grid; gap: 8px; padding: 14px; border: 1px dashed #607383;
+      border-radius: 10px; background: rgba(103,214,193,.04); text-align: center;
+    }
+    .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
     @media (max-width: 1120px) {
       .app { grid-template-columns: 230px 1fr; }
       .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
@@ -253,6 +266,8 @@
       .toolbar-group { justify-content: space-between; }
       .canvas-shell { min-height: 520px; padding: 18px; }
       .tile-list { grid-template-columns: 1fr; }
+      .library-shell { grid-template-columns: 1fr; }
+      .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
     }
   </style>
 </head>
@@ -292,6 +307,12 @@
           <button id="deleteProfile" class="danger">Delete</button>
         </div>
         <p class="small muted" style="margin:12px 0 0">Profiles are stored in the Bridge data directory and survive App upgrades and restarts.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Photo Frame</h2><span class="rule-badge">v0.18</span></div>
+        <button id="openPhotoLibrary" class="primary" style="width:100%">Open media library</button>
+        <p class="small muted" style="margin:10px 0 0">Upload JPEG, PNG, WebP, or BMP images and preview their exact X3/X4 e-paper conversion.</p>
       </div>
     </aside>
 
@@ -513,6 +534,74 @@
       </div>
     </form>
   </dialog>
+  <dialog id="photoLibraryDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Photo Frame v0.18</div><h2 style="font-size:20px">Media library</h2></div>
+      <button id="closePhotoLibrary" class="icon" title="Close">×</button>
+    </div>
+    <div class="library-shell">
+      <div class="library-controls">
+        <label>Album<select id="photoAlbum"></select></label>
+        <div class="field-grid">
+          <button id="newPhotoAlbum">New album</button>
+          <button id="deletePhotoAlbum" class="danger">Delete album</button>
+        </div>
+        <label>Album name<input id="photoAlbumName" maxlength="64"></label>
+        <div class="field-grid">
+          <label>Change image
+            <select id="photoInterval">
+              <option value="300">Every 5 minutes</option>
+              <option value="900">Every 15 minutes</option>
+              <option value="1800">Every 30 minutes</option>
+              <option value="3600">Every hour</option>
+              <option value="7200">Every 2 hours</option>
+              <option value="21600">Every 6 hours</option>
+              <option value="86400">Daily</option>
+            </select>
+          </label>
+          <label>Playback
+            <select id="photoShuffle">
+              <option value="false">In album order</option>
+              <option value="true">Shuffle</option>
+            </select>
+          </label>
+        </div>
+        <div class="field-grid">
+          <label>Active from<input id="photoStart" type="time"></label>
+          <label>Active until<input id="photoEnd" type="time"></label>
+        </div>
+        <label>Timezone<input id="photoTimezone" maxlength="64" value="Australia/Melbourne"></label>
+        <button id="savePhotoAlbum" class="primary">Save album settings</button>
+
+        <div class="upload-drop">
+          <strong>Add photos</strong>
+          <span class="small muted">JPEG · PNG · WebP · BMP · up to 8 MB each</span>
+          <input id="photoUpload" type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple>
+        </div>
+
+        <div class="section" style="padding-bottom:0">
+          <div class="section-head"><h2>Home Assistant source</h2></div>
+          <label>Camera or image entity<input id="photoHaEntity" placeholder="Search camera or image entity…" autocomplete="off"></label>
+          <label style="margin-top:10px">Caption<input id="photoHaCaption" maxlength="120" placeholder="Optional caption"></label>
+          <button id="importPhotoHa" style="width:100%; margin-top:10px">Capture current image</button>
+        </div>
+
+        <div class="section" style="padding-bottom:0">
+          <div class="section-head"><h2>Assign to device</h2></div>
+          <label>Photo Frame device<select id="photoDevice"></select></label>
+          <button id="assignPhotoAlbum" style="width:100%; margin-top:10px">Assign album and refresh</button>
+        </div>
+
+        <label>Preview model
+          <select id="photoModel">
+            <option value="X3">X3 · 528 × 792</option>
+            <option value="X4">X4 · 480 × 800</option>
+          </select>
+        </label>
+      </div>
+      <div id="photoGallery" class="library-gallery"></div>
+    </div>
+  </dialog>
   <div id="toast" role="status"></div>
 
   <script>
@@ -529,6 +618,8 @@
       dirty: false,
       previewTimer: null,
       previewRequest: 0,
+      photoLibrary: {albums: {}, assignments: {}},
+      photoPreviewUrls: [],
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -537,7 +628,8 @@
     async function api(path, options = {}) {
       const headers = new Headers(options.headers || {});
       if (key()) headers.set("X-FlexDisplay-Bridge-Key", key());
-      if (options.body && typeof options.body !== "string") {
+      const rawBody = options.body instanceof Blob || options.body instanceof ArrayBuffer || ArrayBuffer.isView(options.body);
+      if (options.body && typeof options.body !== "string" && !rawBody) {
         headers.set("Content-Type", "application/json");
         options.body = JSON.stringify(options.body);
       }
@@ -612,6 +704,7 @@
         state.entities = payload.entities || [];
         bindEntityPicker($("#conditionEntity"));
         bindEntityPicker($("#buttonActionEntity"));
+        bindEntityPicker($("#photoHaEntity"), ["camera", "image"]);
         renderTiles();
         if (payload.error) toast(`Entity catalogue: ${payload.error}`, true);
       } catch (error) {
@@ -745,8 +838,236 @@
       }
     }
 
+    function selectedPhotoAlbumId() {
+      return $("#photoAlbum").value || "default";
+    }
+
+    function selectedPhotoAlbum() {
+      return state.photoLibrary.albums?.[selectedPhotoAlbumId()];
+    }
+
+    async function openPhotoLibrary() {
+      $("#photoLibraryDialog").showModal();
+      await loadPhotoLibrary();
+    }
+
+    async function loadPhotoLibrary(preferredAlbum = "") {
+      try {
+        const response = await api("photo-frame");
+        state.photoLibrary = await response.json();
+        const albumIds = Object.keys(state.photoLibrary.albums || {});
+        const previous = preferredAlbum || $("#photoAlbum").value;
+        $("#photoAlbum").innerHTML = albumIds.map((albumId) =>
+          `<option value="${escapeHtml(albumId)}">${escapeHtml(state.photoLibrary.albums[albumId].name)} · ${state.photoLibrary.albums[albumId].items.length} photo${state.photoLibrary.albums[albumId].items.length === 1 ? "" : "s"}</option>`
+        ).join("");
+        $("#photoAlbum").value = albumIds.includes(previous) ? previous : (albumIds[0] || "default");
+        renderPhotoAlbum();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderPhotoAlbum() {
+      const album = selectedPhotoAlbum();
+      if (!album) return;
+      $("#photoAlbumName").value = album.name || "";
+      const interval = String(album.interval_seconds || 3600);
+      if (![...$("#photoInterval").options].some((option) => option.value === interval)) {
+        $("#photoInterval").add(new Option(`${interval} seconds`, interval));
+      }
+      $("#photoInterval").value = interval;
+      $("#photoShuffle").value = String(Boolean(album.shuffle));
+      $("#photoStart").value = album.start || "00:00";
+      $("#photoEnd").value = album.end || "00:00";
+      $("#photoTimezone").value = album.timezone || "Australia/Melbourne";
+      $("#deletePhotoAlbum").disabled = selectedPhotoAlbumId() === "default";
+      renderPhotoGallery();
+    }
+
+    async function renderPhotoGallery() {
+      state.photoPreviewUrls.forEach((url) => URL.revokeObjectURL(url));
+      state.photoPreviewUrls = [];
+      const albumId = selectedPhotoAlbumId();
+      const album = selectedPhotoAlbum();
+      const gallery = $("#photoGallery");
+      if (!album?.items?.length) {
+        gallery.innerHTML = '<div class="empty library-empty"><div><strong>This album is empty.</strong><br>Upload a photo or capture a Home Assistant camera/image entity.</div></div>';
+        return;
+      }
+      gallery.innerHTML = album.items.map((item) => `
+        <article class="photo-card" data-photo-id="${escapeHtml(item.id)}">
+          <img alt="${escapeHtml(item.caption || item.filename)}">
+          <div class="photo-card-body">
+            <div class="photo-meta" title="${escapeHtml(item.filename)}">${escapeHtml(item.filename)} · ${item.width} × ${item.height}</div>
+            <label>Caption<input class="photo-caption" maxlength="120" value="${escapeHtml(item.caption || "")}"></label>
+            <div class="field-grid">
+              <label>Fit<select class="photo-fit">${options(["cover", "contain"], item.fit, (value) => value === "cover" ? "Crop" : "Contain")}</select></label>
+              <label>Rotation<select class="photo-rotation">${options(["0", "90", "180", "270"], String(item.rotation || 0), (value) => `${value}°`)}</select></label>
+            </div>
+            <div class="button-row">
+              <button class="save-photo">Save</button>
+              <button class="delete-photo danger">Remove</button>
+            </div>
+          </div>
+        </article>
+      `).join("");
+
+      for (const card of gallery.querySelectorAll(".photo-card")) {
+        const itemId = card.dataset.photoId;
+        card.querySelector(".save-photo").addEventListener("click", () => savePhotoItem(card));
+        card.querySelector(".delete-photo").addEventListener("click", () => deletePhotoItem(itemId));
+        try {
+          const response = await api(
+            `photo-frame/albums/${encodeURIComponent(albumId)}/images/${encodeURIComponent(itemId)}/preview?model=${encodeURIComponent($("#photoModel").value)}`
+          );
+          const url = URL.createObjectURL(await response.blob());
+          state.photoPreviewUrls.push(url);
+          card.querySelector("img").src = url;
+        } catch (error) {
+          card.querySelector("img").alt = error.message;
+        }
+      }
+    }
+
+    async function savePhotoAlbum() {
+      const albumId = selectedPhotoAlbumId();
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId)}`, {
+          method: "PUT",
+          body: {
+            name: $("#photoAlbumName").value,
+            shuffle: $("#photoShuffle").value === "true",
+            interval_seconds: Number($("#photoInterval").value),
+            start: $("#photoStart").value,
+            end: $("#photoEnd").value,
+            timezone: $("#photoTimezone").value,
+          },
+        });
+        await loadPhotoLibrary(albumId);
+        toast("Photo Frame album saved.");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function createPhotoAlbum() {
+      const albumId = prompt("Album ID (letters, numbers, underscores, or hyphens):", "family");
+      if (!albumId) return;
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId.trim())}`, {
+          method: "PUT",
+          body: {name: titleCase(albumId.trim()), interval_seconds: 3600},
+        });
+        await loadPhotoLibrary(albumId.trim());
+        toast(`Created ${albumId.trim()}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function deletePhotoAlbum() {
+      const albumId = selectedPhotoAlbumId();
+      if (albumId === "default" || !confirm(`Delete album ${albumId} and its stored photos?`)) return;
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId)}`, {method: "DELETE"});
+        await loadPhotoLibrary("default");
+        toast(`Deleted ${albumId}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function uploadPhotos(files) {
+      const albumId = selectedPhotoAlbumId();
+      for (const file of files) {
+        try {
+          await api(`photo-frame/albums/${encodeURIComponent(albumId)}/images`, {
+            method: "POST",
+            headers: {
+              "Content-Type": file.type || "application/octet-stream",
+              "X-FlexDisplay-Filename": file.name,
+            },
+            body: file,
+          });
+        } catch (error) {
+          toast(`${file.name}: ${error.message}`, true);
+          return;
+        }
+      }
+      $("#photoUpload").value = "";
+      await loadPhotoLibrary(albumId);
+      toast(`Added ${files.length} photo${files.length === 1 ? "" : "s"}.`);
+    }
+
+    async function importPhotoFromHomeAssistant() {
+      const albumId = selectedPhotoAlbumId();
+      const entityId = $("#photoHaEntity").value.trim();
+      if (!entityId) return toast("Choose a Home Assistant camera or image entity.", true);
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId)}/home-assistant`, {
+          method: "POST",
+          body: {
+            entity_id: entityId,
+            caption: $("#photoHaCaption").value,
+            fit: "cover",
+            rotation: 0,
+          },
+        });
+        $("#photoHaCaption").value = "";
+        await loadPhotoLibrary(albumId);
+        toast(`Captured ${entityId}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function savePhotoItem(card) {
+      const albumId = selectedPhotoAlbumId();
+      const itemId = card.dataset.photoId;
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId)}/images/${encodeURIComponent(itemId)}`, {
+          method: "PUT",
+          body: {
+            caption: card.querySelector(".photo-caption").value,
+            fit: card.querySelector(".photo-fit").value,
+            rotation: Number(card.querySelector(".photo-rotation").value),
+          },
+        });
+        await loadPhotoLibrary(albumId);
+        toast("Photo settings saved.");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function deletePhotoItem(itemId) {
+      const albumId = selectedPhotoAlbumId();
+      if (!confirm("Remove this photo from the album?")) return;
+      try {
+        await api(`photo-frame/albums/${encodeURIComponent(albumId)}/images/${encodeURIComponent(itemId)}`, {method: "DELETE"});
+        await loadPhotoLibrary(albumId);
+        toast("Photo removed.");
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function assignPhotoAlbum() {
+      const deviceId = $("#photoDevice").value;
+      if (!deviceId) return toast("Choose a target device.", true);
+      try {
+        await api(`photo-frame/devices/${encodeURIComponent(deviceId)}`, {
+          method: "PUT",
+          body: {album_id: selectedPhotoAlbumId()},
+        });
+        toast(`Assigned ${selectedPhotoAlbumId()} to ${deviceId}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
     function populateDevices() {
-      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice"]) {
+      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice", "photoDevice"]) {
         const select = $(`#${id}`);
         const previous = select.value;
         select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
@@ -1422,6 +1743,19 @@
     $("#clearButtonActions").addEventListener("click", () => {
       if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
     });
+    $("#openPhotoLibrary").addEventListener("click", openPhotoLibrary);
+    $("#closePhotoLibrary").addEventListener("click", () => $("#photoLibraryDialog").close());
+    $("#photoAlbum").addEventListener("change", renderPhotoAlbum);
+    $("#savePhotoAlbum").addEventListener("click", savePhotoAlbum);
+    $("#newPhotoAlbum").addEventListener("click", createPhotoAlbum);
+    $("#deletePhotoAlbum").addEventListener("click", deletePhotoAlbum);
+    $("#photoUpload").addEventListener("change", (event) => {
+      const files = [...event.target.files];
+      if (files.length) uploadPhotos(files);
+    });
+    $("#importPhotoHa").addEventListener("click", importPhotoFromHomeAssistant);
+    $("#assignPhotoAlbum").addEventListener("click", assignPhotoAlbum);
+    $("#photoModel").addEventListener("change", renderPhotoGallery);
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       if (selected?.model) setModel(selected.model.toUpperCase().includes("4") ? "X4" : "X3");

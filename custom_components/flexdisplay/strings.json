@@ -43,6 +43,15 @@
       "dashboard_selection": {
         "name": "Active page set"
       },
+      "photo_album": {
+        "name": "Photo Frame album"
+      },
+      "photo_filename": {
+        "name": "Photo Frame image"
+      },
+      "photo_position": {
+        "name": "Photo Frame position"
+      },
       "pending_commands": {
         "name": "Pending commands"
       },

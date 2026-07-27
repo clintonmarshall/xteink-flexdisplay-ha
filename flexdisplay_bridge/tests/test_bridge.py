@@ -23,6 +23,7 @@ from flexdisplay_bridge.dashboards import (
     select_active_pages,
 )
 from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
+from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
@@ -922,6 +923,235 @@ def test_dashboard_studio_uses_searchable_full_catalogue_entity_picker(
     assert "entity-picker-results" in response.text
     assert "keep typing to narrow" in response.text
     assert 'list="entityOptions"' not in response.text
+
+
+def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    formats = {
+        "portrait.jpg": "JPEG",
+        "graphic.png": "PNG",
+        "artwork.webp": "WEBP",
+        "legacy.bmp": "BMP",
+    }
+
+    with TestClient(create_app(config)) as client:
+        album = client.put(
+            "/api/v1/photo-frame/albums/family",
+            json={
+                "name": "Family",
+                "shuffle": True,
+                "interval_seconds": 1800,
+                "start": "07:00",
+                "end": "22:00",
+                "timezone": "Australia/Melbourne",
+            },
+        )
+        assert album.status_code == 200
+
+        uploaded_ids: list[str] = []
+        for index, (filename, image_format) in enumerate(formats.items()):
+            source = io.BytesIO()
+            Image.new("RGB", (80 + index * 10, 120), (40 * index, 100, 190)).save(
+                source,
+                format=image_format,
+            )
+            uploaded = client.post(
+                "/api/v1/photo-frame/albums/family/images",
+                content=source.getvalue(),
+                headers={
+                    "Content-Type": f"image/{image_format.lower()}",
+                    "X-FlexDisplay-Filename": filename,
+                    "X-FlexDisplay-Caption": f"Photo {index + 1}",
+                },
+            )
+            assert uploaded.status_code == 200
+            uploaded_ids.append(uploaded.json()["image"]["id"])
+
+        library = client.get("/api/v1/photo-frame").json()
+        assert library["capabilities"]["formats"] == ["JPEG", "PNG", "WebP", "BMP"]
+        assert len(library["albums"]["family"]["items"]) == 4
+        assert {item["filename"] for item in library["albums"]["family"]["items"]} == set(
+            formats
+        )
+
+        updated = client.put(
+            f"/api/v1/photo-frame/albums/family/images/{uploaded_ids[0]}",
+            json={"caption": "Portrait caption", "fit": "contain", "rotation": 90},
+        )
+        assert updated.status_code == 200
+        assert updated.json()["image"]["rotation"] == 90
+
+        preview = client.get(
+            f"/api/v1/photo-frame/albums/family/images/{uploaded_ids[0]}/preview",
+            params={"model": "X3"},
+        )
+        assert preview.status_code == 200
+        with Image.open(io.BytesIO(preview.content)) as rendered:
+            assert rendered.size == (528, 792)
+            assert rendered.mode == "1"
+
+        assigned = client.put(
+            "/api/v1/photo-frame/devices/X4-PHOTO1",
+            json={"album_id": "family"},
+        )
+        assert assigned.status_code == 200
+        assert assigned.json()["album_id"] == "family"
+
+        frame = client.get(
+            "/api/v1/photo-frame/devices/X4-PHOTO1/image",
+            headers={
+                "X-FlexDisplay-Width": "480",
+                "X-FlexDisplay-Height": "800",
+            },
+        )
+        assert frame.status_code == 200
+        assert frame.headers["content-type"] == "image/bmp"
+        assert frame.headers["x-flexdisplay-photo-album"] == "family"
+        assert frame.headers["x-flexdisplay-photo-count"] == "4"
+        with Image.open(io.BytesIO(frame.content)) as rendered:
+            assert rendered.size == (480, 800)
+            assert rendered.mode == "1"
+
+        device = client.get("/api/v1/devices/X4-PHOTO1").json()
+        assert device["assigned_mode"] == "photo_frame"
+        assert device["pending_commands"] == ["refresh"]
+
+        fleet_frame = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-PHOTO1",
+                "X-FlexDisplay-Width": "480",
+                "X-FlexDisplay-Height": "800",
+                "X-FlexDisplay-Mode": "photo_frame",
+                "X-FlexDisplay-SD-Ready": "true",
+            },
+        )
+        assert fleet_frame.status_code == 200
+        assert fleet_frame.headers["content-type"] == "image/bmp"
+        assert fleet_frame.headers["x-flexdisplay-assigned-mode"] == "photo_frame"
+        assert fleet_frame.headers["x-flexdisplay-photo-album"] == "family"
+        with Image.open(io.BytesIO(fleet_frame.content)) as rendered:
+            assert rendered.size == (480, 800)
+            assert rendered.mode == "1"
+
+        too_large = client.post(
+            "/api/v1/photo-frame/albums/family/images",
+            content=b"x" * (8 * 1024 * 1024 + 1),
+            headers={"X-FlexDisplay-Filename": "too-large.jpg"},
+        )
+        assert too_large.status_code == 413
+
+    with TestClient(create_app(config)) as client:
+        persisted = client.get("/api/v1/photo-frame").json()
+        assert persisted["albums"]["family"]["name"] == "Family"
+        assert len(persisted["albums"]["family"]["items"]) == 4
+
+
+def test_dashboard_studio_exposes_photo_frame_media_library(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    with TestClient(create_app(config)) as client:
+        html = client.get("/studio/").text
+
+    assert "Photo Frame v0.18" in html
+    assert 'accept="image/jpeg,image/png,image/webp,image/bmp"' in html
+    assert "function loadPhotoLibrary" in html
+    assert "function uploadPhotos" in html
+    assert "function importPhotoFromHomeAssistant" in html
+
+
+def test_photo_frame_schedule_pauses_rotation_and_wakes_for_next_window(
+    tmp_path: Path,
+) -> None:
+    store = PhotoFrameMediaStore(tmp_path / "photo-frame.json")
+    store.put_album(
+        "scheduled",
+        {
+            "name": "Scheduled",
+            "interval_seconds": 600,
+            "start": "08:00",
+            "end": "20:00",
+            "timezone": "UTC",
+        },
+    )
+    for colour, filename in (((20, 60, 100), "one.png"), ((200, 160, 80), "two.png")):
+        source = io.BytesIO()
+        Image.new("RGB", (80, 120), colour).save(source, format="PNG")
+        store.add_image("scheduled", source.getvalue(), filename=filename)
+    store.assign("X3-SCHEDULE", "scheduled")
+
+    _, before_window = store.next_for_device(
+        "X3-SCHEDULE",
+        width=528,
+        height=792,
+        now=datetime(2026, 7, 27, 7, 0, tzinfo=UTC),
+    )
+    assert before_window["X-FlexDisplay-Photo-Active"] == "false"
+    assert before_window["X-FlexDisplay-Photo-Index"] == "0"
+    assert before_window["X-FlexDisplay-Refresh-Interval"] == "3600"
+    assert before_window["X-FlexDisplay-Photo-Start"] == "08:00"
+    assert before_window["X-FlexDisplay-Photo-End"] == "20:00"
+    assert before_window["X-FlexDisplay-Photo-Timezone"] == "UTC"
+
+    _, active_window = store.next_for_device(
+        "X3-SCHEDULE",
+        width=528,
+        height=792,
+        now=datetime(2026, 7, 27, 8, 0, tzinfo=UTC),
+    )
+    assert active_window["X-FlexDisplay-Photo-Active"] == "true"
+    assert active_window["X-FlexDisplay-Photo-Index"] == "1"
+    assert active_window["X-FlexDisplay-Refresh-Interval"] == "600"
+
+    _, after_window = store.next_for_device(
+        "X3-SCHEDULE",
+        width=528,
+        height=792,
+        now=datetime(2026, 7, 27, 22, 0, tzinfo=UTC),
+    )
+    assert after_window["X-FlexDisplay-Photo-Active"] == "false"
+    assert after_window["X-FlexDisplay-Photo-Index"] == "1"
+    assert after_window["X-FlexDisplay-Refresh-Interval"] == "36000"
+
+
+def test_photo_frame_empty_album_renders_setup_screen_instead_of_ha_error(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    with TestClient(create_app(config)) as client:
+        assigned = client.put(
+            "/api/v1/photo-frame/devices/X3-EMPTY",
+            json={"album_id": "default"},
+        )
+        assert assigned.status_code == 200
+
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-EMPTY",
+                "X-FlexDisplay-Width": "528",
+                "X-FlexDisplay-Height": "792",
+                "X-FlexDisplay-Mode": "photo_frame",
+            },
+        )
+
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/bmp"
+    assert response.headers["x-flexdisplay-photo-count"] == "0"
+    assert response.headers["x-flexdisplay-photo-filename"] == "No photos"
+    with Image.open(io.BytesIO(response.content)) as rendered:
+        assert rendered.size == (528, 792)
+        assert rendered.mode == "1"
 
 
 def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> None:

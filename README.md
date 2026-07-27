@@ -164,6 +164,13 @@ scenes, scripts, automations, or another Home Assistant service. Short arrows
 retain their existing page-navigation defaults; Back and Power remain reserved
 for escape, wake, and recovery.
 
+Firmware, Bridge, and integration `0.18.0` add a persistent Photo Frame media
+library to Dashboard Studio. Upload JPEG, PNG, WebP, or BMP images, preview the
+exact dithered X3/X4 result, organize albums, add captions and rotations, import
+Home Assistant camera/image entities, configure active hours and shuffle, then
+assign an album to any fleet device. Devices fetch one server-rendered BMP,
+retain it while asleep, and wake at the album interval or next active window.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

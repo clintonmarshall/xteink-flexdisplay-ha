@@ -23,6 +23,13 @@ presses for dashboard navigation, entity controls, scenes, scripts,
 automations, and validated Home Assistant services. Back and Power remain
 reserved recovery controls.
 
+FlexDisplay `0.18.0` adds a **Photo Frame** workspace to Dashboard Studio.
+Create albums, upload JPEG/PNG/WebP/BMP images, import `camera.*` or `image.*`
+entities, select crop/contain and rotation, add captions, preview the exact
+1-bit X3/X4 output, and assign the album to a device. Album shuffle, rotation
+intervals, timezone-aware active windows, and unchanged-image sleep handling
+run in the Bridge so each device downloads only its final monochrome BMP.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
