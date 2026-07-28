@@ -103,6 +103,14 @@ in Reader, TRMNL, OpenDisplay, or Photo Frame cannot execute later when the
 device checks into the Bridge. Replayed HTTP requests are de-duplicated by the
 event sequence, button, and device uptime before any service call.
 
+Studio's activation card reports **Ready** when the selected device currently
+uses Home Assistant mode and **Waiting** otherwise. Saving is immediate and
+does not require a firmware-configuration sync; the action runs after the
+device reports the gesture to the Bridge. Enable **Show assigned-button
+indicators** to add a narrow screen legend above the device status footer:
+dotted means short press, double-dotted means double press, and solid means
+long press. The indicator is included at the device's next screen render.
+
 Options:
 
 - `dashboard_title`: heading rendered on each e-paper screen.

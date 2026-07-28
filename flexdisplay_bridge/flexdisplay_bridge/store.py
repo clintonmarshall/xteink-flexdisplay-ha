@@ -1025,16 +1025,26 @@ class DeviceStore:
         self,
         device_id: str,
         mappings: dict[str, dict[str, Any]],
+        show_indicators: bool = False,
     ) -> dict[str, Any] | None:
         """Replace a device's validated physical-button action overrides."""
         with self._lock:
             record = self._state["devices"].get(device_id)
             if not record:
                 return None
-            if record.get("button_action_mappings") == mappings:
+            indicators_changed = (
+                bool(record.get("button_action_indicators"))
+                != bool(show_indicators)
+            )
+            if (
+                record.get("button_action_mappings") == mappings
+                and not indicators_changed
+            ):
                 return deepcopy(record)
             record["button_action_mappings"] = deepcopy(mappings)
+            record["button_action_indicators"] = bool(show_indicators)
             record["button_actions_updated_at"] = utc_now()
+            record["render_revision"] = int(record.get("render_revision", 0)) + 1
             self._save()
             return deepcopy(record)
 

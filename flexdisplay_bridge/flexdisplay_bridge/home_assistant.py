@@ -32,6 +32,8 @@ class EntityState:
     image_bytes: bytes = b""
     image_fit: str = "cover"
     badge_theme: str = "classic"
+    text_scale: int = 100
+    qr_scale: int = 100
 
 
 class HomeAssistantClient:
@@ -61,6 +63,8 @@ class HomeAssistantClient:
                         entity.minimum,
                         entity.maximum,
                         image_fit=entity.image_fit,
+                        text_scale=entity.text_scale,
+                        qr_scale=entity.qr_scale,
                     )
                 )
                 continue
@@ -118,6 +122,8 @@ class HomeAssistantClient:
                         self._timestamp(payload.get("last_changed")),
                         image,
                         entity.image_fit,
+                        text_scale=entity.text_scale,
+                        qr_scale=entity.qr_scale,
                     )
                 )
             except (requests.RequestException, ValueError) as exc:
@@ -213,6 +219,8 @@ class HomeAssistantClient:
             None,
             image,
             entity.image_fit,
+            text_scale=entity.text_scale,
+            qr_scale=entity.qr_scale,
         )
 
     @staticmethod
@@ -231,6 +239,8 @@ class HomeAssistantClient:
             None,
             b"",
             entity.image_fit,
+            text_scale=entity.text_scale,
+            qr_scale=entity.qr_scale,
         )
 
     @staticmethod

@@ -184,7 +184,14 @@
     }
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
-    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden] { display: none; }
+    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden], .qr-size-field[hidden] { display: none; }
+    .scale-input { display: grid; grid-template-columns: minmax(0, 1fr) 54px; align-items: center; gap: 8px; }
+    .scale-input input[type="range"] { min-height: 38px; padding: 0; accent-color: var(--accent-2); }
+    .scale-input output {
+      display: grid; min-height: 38px; place-items: center;
+      border: 1px solid var(--line); border-radius: 9px;
+      background: #111c25; color: var(--ink); font-size: 12px; font-weight: 800;
+    }
     .rule-fields[hidden] { display: none; }
     .action-fields[hidden] { display: none; }
     .entity-picker { position: relative; min-width: 0; }
@@ -211,6 +218,29 @@
       padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px;
       background: #0d151d; font-size: 11px;
     }
+    .activation-card {
+      display: grid; gap: 4px; margin-top: 10px; padding: 11px;
+      border: 1px solid var(--line); border-radius: 10px;
+      background: rgba(103, 214, 193, .07);
+    }
+    .activation-card.waiting { background: rgba(255, 180, 84, .08); }
+    .activation-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .activation-state {
+      padding: 2px 7px; border-radius: 999px; background: var(--accent-2);
+      color: #08211c; font-size: 9px; font-weight: 900; text-transform: uppercase;
+    }
+    .activation-card.waiting .activation-state { background: var(--accent); color: #241707; }
+    .toggle-option {
+      display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 9px;
+      align-items: start; margin-top: 10px; padding: 10px;
+      border: 1px solid var(--line); border-radius: 10px; background: #0d151d;
+    }
+    .toggle-option input { width: 18px; min-height: 18px; margin-top: 2px; accent-color: var(--accent-2); }
+    .indicator-key { display: flex; flex-wrap: wrap; gap: 8px 12px; margin-top: 7px; color: var(--muted); font-size: 10px; }
+    .gesture-mark { display: inline-block; width: 25px; height: 7px; margin-right: 5px; vertical-align: middle; }
+    .gesture-mark.short { border-top: 2px dotted currentColor; }
+    .gesture-mark.double { border-top: 2px dotted currentColor; border-bottom: 2px dotted currentColor; }
+    .gesture-mark.long { border-top: 3px solid currentColor; }
     .rule-fields { display: grid; gap: 10px; margin-top: 10px; }
     .rule-badge {
       display: inline-block; margin-left: 5px; padding: 1px 6px;
@@ -525,6 +555,10 @@
           <div><h2>Physical-button actions</h2><span class="small muted">Per-device · Home Assistant mode</span></div>
         </div>
         <label>Device<select id="buttonActionDevice"></select></label>
+        <div id="buttonActionActivation" class="activation-card waiting">
+          <div class="activation-title"><strong>Select a device</strong><span class="activation-state">Waiting</span></div>
+          <span class="small muted">Actions are stored on the Bridge and run when a device reports a gesture in Home Assistant mode.</span>
+        </div>
         <div class="field-grid" style="margin-top:10px">
           <label>Button
             <select id="buttonActionButton">
@@ -566,11 +600,23 @@
           <label style="margin-top:10px">Service data (optional JSON)<textarea id="buttonActionData" spellcheck="false" placeholder='{"brightness_pct": 50}'></textarea></label>
         </div>
         <div class="button-row" style="margin-top:10px">
-          <button id="saveButtonAction" class="primary">Save action</button>
+          <button id="saveButtonAction" class="primary">Save &amp; activate</button>
           <button id="clearButtonActions">Reset all</button>
         </div>
+        <label class="toggle-option">
+          <input id="buttonActionIndicators" type="checkbox">
+          <span>
+            <strong>Show assigned-button indicators on the display</strong>
+            <span class="small muted">Appears on the next rendered dashboard screen. The marker identifies the button and gesture without covering dashboard tiles.</span>
+            <span class="indicator-key">
+              <span><i class="gesture-mark short"></i>Short press</span>
+              <span><i class="gesture-mark double"></i>Double press</span>
+              <span><i class="gesture-mark long"></i>Long press</span>
+            </span>
+          </span>
+        </label>
         <div id="buttonActionSummary" class="action-summary"></div>
-        <p class="small muted" style="margin:10px 0 0">Back and Power stay reserved for escape, wake, and recovery. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
+        <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge; no firmware sync is required. They execute after the device sends the gesture during a Home Assistant-mode check-in. Back and Power stay reserved. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
       </div>
     </aside>
   </div>
@@ -770,6 +816,8 @@
       entities: [],
       services: [],
       buttonMappings: [],
+      buttonIndicators: false,
+      buttonActivation: {},
       profile: null,
       pageIndex: 0,
       model: "X4",
@@ -995,6 +1043,8 @@
           badge_photo_id: entity.badge_photo_id || "",
           badge_photo_filename: entity.badge_photo_filename || "",
           badge_theme: entity.badge_theme || "classic",
+          text_scale: Math.max(60, Math.min(180, Number(entity.text_scale) || 100)),
+          qr_scale: Math.max(50, Math.min(150, Number(entity.qr_scale) || 100)),
         })),
       }));
       selected.auto_rotate_seconds ||= 0;
@@ -1563,15 +1613,21 @@
     async function loadButtonActions(deviceId) {
       if (!deviceId) {
         state.buttonMappings = [];
+        state.buttonIndicators = false;
+        state.buttonActivation = {};
         return renderButtonAction();
       }
       try {
         const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`);
         const payload = await response.json();
         state.buttonMappings = payload.mappings || [];
+        state.buttonIndicators = Boolean(payload.show_indicators);
+        state.buttonActivation = payload.activation || {};
         renderButtonAction();
       } catch (error) {
         state.buttonMappings = [];
+        state.buttonIndicators = false;
+        state.buttonActivation = {};
         renderButtonAction();
         toast(error.message, true);
       }
@@ -1608,6 +1664,46 @@
       return `${action.service}${action.entity_id ? ` · ${action.entity_id}` : ""}`;
     }
 
+    function renderButtonActivation() {
+      const deviceId = $("#buttonActionDevice").value;
+      const activation = state.buttonActivation || {};
+      const active = Boolean(activation.active_now);
+      const hasMappings = state.buttonMappings.length > 0;
+      const currentMode = titleCase(String(activation.current_mode || "unknown"));
+      const updated = activation.updated_at
+        ? new Date(activation.updated_at).toLocaleString()
+        : "not saved yet";
+      const lastResult = activation.last_result
+        ? ` Last result: ${escapeHtml(activation.last_result)}.`
+        : "";
+      const node = $("#buttonActionActivation");
+      if (!deviceId) {
+        node.className = "activation-card waiting";
+        node.innerHTML = `
+          <div class="activation-title"><strong>Select a device</strong><span class="activation-state">Waiting</span></div>
+          <span class="small muted">Choose a device to see when its button actions become active.</span>`;
+        $("#buttonActionIndicators").disabled = true;
+        return;
+      }
+      $("#buttonActionIndicators").disabled = false;
+      node.className = `activation-card ${active ? "" : "waiting"}`;
+      const heading = !hasMappings
+        ? "Using default button behaviour"
+        : active
+        ? "Saved and ready"
+        : "Saved — waiting for Home Assistant mode";
+      const status = !hasMappings ? "Defaults" : active ? "Active" : "Waiting";
+      const detail = !hasMappings
+        ? "No custom mappings are assigned. Short direction presses retain normal page navigation."
+        : active
+        ? "The Bridge will execute the assigned action when this device reports the selected gesture."
+        : `The device currently reports ${escapeHtml(currentMode)} mode. The mapping remains saved and becomes functional whenever the device checks in from Home Assistant mode.`;
+      node.innerHTML = `
+        <div class="activation-title"><strong>${heading}</strong><span class="activation-state">${status}</span></div>
+        <span class="small muted">${detail}</span>
+        <span class="small muted">Bridge save: ${escapeHtml(updated)}.${lastResult}</span>`;
+    }
+
     function renderButtonAction() {
       const mapping = selectedButtonMapping();
       const action = mapping?.action;
@@ -1615,11 +1711,13 @@
       $("#buttonActionEntity").value = action?.entity_id || "";
       $("#buttonActionService").value = action?.service || "";
       $("#buttonActionData").value = action?.data ? JSON.stringify(action.data, null, 2) : "";
+      $("#buttonActionIndicators").checked = state.buttonIndicators;
       toggleButtonActionFields();
+      renderButtonActivation();
       $("#buttonActionSummary").innerHTML = state.buttonMappings.length
         ? state.buttonMappings.map((item) => `
             <div class="action-summary-row">
-              <span>${titleCase(item.button)} · ${titleCase(item.gesture)}</span>
+              <span><i class="gesture-mark ${escapeHtml(item.gesture)}"></i>${titleCase(item.button)} · ${titleCase(item.gesture)}</span>
               <span class="muted">${escapeHtml(actionLabel(item))}</span>
             </div>
           `).join("")
@@ -1687,12 +1785,26 @@
         }
         const response = await api(`devices/${encodeURIComponent(deviceId)}/button-actions`, {
           method: "PUT",
-          body: {mappings},
+          body: {
+            mappings,
+            show_indicators: resetAll
+              ? false
+              : $("#buttonActionIndicators").checked,
+          },
         });
         const payload = await response.json();
         state.buttonMappings = payload.mappings || [];
+        state.buttonIndicators = Boolean(payload.show_indicators);
+        state.buttonActivation = payload.activation || {};
         renderButtonAction();
-        toast(resetAll ? "All button actions reset to defaults." : "Physical-button action saved.");
+        if (resetAll) {
+          toast("All button actions and screen indicators reset to defaults.");
+        } else if (state.buttonActivation.active_now) {
+          toast("Button action saved and active in Home Assistant mode.");
+        } else {
+          toast("Button action saved. It will activate when the device enters Home Assistant mode.");
+        }
+        schedulePreview();
       } catch (error) {
         toast(error.message, true);
       }
@@ -2126,6 +2238,20 @@
               <label>${unitLabel}<input class="tile-unit" maxlength="64" value="${escapeHtml(tile.unit || "")}" placeholder="${isStatic ? "Optional" : "From entity"}"></label>
               <span></span>
             </div>
+            <div class="field-grid tile-sizing">
+              <label>Text size
+                <div class="scale-input">
+                  <input class="tile-text-scale" type="range" min="60" max="180" step="5" value="${Number(tile.text_scale || 100)}">
+                  <output class="tile-text-scale-value">${Number(tile.text_scale || 100)}%</output>
+                </div>
+              </label>
+              <label class="qr-size-field" ${isQr ? "" : "hidden"}>QR code size
+                <div class="scale-input">
+                  <input class="tile-qr-scale" type="range" min="50" max="150" step="5" value="${Number(tile.qr_scale || 100)}">
+                  <output class="tile-qr-scale-value">${Number(tile.qr_scale || 100)}%</output>
+                </div>
+              </label>
+            </div>
             <div class="field-grid range-fields" ${(tile.style === "gauge" || tile.style === "progress") ? "" : "hidden"}>
               <label>Minimum<input class="tile-min" type="number" step="any" value="${Number(tile.minimum ?? 0)}"></label>
               <label>Maximum<input class="tile-max" type="number" step="any" value="${Number(tile.maximum ?? 100)}"></label>
@@ -2197,6 +2323,16 @@
         tile.badge_theme = event.target.value;
         changed();
       });
+      for (const [selector, outputSelector, field] of [
+        [".tile-text-scale", ".tile-text-scale-value", "text_scale"],
+        [".tile-qr-scale", ".tile-qr-scale-value", "qr_scale"],
+      ]) {
+        card.querySelector(selector)?.addEventListener("input", (event) => {
+          tile[field] = Number(event.target.value);
+          card.querySelector(outputSelector).textContent = `${tile[field]}%`;
+          changed();
+        });
+      }
       card.querySelector(".badge-photo-upload")?.addEventListener("change", async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -2502,11 +2638,13 @@
               icon:"home", style:"name_card", minimum:0, maximum:100,
               source:"static", value:"Role / title", badge_theme:"bold",
               badge_photo_id:"", badge_photo_filename:"",
+              text_scale:110, qr_scale:100,
             },
             {
               entity_id:"static.id_qr", label:"Email · LinkedIn · Website", unit:"SCAN ME",
               icon:"auto", style:"qr", minimum:0, maximum:100,
               source:"static", value:"https://example.com",
+              text_scale:100, qr_scale:125,
             },
           ],
         },
@@ -2518,6 +2656,7 @@
               entity_id:"static.qr_code", label:"Scan me", unit:"SCAN TO OPEN",
               icon:"auto", style:"qr", minimum:0, maximum:100,
               source:"static", value:"https://example.com",
+              text_scale:110, qr_scale:140,
             },
           ],
         },
@@ -2584,6 +2723,8 @@
         image_fit: "cover",
         source,
         value: isStatic ? (style === "qr" ? "https://example.com" : "Your text") : "",
+        text_scale: 100,
+        qr_scale: style === "qr" ? 130 : 100,
       });
       changed(); renderInspector(); renderPages();
     }

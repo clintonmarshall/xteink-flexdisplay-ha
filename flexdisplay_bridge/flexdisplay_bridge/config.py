@@ -36,6 +36,8 @@ class EntityConfig:
     badge_photo_id: str = ""
     badge_photo_filename: str = ""
     badge_theme: str = "classic"
+    text_scale: int = 100
+    qr_scale: int = 100
 
 
 @dataclass(frozen=True)
@@ -226,6 +228,8 @@ def _entity(value: dict[str, Any]) -> EntityConfig:
         image_fit=str(value.get("image_fit") or "cover"),
         source=str(value.get("source") or "home_assistant"),
         value=str(value.get("value") or ""),
+        text_scale=max(60, min(180, int(value.get("text_scale", 100)))),
+        qr_scale=max(50, min(150, int(value.get("qr_scale", 100)))),
     )
 
 

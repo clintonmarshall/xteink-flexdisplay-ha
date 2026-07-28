@@ -86,6 +86,11 @@ def _number(value: str) -> float | None:
         return None
 
 
+def _scaled(size: int, percent: int, minimum: int, maximum: int = 160) -> int:
+    selected = max(60, min(180, int(percent or 100)))
+    return max(minimum, min(maximum, round(size * selected / 100)))
+
+
 def _icon_kind(entity: EntityState) -> str:
     if entity.icon != "auto":
         return entity.icon
@@ -658,7 +663,10 @@ def _draw_name_card(
     } else "classic"
     header_bottom, header_fill = _draw_badge_background(draw, box, theme)
     badge = "IDENTIFICATION"
-    badge_font = _font(max(13, min(22, width // 25)), True)
+    badge_font = _font(
+        _scaled(max(13, min(22, width // 25)), entity.text_scale, 11, 34),
+        True,
+    )
     badge_width = draw.textbbox((0, 0), badge, font=badge_font)[2]
     draw.text(
         (center_x - badge_width // 2, top + max(9, (header_bottom - top) // 4)),
@@ -696,8 +704,8 @@ def _draw_name_card(
             draw,
             entity.label,
             text_width,
-            max(28, width // 13),
-            max(18, width // 23),
+            _scaled(max(28, width // 13), entity.text_scale, 18, 72),
+            _scaled(max(18, width // 23), entity.text_scale, 13, 42),
         )
         name_y = content_top + max(2, height // 55)
         for line in name_lines[:2]:
@@ -705,7 +713,14 @@ def _draw_name_card(
             draw.text((text_left, name_y), line, fill=0, font=name_font)
             name_y += bounds[3] - bounds[1] + 4
         role = entity.state or "Team member"
-        role_font = _fit(draw, role, text_width, max(19, width // 24), True, 13)
+        role_font = _fit(
+            draw,
+            role,
+            text_width,
+            _scaled(max(19, width // 24), entity.text_scale, 13, 48),
+            True,
+            _scaled(13, entity.text_scale, 10, 24),
+        )
         role_y = min(bottom - 70, name_y + max(8, height // 35))
         draw.text((text_left, role_y), role, fill=0, font=role_font)
         accent_y = role_y + draw.textbbox((0, 0), role, font=role_font)[3] + 7
@@ -719,9 +734,9 @@ def _draw_name_card(
                 draw,
                 entity.unit,
                 text_width,
-                max(16, width // 29),
+                _scaled(max(16, width // 29), entity.text_scale, 11, 38),
                 False,
-                11,
+                _scaled(11, entity.text_scale, 9, 20),
             )
             draw.text(
                 (text_left, min(bottom - padding - 18, accent_y + 10)),
@@ -751,8 +766,8 @@ def _draw_name_card(
         draw,
         entity.label,
         width - padding * 2,
-        max(34, width // 10),
-        max(21, width // 18),
+        _scaled(max(34, width // 10), entity.text_scale, 21, 84),
+        _scaled(max(21, width // 18), entity.text_scale, 15, 48),
     )
     name_y = name_top
     for line in name_lines[:2]:
@@ -765,9 +780,9 @@ def _draw_name_card(
         draw,
         role,
         width - padding * 2,
-        max(22, width // 17),
+        _scaled(max(22, width // 17), entity.text_scale, 14, 54),
         True,
-        14,
+        _scaled(14, entity.text_scale, 11, 28),
     )
     role_width = draw.textbbox((0, 0), role, font=role_font)[2]
     role_y = min(bottom - max(84, height // 7), name_y + max(10, height // 50))
@@ -777,9 +792,9 @@ def _draw_name_card(
             draw,
             entity.unit,
             width - padding * 2,
-            max(18, width // 23),
+            _scaled(max(18, width // 23), entity.text_scale, 12, 44),
             False,
-            12,
+            _scaled(12, entity.text_scale, 10, 24),
         )
         detail_width = draw.textbbox((0, 0), entity.unit, font=detail_font)[2]
         detail_y = min(bottom - padding - 20, role_y + max(34, height // 18))
@@ -789,6 +804,124 @@ def _draw_name_card(
             fill=0,
             font=detail_font,
         )
+
+
+def _draw_dotted_line(
+    draw: ImageDraw.ImageDraw,
+    start: int,
+    end: int,
+    y: int,
+    width: int,
+) -> None:
+    segment = max(3, width * 2)
+    gap = max(3, width * 2)
+    cursor = start
+    while cursor < end:
+        draw.line(
+            (cursor, y, min(end, cursor + segment), y),
+            fill=0,
+            width=width,
+        )
+        cursor += segment + gap
+
+
+def _draw_button_action_indicators(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    top: int,
+    bottom: int,
+    mappings: Iterable[dict[str, Any]],
+) -> None:
+    """Draw a compact edge legend for configured physical-button gestures."""
+    labels = {
+        "confirm": "OK",
+        "left": "L",
+        "right": "R",
+        "up": "U",
+        "down": "D",
+    }
+    grouped: dict[str, set[str]] = {}
+    for mapping in mappings:
+        action = mapping.get("action")
+        if not isinstance(action, dict) or action.get("type") == "none":
+            continue
+        button = str(mapping.get("button") or "")
+        gesture = str(mapping.get("gesture") or "")
+        if button in labels and gesture in {"short", "double", "long"}:
+            grouped.setdefault(button, set()).add(gesture)
+    buttons = [
+        button
+        for button in ("left", "up", "confirm", "down", "right")
+        if button in grouped
+    ]
+    if not buttons:
+        return
+
+    margin = max(14, width // 26)
+    draw.line((margin, top, width - margin, top), fill=0, width=1)
+    slot_width = max(54, (width - margin * 2) // len(buttons))
+    label_font = _font(max(11, width // 42), True)
+    stroke = max(1, width // 240)
+    center_y = (top + bottom) // 2
+    for index, button in enumerate(buttons):
+        slot_left = margin + index * slot_width
+        slot_right = min(width - margin, slot_left + slot_width)
+        label = labels[button]
+        label_bounds = draw.textbbox((0, 0), label, font=label_font)
+        label_width = label_bounds[2] - label_bounds[0]
+        label_left = slot_left + 4
+        label_top = center_y - (label_bounds[3] - label_bounds[1]) // 2
+        draw.rounded_rectangle(
+            (
+                label_left,
+                center_y - 10,
+                label_left + label_width + 10,
+                center_y + 10,
+            ),
+            radius=4,
+            outline=0,
+            width=stroke,
+        )
+        draw.text(
+            (label_left + 5, label_top - label_bounds[1]),
+            label,
+            fill=0,
+            font=label_font,
+        )
+        line_start = label_left + label_width + 16
+        line_end = slot_right - 5
+        if line_end <= line_start:
+            continue
+        gestures = grouped[button]
+        if "short" in gestures:
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y - 6,
+                stroke,
+            )
+        if "double" in gestures:
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y - 1,
+                stroke,
+            )
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y + 4,
+                stroke,
+            )
+        if "long" in gestures:
+            draw.line(
+                (line_start, center_y + 8, line_end, center_y + 8),
+                fill=0,
+                width=max(2, stroke + 1),
+            )
 
 
 class DashboardRenderer:
@@ -804,6 +937,8 @@ class DashboardRenderer:
         page_count: int = 1,
         ha_error: str = "",
         layout: str = "auto",
+        button_actions: Iterable[dict[str, Any]] = (),
+        show_button_indicators: bool = False,
     ) -> bytes:
         width = max(240, min(1200, width))
         height = max(240, min(1600, height))
@@ -833,9 +968,21 @@ class DashboardRenderer:
         draw.text((width - margin - date_width, header_height - 27), date_text, fill=255, font=date_font)
 
         values = list(entities)[:4]
+        configured_button_actions = [
+            mapping
+            for mapping in button_actions
+            if isinstance(mapping, dict)
+            and isinstance(mapping.get("action"), dict)
+            and mapping["action"].get("type") != "none"
+        ]
+        indicator_height = (
+            max(32, height // 24)
+            if show_button_indicators and configured_button_actions
+            else 0
+        )
         grid_top = header_height + gap
         footer_top = height - footer_height
-        grid_bottom = footer_top - gap
+        grid_bottom = footer_top - gap - indicator_height
 
         if values:
             if layout == "single" or len(values) == 1:
@@ -905,9 +1052,14 @@ class DashboardRenderer:
                         draw,
                         entity.label,
                         cell_width - 24,
-                        max(20, width // 21),
+                        _scaled(
+                            max(20, width // 21),
+                            entity.text_scale,
+                            13,
+                            48,
+                        ),
                         True,
-                        13,
+                        _scaled(13, entity.text_scale, 10, 24),
                     )
                     caption_box = draw.textbbox((0, 0), entity.label, font=caption_font)
                     caption_width = caption_box[2] - caption_box[0]
@@ -927,8 +1079,135 @@ class DashboardRenderer:
                     max(58, cell_width // (2 if len(values) == 1 else 3)),
                     max(58, card_height // (2 if len(values) == 1 else 3)),
                 )
-                icon_left = left + (cell_width - icon_size) // 2
+                label_width = cell_width - 24
+                label_font, label_lines = _wrap_label(
+                    draw,
+                    entity.label,
+                    label_width,
+                    _scaled(
+                        max(23, width // 20),
+                        entity.text_scale,
+                        15,
+                        56,
+                    ),
+                    _scaled(17, entity.text_scale, 12, 34),
+                )
+                value = (
+                    (entity.unit or "SCAN ME")
+                    if entity.style == "qr"
+                    else entity.state
+                )
+                if (
+                    entity.style != "qr"
+                    and entity.unit
+                    and entity.unit not in value
+                ):
+                    value = f"{value} {entity.unit}"
+                value_font = _fit(
+                    draw,
+                    value,
+                    cell_width - 20,
+                    _scaled(
+                        max(52, width // 9),
+                        entity.text_scale,
+                        22,
+                        108,
+                    ),
+                    True,
+                    _scaled(22, entity.text_scale, 15, 42),
+                )
+                value_bbox = draw.textbbox((0, 0), value, font=value_font)
+                value_width = value_bbox[2] - value_bbox[0]
+                value_height = value_bbox[3] - value_bbox[1]
+
+                if entity.style == "qr":
+                    label_y = top + 15
+                    for line in label_lines[:2]:
+                        label_bbox = draw.textbbox(
+                            (0, 0),
+                            line,
+                            font=label_font,
+                        )
+                        label_text_width = label_bbox[2] - label_bbox[0]
+                        draw.text(
+                            (
+                                left + (cell_width - label_text_width) // 2,
+                                label_y,
+                            ),
+                            line,
+                            fill=0,
+                            font=label_font,
+                        )
+                        label_y += label_bbox[3] - label_bbox[1] + 3
+                    value_y = bottom - value_height - 18
+                    draw.text(
+                        (
+                            left + (cell_width - value_width) // 2,
+                            value_y - value_bbox[1],
+                        ),
+                        value,
+                        fill=0,
+                        font=value_font,
+                    )
+                    visual_top = label_y + 7
+                    visual_bottom = value_y - 10
+                    available_size = max(
+                        40,
+                        min(
+                            cell_width - 28,
+                            visual_bottom - visual_top,
+                        ),
+                    )
+                    qr_size = min(
+                        available_size,
+                        max(
+                            40,
+                            round(
+                                icon_size
+                                * max(50, min(150, entity.qr_scale))
+                                / 100
+                            ),
+                        ),
+                    )
+                    qr_left = left + (cell_width - qr_size) // 2
+                    qr_top = visual_top + max(
+                        0,
+                        (visual_bottom - visual_top - qr_size) // 2,
+                    )
+                    _draw_tile_visual(
+                        image,
+                        draw,
+                        entity,
+                        (
+                            qr_left,
+                            qr_top,
+                            qr_left + qr_size,
+                            qr_top + qr_size,
+                        ),
+                    )
+                    continue
+
+                label_heights = [
+                    (
+                        draw.textbbox((0, 0), line, font=label_font)[3]
+                        - draw.textbbox((0, 0), line, font=label_font)[1]
+                    )
+                    for line in label_lines[:2]
+                ]
+                label_block_height = sum(label_heights) + max(
+                    0,
+                    len(label_heights) - 1,
+                ) * 4
+                value_y = bottom - value_height - 26
                 icon_top = top + 18
+                icon_size = max(
+                    36,
+                    min(
+                        icon_size,
+                        value_y - icon_top - label_block_height - 24,
+                    ),
+                )
+                icon_left = left + (cell_width - icon_size) // 2
                 _draw_tile_visual(
                     image,
                     draw,
@@ -936,13 +1215,6 @@ class DashboardRenderer:
                     (icon_left, icon_top, icon_left + icon_size, icon_top + icon_size),
                 )
 
-                label_width = cell_width - 24
-                label_font, label_lines = _wrap_label(
-                    draw,
-                    entity.label,
-                    label_width,
-                    max(23, width // 20),
-                )
                 label_y = icon_top + icon_size + 12
                 for line in label_lines:
                     label_bbox = draw.textbbox((0, 0), line, font=label_font)
@@ -955,14 +1227,15 @@ class DashboardRenderer:
                     )
                     label_y += label_bbox[3] - label_bbox[1] + 4
 
-                value = entity.unit or "SCAN ME" if entity.style == "qr" else entity.state
-                if entity.unit and entity.unit not in value:
-                    value = f"{value} {entity.unit}"
-                value_font = _fit(draw, value, cell_width - 20, max(52, width // 9), True, 22)
-                value_width = draw.textbbox((0, 0), value, font=value_font)[2]
-                value_height = draw.textbbox((0, 0), value, font=value_font)[3]
-                value_y = bottom - value_height - 26
-                draw.text((left + (cell_width - value_width) // 2, value_y), value, fill=0, font=value_font)
+                draw.text(
+                    (
+                        left + (cell_width - value_width) // 2,
+                        value_y - value_bbox[1],
+                    ),
+                    value,
+                    fill=0,
+                    font=value_font,
+                )
         else:
             box_top = grid_top + 28
             box_bottom = min(grid_bottom - 20, box_top + 230)
@@ -973,6 +1246,15 @@ class DashboardRenderer:
             draw.text((margin + 106, box_top + 34), "Bridge connected", fill=0, font=heading)
             draw.text((margin + 24, box_top + 125), "Add entity IDs to config.yaml", fill=0, font=body)
             draw.text((margin + 24, box_top + 160), "to display live Home Assistant values.", fill=0, font=body)
+
+        if indicator_height:
+            _draw_button_action_indicators(
+                draw,
+                width,
+                footer_top - indicator_height,
+                footer_top - 2,
+                configured_button_actions,
+            )
 
         draw.line((margin, footer_top, width - margin, footer_top), fill=0, width=2)
         status_font = _font(max(13, width // 34), True)

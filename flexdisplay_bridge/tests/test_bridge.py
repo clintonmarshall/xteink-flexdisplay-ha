@@ -1174,10 +1174,14 @@ def test_configurable_double_press_calls_home_assistant_once(
         devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
     )
     with TestClient(create_app(config)) as client:
-        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+        initial_screen = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-DEMO01"},
+        )
         saved = client.put(
             "/api/v1/devices/X3-DEMO01/button-actions",
             json={
+                "show_indicators": True,
                 "mappings": [
                     {
                         "mode": "home_assistant",
@@ -1194,6 +1198,14 @@ def test_configurable_double_press_calls_home_assistant_once(
             },
         )
         assert saved.status_code == 200
+        assert saved.json()["show_indicators"] is True
+        assert saved.json()["activation"]["active_now"] is True
+        assert saved.json()["activation"]["requires_device_sync"] is False
+        configured = client.get(
+            "/api/v1/devices/X3-DEMO01/button-actions"
+        ).json()
+        assert configured["show_indicators"] is True
+        assert configured["activation"]["status"] == "ready"
 
         response = client.get(
             "/api/v1/screen",
@@ -1206,6 +1218,7 @@ def test_configurable_double_press_calls_home_assistant_once(
             },
         )
         assert response.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        assert response.content != initial_screen.content
         assert calls == [("light.toggle", "light.showroom", {"transition": 1})]
 
         # Firmware retries remain replay-safe.
@@ -1434,6 +1447,7 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
                         "style": "name_card",
                         "source": "static",
                         "value": "Showroom Guest",
+                        "text_scale": 115,
                     },
                     {
                         "entity_id": "static.id_qr",
@@ -1442,6 +1456,8 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
                         "style": "qr",
                         "source": "static",
                         "value": "https://example.test/visitor/042",
+                        "text_scale": 110,
+                        "qr_scale": 140,
                     },
                 ],
             }
@@ -1456,6 +1472,13 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
         assert "Bold band" in studio.text
         assert "LinkedIn profile" in studio.text
         assert 'id="addQrTile"' in studio.text
+        assert 'class="tile-text-scale"' in studio.text
+        assert 'class="tile-qr-scale"' in studio.text
+        assert "Save &amp; activate" in studio.text
+        assert "Show assigned-button indicators" in studio.text
+        assert "Saved actions are active immediately on the Bridge" in studio.text
+        assert "gesture-mark short" in studio.text
+        assert "gesture-mark long" in studio.text
 
         portrait = io.BytesIO()
         photo = Image.new("RGB", (300, 420), "white")
@@ -1493,7 +1516,10 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
         assert tiles[0]["badge_theme"] == "bold"
         assert tiles[0]["badge_photo_id"] == asset["id"]
         assert tiles[0]["badge_photo_filename"] == "alex-profile.jpg"
+        assert tiles[0]["text_scale"] == 115
         assert tiles[1]["value"] == "https://example.test/visitor/042"
+        assert tiles[1]["text_scale"] == 110
+        assert tiles[1]["qr_scale"] == 140
 
         rendered_previews = {}
         for model, expected_size in (("X3", (528, 792)), ("X4", (480, 800))):
@@ -2202,6 +2228,45 @@ def test_dashboard_renderer_supports_visual_tile_styles() -> None:
         with Image.open(io.BytesIO(image)) as rendered:
             assert rendered.size == (480, 800)
             assert rendered.mode == "1"
+
+
+def test_dashboard_renderer_applies_text_and_qr_size_controls() -> None:
+    renderer = DashboardRenderer()
+
+    def render(text_scale: int, qr_scale: int) -> bytes:
+        return renderer.render(
+            title="VISUAL",
+            device={
+                "device_id": "X4-SIZING",
+                "battery_percent": 80,
+                "rssi": -50,
+            },
+            width=480,
+            height=800,
+            entities=(
+                EntityState(
+                    "static.qr",
+                    "Visitor access",
+                    "https://example.test/visitor/access",
+                    "SCAN TO OPEN",
+                    True,
+                    "auto",
+                    "qr",
+                    text_scale=text_scale,
+                    qr_scale=qr_scale,
+                ),
+            ),
+            layout="single",
+        )
+
+    compact = render(70, 60)
+    large = render(150, 150)
+    assert compact != large
+    with Image.open(io.BytesIO(compact)) as compact_image:
+        compact_ink = compact_image.histogram()[0]
+    with Image.open(io.BytesIO(large)) as large_image:
+        large_ink = large_image.histogram()[0]
+    assert large_ink > compact_ink
 
 
 def test_dashboard_renderer_crops_and_dithers_image_tiles() -> None:

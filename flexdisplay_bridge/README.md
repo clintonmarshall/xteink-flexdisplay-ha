@@ -24,6 +24,14 @@ presses for dashboard navigation, entity controls, scenes, scripts,
 automations, and validated Home Assistant services. Back and Power remain
 reserved recovery controls.
 
+Bridge `0.22.3` makes activation state explicit in Studio: mappings are saved
+on the Bridge immediately and show **Ready** while the device is in Home
+Assistant mode or **Waiting** when another device mode is active. An optional
+on-screen legend can identify assigned buttons using a dotted line for short
+press, double-dotted line for double press, and solid line for long press.
+The legend is rendered above the status footer and does not cover dashboard
+tiles.
+
 FlexDisplay `0.18.0` adds a **Photo Frame** workspace to Dashboard Studio.
 Create albums, upload JPEG/PNG/WebP/BMP images, import `camera.*` or `image.*`
 entities, select crop/contain and rotation, add captions, preview the exact
@@ -68,6 +76,12 @@ FlexDisplay Bridge `0.22.2` expands standalone Studio content with a dedicated
 QR Code Page, guided email, LinkedIn, website, contact, phone, Wi-Fi, and text
 QR builders, profile-photo uploads, and four e-ink ID badge themes. This is
 also a Bridge-only update; the shared X3/X4 firmware remains `0.22.0`.
+
+FlexDisplay Bridge `0.22.3` adds independent per-tile **Text size** and
+**QR code size** sliders. Text can be scaled from 60% to 180%, QR codes from
+50% to 150%, and the live X3/X4 preview uses the exact saved layout. QR tiles
+now reserve separate label, code, and caption regions so enlarged codes remain
+readable without colliding with surrounding text. This is also Bridge-only.
 
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.

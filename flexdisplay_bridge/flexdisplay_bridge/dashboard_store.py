@@ -240,6 +240,18 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
             if style != "name_card":
                 badge_photo_id = ""
                 badge_theme = "classic"
+            text_scale = _integer(
+                raw_entity.get("text_scale"),
+                100,
+                60,
+                180,
+            )
+            qr_scale = _integer(
+                raw_entity.get("qr_scale"),
+                100,
+                50,
+                150,
+            )
             entities.append(
                 EntityConfig(
                     entity_id=entity_id,
@@ -264,6 +276,8 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                         else ""
                     ),
                     badge_theme=badge_theme,
+                    text_scale=text_scale,
+                    qr_scale=qr_scale,
                 )
             )
         pages.append(
