@@ -15,6 +15,11 @@ def _env_bool(name: str, default: bool) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _choice(value: Any, allowed: set[str], default: str) -> str:
+    selected = str(value or default).strip().lower()
+    return selected if selected in allowed else default
+
+
 @dataclass(frozen=True)
 class EntityConfig:
     entity_id: str
@@ -119,6 +124,13 @@ class MqttConfig:
     password: str = ""
     discovery_prefix: str = "homeassistant"
     topic_prefix: str = "flexdisplay"
+    entity_source: str = "hacs"
+
+
+@dataclass(frozen=True)
+class ScreenHistoryConfig:
+    enabled: bool = True
+    limit: int = 5
 
 
 @dataclass(frozen=True)
@@ -135,6 +147,7 @@ class FirmwareConfig:
     retry_backoff_seconds: int = 300
     mirror_enabled: bool = True
     mirror_retry_seconds: int = 300
+    stale_install_seconds: int = 1800
 
 
 @dataclass(frozen=True)
@@ -144,6 +157,7 @@ class BridgeConfig:
     api_key: str = ""
     home_assistant: HomeAssistantConfig = HomeAssistantConfig()
     mqtt: MqttConfig = MqttConfig()
+    screen_history: ScreenHistoryConfig = ScreenHistoryConfig()
     firmware: FirmwareConfig = FirmwareConfig()
     provisioning: ProvisioningConfig = ProvisioningConfig()
     default_entities: tuple[EntityConfig, ...] = ()
@@ -343,6 +357,34 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         password=os.getenv(mqtt_password_env, str(mqtt_raw.get("password") or "")),
         discovery_prefix=str(mqtt_raw.get("discovery_prefix") or "homeassistant").strip("/"),
         topic_prefix=str(mqtt_raw.get("topic_prefix") or "flexdisplay").strip("/"),
+        entity_source=_choice(
+            os.getenv(
+                "FLEXDISPLAY_HA_ENTITY_SOURCE",
+                str(mqtt_raw.get("entity_source") or "hacs"),
+            ),
+            {"hacs", "mqtt", "both"},
+            "hacs",
+        ),
+    )
+
+    screen_history_raw = raw.get("screen_history") or {}
+    screen_history = ScreenHistoryConfig(
+        enabled=_env_bool(
+            "FLEXDISPLAY_SCREEN_HISTORY_ENABLED",
+            bool(screen_history_raw.get("enabled", True)),
+        ),
+        limit=max(
+            1,
+            min(
+                20,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_SCREEN_HISTORY_LIMIT",
+                        screen_history_raw.get("limit", 5),
+                    )
+                ),
+            ),
+        ),
     )
 
     firmware_raw = raw.get("firmware") or {}
@@ -423,6 +465,18 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
                 ),
             ),
         ),
+        stale_install_seconds=max(
+            300,
+            min(
+                86400,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_FIRMWARE_STALE_INSTALL_SECONDS",
+                        firmware_raw.get("stale_install_seconds", 1800),
+                    )
+                ),
+            ),
+        ),
     )
 
     provisioning_raw = raw.get("provisioning") or {}
@@ -492,6 +546,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         api_key=os.getenv(api_key_env, str(raw.get("server", {}).get("api_key") or "")),
         home_assistant=ha,
         mqtt=mqtt,
+        screen_history=screen_history,
         firmware=firmware,
         provisioning=provisioning,
         default_entities=defaults,

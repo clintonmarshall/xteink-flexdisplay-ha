@@ -81,7 +81,7 @@ class HomeAssistantClient:
                     entity_picture = str(attributes.get("entity_picture") or "")
                     if not entity_picture:
                         raise ValueError(f"{entity.entity_id} does not expose an entity picture")
-                    image_url = urljoin(f"{self.config.base_url}/", entity_picture)
+                    image_url = self._entity_picture_url(entity_picture)
                     image = self._download_image(
                         image_url,
                         authenticated=self._same_origin(image_url, self.config.base_url),
@@ -122,6 +122,23 @@ class HomeAssistantClient:
             right.hostname,
             right.port or (443 if right.scheme.lower() == "https" else 80),
         )
+
+    def _entity_picture_url(self, entity_picture: str) -> str:
+        """Resolve HA image paths without escaping an internal API proxy prefix."""
+        picture = urlparse(entity_picture)
+        if picture.scheme or picture.netloc:
+            return entity_picture
+
+        base = urlparse(self.config.base_url)
+        base_path = base.path.rstrip("/")
+        if base_path and picture.path.startswith("/api/"):
+            return base._replace(
+                path=f"{base_path}{picture.path}",
+                params="",
+                query=picture.query,
+                fragment=picture.fragment,
+            ).geturl()
+        return urljoin(f"{self.config.base_url}/", entity_picture)
 
     def _download_image(self, url: str, *, authenticated: bool) -> bytes:
         parsed = urlparse(url)

@@ -179,6 +179,28 @@ failure progress with exact timestamps. The Bridge downloads the configured
 release once, verifies its size and SHA-256, then serves the trusted local copy
 to X3 and X4 devices while preserving canary-first rollout gating.
 
+Bridge and integration `0.20.0` add an optional HACS-free installation path.
+With MQTT enabled and **Home Assistant entity source** set to `mqtt`, the
+Bridge creates the complete device, diagnostics, controls, configuration
+entities, button events, and firmware update entity through Home Assistant
+MQTT Discovery. Existing installations default to `hacs` so retained MQTT
+Discovery records are removed instead of creating duplicates.
+
+Dashboard Studio now includes Fleet Health and a bounded history of the exact
+screens rendered for each X3/X4. Operators can review battery, connectivity,
+SD-card, Home Assistant, firmware, power, page, and next-wake state, then
+resend a saved image on the next device check-in. Shared firmware `0.19.0`
+remains compatible with this Bridge release.
+
+Firmware, Bridge, and integration `0.21.0` add Branded Fetch Screens. Use
+Dashboard Studio to upload a company logo or icon, set a headline and message,
+include the device name, owner, or area, select an X3/X4 layout, and preview
+the exact e-paper result. Devices verify and cache the one-bit BMP on their SD
+card only when its SHA-256 changes, then render it locally while fetching a
+dashboard. Fleet-default and per-device designs support always, manual-wake,
+USB-only, and disabled policies, with the original text screen retained as a
+safe fallback.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

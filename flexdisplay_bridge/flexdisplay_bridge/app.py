@@ -2,8 +2,9 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import io
 import re
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
 from pathlib import Path
@@ -12,6 +13,7 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
+from PIL import Image
 
 from . import __version__
 from .button_actions import (
@@ -33,6 +35,11 @@ from .dashboard_store import (
 from .dashboards import build_dashboard_pages, select_active_pages
 from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
 from .home_assistant import HomeAssistantClient
+from .loading_screen import (
+    MAX_LOGO_BYTES,
+    LoadingScreenStore,
+    LoadingScreenValidationError,
+)
 from .mqtt_service import MqttService
 from .photo_frame import (
     MAX_IMAGE_BYTES,
@@ -40,6 +47,7 @@ from .photo_frame import (
     PhotoFrameValidationError,
 )
 from .renderer import DashboardRenderer
+from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
@@ -380,6 +388,37 @@ def _decorate_device(
         recovery_blockers = _usb_recovery_blockers(result, settings, store)
         result["usb_recovery_verification_blockers"] = recovery_blockers
         result["usb_recovery_verification_ready"] = not recovery_blockers
+    battery = _number(
+        str(result.get("battery_percent"))
+        if result.get("battery_percent") is not None
+        else None
+    )
+    result["low_battery"] = bool(
+        battery is not None and battery <= profile.low_battery_percent
+    )
+    health_issues: list[str] = []
+    if not online and power_state != "powered_off":
+        health_issues.append("offline")
+    if result.get("sd_ready") is False:
+        health_issues.append("sd_card")
+    if result.get("ha_error"):
+        health_issues.append("home_assistant")
+    if result.get("firmware_update_status") in {"failed", "cancelled"}:
+        health_issues.append("firmware_update")
+    if result["low_battery"]:
+        health_issues.append("low_battery")
+    if health_issues:
+        result["health_state"] = (
+            "offline"
+            if health_issues == ["offline"]
+            else "needs_attention"
+        )
+    elif power_state in {"sleeping", "powered_off"}:
+        result["health_state"] = power_state
+    else:
+        result["health_state"] = "healthy"
+    result["health_issues"] = health_issues
+    result["health_detail"] = ", ".join(health_issues) if health_issues else "No issues"
     return result
 
 
@@ -687,15 +726,217 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     photo_frames = PhotoFrameMediaStore(
         settings.state_path.with_name("flexdisplay-photo-frame.json")
     )
+    loading_screens = LoadingScreenStore(
+        settings.state_path.with_name("flexdisplay-loading-screens.json")
+    )
     firmware_mirror = FirmwareMirror(
         settings.state_path.with_name("firmware-cache")
+    )
+    screen_history = ScreenHistoryStore(
+        settings.state_path.with_name("screen-history"),
+        settings.screen_history.limit,
     )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
 
-    def queue_from_mqtt(device_id: str, command: str) -> None:
-        if DEVICE_ID_PATTERN.fullmatch(device_id) and command in SUPPORTED_COMMANDS:
-            store.queue_command(device_id, command)
+    def publish_current(device_id: str) -> None:
+        current = store.get(device_id)
+        if not current:
+            return
+        configured = settings.device(
+            device_id,
+            int(current.get("width") or 480),
+            int(current.get("height") or 800),
+            str(current.get("model") or ""),
+        )
+        profile = _effective_device(configured, current)
+        decorated = _decorate_device(
+            current,
+            settings,
+            store,
+            dashboards.names(),
+        )
+        decorated["screen_history_count"] = len(screen_history.list(device_id))
+        mqtt.publish_device(device_id, profile, decorated)
+
+    def publish_screen_preview(
+        device_id: str,
+        content: bytes,
+        media_type: str,
+    ) -> None:
+        if not mqtt.discovery_enabled:
+            return
+        preview = content
+        if media_type != "image/png":
+            output = io.BytesIO()
+            with Image.open(io.BytesIO(content)) as source:
+                source.convert("1").save(output, format="PNG", optimize=True)
+            preview = output.getvalue()
+        mqtt.publish_screen(device_id, preview)
+
+    def queue_from_mqtt(device_id: str, command: str, payload: str) -> None:
+        if not DEVICE_ID_PATTERN.fullmatch(device_id):
+            return
+        current = store.get(device_id)
+        if not current:
+            return
+        try:
+            if command in SUPPORTED_COMMANDS:
+                if command == "install":
+                    blockers = _firmware_install_blockers(current, settings, store)
+                    if blockers:
+                        raise ValueError("; ".join(blockers))
+                    store.queue_firmware_install(
+                        device_id,
+                        settings.firmware.version,
+                        canary_required=settings.firmware.canary_required,
+                        max_parallel=settings.firmware.max_parallel,
+                    )
+                else:
+                    store.queue_command(device_id, command)
+            elif command == "cancel":
+                store.clear_commands(device_id, include_dispatched=True)
+            elif command == "firmware-retry":
+                blockers = _firmware_retry_blockers(current, settings, store)
+                if blockers:
+                    raise ValueError("; ".join(blockers))
+                store.retry_firmware_install(
+                    device_id,
+                    settings.firmware.version,
+                    canary_required=settings.firmware.canary_required,
+                    max_parallel=settings.firmware.max_parallel,
+                    retry_limit=settings.firmware.retry_limit,
+                    retry_backoff_seconds=settings.firmware.retry_backoff_seconds,
+                )
+            elif command == "rollout-reset":
+                store.reset_firmware_rollout(
+                    settings.firmware.version,
+                    canary_required=settings.firmware.canary_required,
+                )
+            elif command == "resend-screen":
+                _, item = screen_history.latest(device_id)
+                store.set_screen_override(device_id, str(item["id"]))
+                store.queue_command(device_id, "refresh")
+            elif command in {
+                "set-auto-start",
+                "set-live-mode",
+                "set-intelligent-sleep",
+                "set-stay-awake-on-usb",
+            }:
+                field = {
+                    "set-auto-start": "assigned_auto_start",
+                    "set-live-mode": "assigned_live_mode",
+                    "set-intelligent-sleep": "assigned_intelligent_sleep",
+                    "set-stay-awake-on-usb": "assigned_stay_awake_on_usb",
+                }[command]
+                store.provision(
+                    device_id,
+                    {field: payload.strip().lower() in {"1", "true", "yes", "on"}},
+                )
+                store.queue_command(device_id, "refresh")
+            elif command in {
+                "set-refresh-interval",
+                "set-manual-sleep",
+                "set-critical-battery",
+                "set-low-battery",
+                "set-low-battery-multiplier",
+                "set-unchanged-multiplier",
+                "set-manual-wake-grace",
+            }:
+                field, minimum, maximum = {
+                    "set-refresh-interval": (
+                        "assigned_refresh_interval_seconds",
+                        60,
+                        86400,
+                    ),
+                    "set-manual-sleep": (
+                        "assigned_manual_sleep_seconds",
+                        60,
+                        86400,
+                    ),
+                    "set-critical-battery": (
+                        "assigned_critical_battery_percent",
+                        5,
+                        50,
+                    ),
+                    "set-low-battery": (
+                        "assigned_low_battery_percent",
+                        10,
+                        80,
+                    ),
+                    "set-low-battery-multiplier": (
+                        "assigned_low_battery_multiplier",
+                        1,
+                        12,
+                    ),
+                    "set-unchanged-multiplier": (
+                        "assigned_unchanged_image_multiplier",
+                        1,
+                        12,
+                    ),
+                    "set-manual-wake-grace": (
+                        "assigned_manual_wake_grace_seconds",
+                        0,
+                        600,
+                    ),
+                }[command]
+                try:
+                    value = int(float(payload))
+                except ValueError as err:
+                    raise ValueError("A numeric value is required") from err
+                if not minimum <= value <= maximum:
+                    raise ValueError(f"Value must be between {minimum} and {maximum}")
+                store.provision(device_id, {field: value})
+                store.queue_command(device_id, "refresh")
+            elif command == "set-mode":
+                if payload not in SUPPORTED_MODES:
+                    raise ValueError("Unsupported device mode")
+                store.provision(device_id, {"assigned_mode": payload})
+                store.queue_command(device_id, "refresh")
+            elif command == "set-profile":
+                if payload not in dashboards.names():
+                    raise ValueError("Unknown dashboard profile")
+                store.provision(device_id, {"assigned_profile": payload})
+                store.queue_command(device_id, "refresh")
+            elif command in {"set-name", "set-area"}:
+                field = (
+                    "assigned_name" if command == "set-name" else "assigned_area"
+                )
+                value = _header_value(payload)
+                if command == "set-name" and not value:
+                    value = device_id
+                store.provision(device_id, {field: value})
+                store.queue_command(device_id, "refresh")
+            elif command == "set-timezone":
+                try:
+                    ZoneInfo(payload)
+                except ZoneInfoNotFoundError as err:
+                    raise ValueError("Unknown timezone") from err
+                store.provision(
+                    device_id,
+                    {"assigned_timezone": payload[:64]},
+                )
+                store.queue_command(device_id, "refresh")
+            elif command in {"set-active-start", "set-active-end"}:
+                minutes = _clock_minutes(payload, -1)
+                if minutes < 0:
+                    raise ValueError("Active time must use HH:MM")
+                field = (
+                    "assigned_active_start"
+                    if command == "set-active-start"
+                    else "assigned_active_end"
+                )
+                store.provision(
+                    device_id,
+                    {field: f"{minutes // 60:02d}:{minutes % 60:02d}"},
+                )
+                store.queue_command(device_id, "refresh")
+            else:
+                raise ValueError("Unsupported MQTT command")
+            store.record_management_result(device_id, command, True, f"{command}:accepted")
+        except (ScreenHistoryError, ValueError) as err:
+            store.record_management_result(device_id, command, False, str(err))
+        publish_current(device_id)
 
     mqtt = MqttService(settings.mqtt, queue_from_mqtt)
 
@@ -706,16 +947,32 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # Health/status endpoints expose the bounded failure and next retry.
             pass
 
+    async def monitor_fleet_health() -> None:
+        while True:
+            await asyncio.sleep(60)
+            store.expire_stale_firmware_installs(
+                settings.firmware.stale_install_seconds
+            )
+            for current in store.all():
+                publish_current(str(current.get("device_id") or ""))
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
+        store.expire_stale_firmware_installs(
+            settings.firmware.stale_install_seconds
+        )
         mqtt.start()
+        health_task = asyncio.create_task(monitor_fleet_health())
         mirror_task = None
         if settings.firmware.mirror_enabled:
             mirror_task = asyncio.create_task(warm_firmware_mirror())
         yield
         if mirror_task and not mirror_task.done():
             mirror_task.cancel()
+        health_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await health_task
         mqtt.stop()
 
     app = FastAPI(title="FlexDisplay Home Assistant Bridge", version=__version__, lifespan=lifespan)
@@ -723,13 +980,53 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.store = store
     app.state.dashboards = dashboards
     app.state.photo_frames = photo_frames
+    app.state.loading_screens = loading_screens
     app.state.firmware_mirror = firmware_mirror
+    app.state.screen_history = screen_history
     app.state.mqtt = mqtt
 
     def firmware_delivery_url(request: Request) -> str:
         if settings.firmware.mirror_enabled:
             return str(request.url_for("firmware_binary"))
         return settings.firmware.url
+
+    def apply_loading_screen_headers(
+        response: Response,
+        request: Request,
+        device_id: str,
+        profile: DeviceConfig,
+        width: int,
+        height: int,
+    ) -> None:
+        config = loading_screens.effective(device_id)
+        _, digest = loading_screens.render(
+            device_id,
+            {
+                "name": profile.name,
+                "area": profile.area,
+                "profile": profile.profile,
+            },
+            width,
+            height,
+        )
+        response.headers["X-FlexDisplay-Loading-Enabled"] = (
+            "true" if config["enabled"] else "false"
+        )
+        response.headers["X-FlexDisplay-Loading-Policy"] = str(config["policy"])
+        response.headers["X-FlexDisplay-Loading-SHA256"] = digest
+        response.headers["X-FlexDisplay-Loading-URL"] = str(
+            request.url_for("device_loading_screen", device_id=device_id)
+        )
+
+    def queue_loading_screen_refresh(target: str) -> list[str]:
+        refreshed: list[str] = []
+        for current in store.all():
+            device_id = str(current.get("device_id") or "")
+            if target != "default" and device_id != target:
+                continue
+            store.queue_command(device_id, "refresh")
+            refreshed.append(device_id)
+        return refreshed
 
     @app.middleware("http")
     async def normalize_ingress_path(request: Request, call_next):
@@ -750,6 +1047,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "home_assistant_configured": ha.configured,
             "mqtt_enabled": settings.mqtt.enabled,
             "mqtt_connected": mqtt.connected,
+            "home_assistant_entity_source": settings.mqtt.entity_source,
+            "mqtt_discovery_enabled": mqtt.discovery_enabled,
+            "screen_history_enabled": settings.screen_history.enabled,
+            "screen_history_limit": settings.screen_history.limit,
             "firmware_mirror": firmware_mirror.status(settings.firmware),
         }
 
@@ -785,9 +1086,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/devices")
     def devices() -> dict[str, Any]:
+        store.expire_stale_firmware_installs(
+            settings.firmware.stale_install_seconds
+        )
         return {
             "devices": [
-                _decorate_device(record, settings, store, dashboards.names())
+                {
+                    **_decorate_device(
+                        record,
+                        settings,
+                        store,
+                        dashboards.names(),
+                    ),
+                    "screen_history_count": len(
+                        screen_history.list(str(record.get("device_id") or ""))
+                    ),
+                }
                 for record in store.all()
             ]
         }
@@ -798,7 +1112,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.get(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
-        return _decorate_device(record, settings, store, dashboards.names())
+        return {
+            **_decorate_device(record, settings, store, dashboards.names()),
+            "screen_history_count": len(screen_history.list(selected)),
+        }
 
     @app.get("/api/v1/devices/{device_id}/events")
     def device_events(device_id: str) -> dict[str, Any]:
@@ -807,6 +1124,116 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
         return {"events": record.get("recent_button_events", [])}
+
+    @app.get("/api/v1/devices/{device_id}/screens")
+    def device_screens(device_id: str) -> dict[str, Any]:
+        selected = _device_id(device_id)
+        if not store.get(selected):
+            raise HTTPException(status_code=404, detail="Device not found")
+        items = screen_history.list(selected)
+        return {
+            "device_id": selected,
+            "limit": settings.screen_history.limit,
+            "screens": [
+                {
+                    **item,
+                    "preview_url": f"/api/v1/devices/{selected}/screens/{item['id']}",
+                    "current": index == 0,
+                }
+                for index, item in enumerate(items)
+            ],
+        }
+
+    @app.get("/api/v1/devices/{device_id}/screens/current")
+    def current_device_screen(device_id: str) -> FileResponse:
+        selected = _device_id(device_id)
+        try:
+            path, item = screen_history.latest(selected)
+        except ScreenHistoryError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        return FileResponse(
+            path,
+            media_type=str(item.get("media_type") or "image/png"),
+            headers={
+                "X-FlexDisplay-Screen-ID": str(item["id"]),
+                "X-FlexDisplay-Screen-SHA256": str(item["sha256"]),
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    @app.get("/api/v1/devices/{device_id}/screens/current.png")
+    def current_device_screen_png(device_id: str) -> Response:
+        selected = _device_id(device_id)
+        try:
+            path, item = screen_history.latest(selected)
+            content = path.read_bytes()
+        except (OSError, ScreenHistoryError) as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        if item.get("media_type") != "image/png":
+            output = io.BytesIO()
+            with Image.open(io.BytesIO(content)) as source:
+                source.convert("1").save(output, format="PNG", optimize=True)
+            content = output.getvalue()
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={
+                "X-FlexDisplay-Screen-ID": str(item["id"]),
+                "X-FlexDisplay-Screen-SHA256": str(item["sha256"]),
+                "Cache-Control": "no-cache",
+            },
+        )
+
+    @app.get("/api/v1/devices/{device_id}/screens/{history_id}")
+    def historical_device_screen(device_id: str, history_id: str) -> FileResponse:
+        selected = _device_id(device_id)
+        try:
+            path, item = screen_history.get(selected, history_id)
+        except ScreenHistoryError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        return FileResponse(
+            path,
+            media_type=str(item.get("media_type") or "image/png"),
+            headers={
+                "X-FlexDisplay-Screen-ID": str(item["id"]),
+                "X-FlexDisplay-Screen-SHA256": str(item["sha256"]),
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    @app.post("/api/v1/devices/{device_id}/screens/{history_id}/resend")
+    def resend_historical_screen(
+        device_id: str,
+        history_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        try:
+            _, item = screen_history.get(selected, history_id)
+        except ScreenHistoryError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        record = store.set_screen_override(selected, str(item["id"]))
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        record = store.queue_command(selected, "refresh")
+        store.record_management_result(
+            selected,
+            "resend-screen",
+            True,
+            f"Queued saved screen {item['id']}",
+        )
+        publish_current(selected)
+        return {
+            "queued": True,
+            "screen": item,
+            "device": _decorate_device(
+                record,
+                settings,
+                store,
+                dashboards.names(),
+            ),
+        }
 
     @app.get("/api/v1/devices/{device_id}/button-actions")
     def device_button_actions(device_id: str, request: Request) -> dict[str, Any]:
@@ -866,7 +1293,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "version": __version__,
             "profiles": dashboards.all(),
             "devices": [
-                _decorate_device(record, settings, store, dashboards.names())
+                {
+                    **_decorate_device(
+                        record,
+                        settings,
+                        store,
+                        dashboards.names(),
+                    ),
+                    "screen_history_count": len(
+                        screen_history.list(str(record.get("device_id") or ""))
+                    ),
+                }
                 for record in store.all()
             ],
             "models": {
@@ -946,6 +1383,214 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         services, error = ha.service_catalog()
         return {"services": services, "error": error}
+
+    @app.get("/api/v1/loading-screens")
+    def loading_screen_settings(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return loading_screens.payload()
+
+    @app.get("/api/v1/loading-screens/{target}")
+    def loading_screen_setting(target: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        return {"target": target, "config": loading_screens.effective(target)}
+
+    @app.put("/api/v1/loading-screens/{target}")
+    def save_loading_screen_setting(
+        target: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        try:
+            config = loading_screens.put(target, payload)
+        except LoadingScreenValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        refreshed = queue_loading_screen_refresh(target)
+        return {"target": target, "config": config, "refresh_queued": refreshed}
+
+    @app.delete("/api/v1/loading-screens/{device_id}")
+    def reset_loading_screen_setting(
+        device_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        config = loading_screens.reset(selected)
+        store.queue_command(selected, "refresh")
+        return {"target": selected, "config": config, "refresh_queued": [selected]}
+
+    @app.post("/api/v1/loading-screens/{target}/logo")
+    async def upload_loading_screen_logo(
+        target: str,
+        request: Request,
+        x_flexdisplay_filename: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        content_length = _integer(
+            request.headers.get("Content-Length"),
+            0,
+            0,
+            MAX_LOGO_BYTES + 1,
+        )
+        if content_length > MAX_LOGO_BYTES:
+            raise HTTPException(status_code=413, detail="Logo may not exceed 2 MB")
+        content = await request.body()
+        try:
+            config = loading_screens.put_logo(
+                target,
+                content,
+                x_flexdisplay_filename or "logo",
+            )
+        except LoadingScreenValidationError as err:
+            status = 413 if len(content) > MAX_LOGO_BYTES else 400
+            raise HTTPException(status_code=status, detail=str(err)) from err
+        return {
+            "target": target,
+            "config": config,
+            "refresh_queued": queue_loading_screen_refresh(target),
+        }
+
+    @app.delete("/api/v1/loading-screens/{target}/logo")
+    def delete_loading_screen_logo(
+        target: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        return {
+            "target": target,
+            "config": loading_screens.clear_logo(target),
+            "refresh_queued": queue_loading_screen_refresh(target),
+        }
+
+    @app.post("/api/v1/loading-screens/{target}/preview")
+    def preview_loading_screen(
+        target: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> Response:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        model = str(payload.get("model") or "X4").upper()
+        default_width, default_height = (
+            (528, 792) if model == "X3" else (480, 800)
+        )
+        width = _integer(
+            str(payload.get("width") or default_width),
+            default_width,
+            240,
+            1200,
+        )
+        height = _integer(
+            str(payload.get("height") or default_height),
+            default_height,
+            240,
+            1600,
+        )
+        selected_device_id = (
+            str(payload.get("device_id") or "")
+            or (target if target != "default" else f"{model}-PREVIEW")
+        )
+        current = store.get(selected_device_id) or {
+            "device_id": selected_device_id,
+            "name": f"{model} Preview",
+            "area": "Showroom",
+            "model": model,
+            "width": width,
+            "height": height,
+        }
+        configured = settings.device(selected_device_id, width, height, model)
+        profile = _effective_device(configured, current)
+        raw_config = payload.get("config")
+        if raw_config is not None and not isinstance(raw_config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Loading-screen configuration must be an object",
+            )
+        try:
+            content, digest = loading_screens.render(
+                selected_device_id,
+                {
+                    "name": profile.name,
+                    "area": profile.area,
+                    "profile": profile.profile,
+                },
+                width,
+                height,
+                config_override=raw_config,
+                target_override=target,
+            )
+        except LoadingScreenValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return Response(
+            content=content,
+            media_type="image/bmp",
+            headers={"ETag": f'"{digest}"'},
+        )
+
+    @app.get(
+        "/api/v1/devices/{device_id}/loading-screen.bmp",
+        name="device_loading_screen",
+    )
+    def device_loading_screen(
+        device_id: str,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> Response:
+        selected = _device_id(device_id)
+        current = store.get(selected) or {}
+        model = str(
+            current.get("model")
+            or ("X4" if selected.startswith("X4-") else "X3")
+        )
+        default_width, default_height = (
+            (480, 800) if "X4" in model.upper() else (528, 792)
+        )
+        selected_width = _integer(
+            str(width or current.get("width") or default_width),
+            default_width,
+            240,
+            1200,
+        )
+        selected_height = _integer(
+            str(height or current.get("height") or default_height),
+            default_height,
+            240,
+            1600,
+        )
+        configured = settings.device(
+            selected,
+            selected_width,
+            selected_height,
+            model,
+        )
+        profile = _effective_device(configured, current)
+        content, digest = loading_screens.render(
+            selected,
+            {
+                "name": profile.name,
+                "area": profile.area,
+                "profile": profile.profile,
+            },
+            selected_width,
+            selected_height,
+        )
+        return Response(
+            content=content,
+            media_type="image/bmp",
+            headers={
+                "ETag": f'"{digest}"',
+                "X-FlexDisplay-Loading-SHA256": digest,
+            },
+        )
 
     @app.get("/api/v1/photo-frame")
     def photo_frame_library(request: Request) -> dict[str, Any]:
@@ -1590,6 +2235,123 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record = store.get(device_id) or record
             commands = list(record.get("dispatched_commands") or [])
         command_id = str(record.get("dispatched_command_id") or "") if commands else ""
+        override_id = str(record.get("screen_override_id") or "")
+        if override_id:
+            try:
+                override_path, override_item = screen_history.get(device_id, override_id)
+                image = override_path.read_bytes()
+            except (OSError, ScreenHistoryError) as err:
+                store.clear_screen_override(device_id, override_id)
+                store.record_management_result(
+                    device_id,
+                    "resend-screen",
+                    False,
+                    str(err),
+                )
+            else:
+                store.clear_screen_override(device_id, override_id)
+                digest = hashlib.sha256(image).hexdigest()
+                image_unchanged = bool(
+                    x_flexdisplay_image_sha256
+                    and x_flexdisplay_image_sha256 == digest
+                )
+                sleep_plan = _sleep_plan(
+                    profile,
+                    _number(x_flexdisplay_battery_percent),
+                    bool(_boolean(x_flexdisplay_usb_connected)),
+                    image_unchanged,
+                )
+                record = store.touch(
+                    device_id,
+                    {
+                        **sleep_plan,
+                        "last_image_sha256": digest,
+                        "last_screen_refresh_at": datetime.now(UTC).isoformat(
+                            timespec="seconds"
+                        ),
+                        "last_screen_history_id": override_id,
+                        "screen_history_count": len(screen_history.list(device_id)),
+                    },
+                )
+                publish_screen_preview(
+                    device_id,
+                    image,
+                    str(override_item.get("media_type") or "image/png"),
+                )
+                publish_current(device_id)
+                response.headers["ETag"] = f'"{digest}"'
+                response.headers["X-FlexDisplay-Image-SHA256"] = digest
+                response.headers["X-FlexDisplay-Image-Unchanged"] = (
+                    "true" if image_unchanged else "false"
+                )
+                response.headers["X-FlexDisplay-Screen-Restored"] = override_id
+                response.headers["X-FlexDisplay-Sleep-Action"] = sleep_plan[
+                    "sleep_action"
+                ]
+                response.headers["X-FlexDisplay-Sleep-Seconds"] = str(
+                    sleep_plan["sleep_seconds"]
+                )
+                response.headers["X-FlexDisplay-Sleep-Reason"] = sleep_plan[
+                    "sleep_reason"
+                ]
+                response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
+                    profile.manual_wake_grace_seconds
+                )
+                response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
+                if command_id:
+                    response.headers["X-FlexDisplay-Command-ID"] = command_id
+                if settings.provisioning.enabled:
+                    response.headers["X-FlexDisplay-Provisioned"] = "true"
+                    response.headers["X-FlexDisplay-Device-Name"] = _header_value(
+                        profile.name
+                    )
+                    response.headers["X-FlexDisplay-Area"] = _header_value(
+                        profile.area
+                    )
+                    response.headers["X-FlexDisplay-Profile"] = _header_value(
+                        profile.profile
+                    )
+                    response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(
+                        profile.mode
+                    )
+                    response.headers["X-FlexDisplay-Auto-Start"] = (
+                        "true" if profile.auto_start else "false"
+                    )
+                    response.headers["X-FlexDisplay-Live-Mode"] = (
+                        "true" if profile.live_mode else "false"
+                    )
+                if settings.firmware.version:
+                    response.headers["X-FlexDisplay-Latest-Firmware"] = (
+                        settings.firmware.version
+                    )
+                if "install" in commands:
+                    response.headers["X-FlexDisplay-Firmware-URL"] = (
+                        firmware_delivery_url(request)
+                    )
+                    response.headers["X-FlexDisplay-Firmware-SHA256"] = (
+                        settings.firmware.sha256
+                    )
+                    response.headers["X-FlexDisplay-Firmware-Size"] = str(
+                        settings.firmware.size
+                    )
+                    response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
+                        settings.firmware.minimum_battery_percent
+                    )
+                apply_loading_screen_headers(
+                    response,
+                    request,
+                    device_id,
+                    profile,
+                    width,
+                    height,
+                )
+                return Response(
+                    content=image,
+                    media_type=str(
+                        override_item.get("media_type") or "image/png"
+                    ),
+                    headers=dict(response.headers),
+                )
         if profile.mode == "photo_frame":
             direction = "auto"
             if "next" in commands:
@@ -1665,9 +2427,35 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "photo_index": int(photo_headers["X-FlexDisplay-Photo-Index"]),
                     "photo_count": int(photo_headers["X-FlexDisplay-Photo-Count"]),
                     "last_image_sha256": digest,
+                    "last_screen_refresh_at": datetime.now(UTC).isoformat(
+                        timespec="seconds"
+                    ),
+                    "ha_error": False,
                 },
             )
-            mqtt.publish_device(device_id, profile, {**record, "name": profile.name})
+            if settings.screen_history.enabled:
+                captured = screen_history.record(
+                    device_id,
+                    image,
+                    media_type="image/bmp",
+                    metadata={
+                        "mode": "photo_frame",
+                        "profile": profile.profile,
+                        "title": photo_headers["X-FlexDisplay-Photo-Filename"],
+                        "photo_album": photo_headers["X-FlexDisplay-Photo-Album"],
+                    },
+                )
+                record = store.touch(
+                    device_id,
+                    {
+                        "last_screen_history_id": captured["id"],
+                        "screen_history_count": len(
+                            screen_history.list(device_id)
+                        ),
+                    },
+                )
+            publish_screen_preview(device_id, image, "image/bmp")
+            publish_current(device_id)
             for name, value in photo_headers.items():
                 response.headers[name] = _header_value(value)
             response.headers["ETag"] = f'"{digest}"'
@@ -1711,6 +2499,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                     settings.firmware.minimum_battery_percent
                 )
+            apply_loading_screen_headers(
+                response,
+                request,
+                device_id,
+                profile,
+                width,
+                height,
+            )
             return Response(
                 content=image,
                 media_type="image/bmp",
@@ -1814,14 +2610,47 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     datetime.now(UTC) + timedelta(seconds=profile.manual_sleep_seconds)
                 ).isoformat(timespec="seconds"),
             }
-        record = store.touch(device_id, sleep_plan)
+        record = store.touch(
+            device_id,
+            {
+                **sleep_plan,
+                "last_image_sha256": digest,
+                "last_screen_refresh_at": datetime.now(UTC).isoformat(
+                    timespec="seconds"
+                ),
+                "ha_error": bool(ha_error),
+            },
+        )
+        if settings.screen_history.enabled:
+            captured = screen_history.record(
+                device_id,
+                image,
+                media_type="image/png",
+                metadata={
+                    "mode": profile.mode,
+                    "profile": profile.profile,
+                    "title": page.title,
+                    "page_index": page_index,
+                    "page_count": len(pages),
+                    "page_selection": page_selection,
+                },
+            )
+            record = store.touch(
+                device_id,
+                {
+                    "last_screen_history_id": captured["id"],
+                    "screen_history_count": len(screen_history.list(device_id)),
+                },
+            )
+        publish_screen_preview(device_id, image, "image/png")
         state = {
             **record,
             "name": profile.name,
             "last_image_sha256": digest,
             "refresh_interval_seconds": profile.refresh_interval_seconds,
         }
-        mqtt.publish_device(device_id, profile, state)
+        del state
+        publish_current(device_id)
         response.headers["ETag"] = f'"{digest}"'
         response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
         response.headers["X-FlexDisplay-Image-SHA256"] = digest
@@ -1860,6 +2689,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                 settings.firmware.minimum_battery_percent
             )
+        apply_loading_screen_headers(
+            response,
+            request,
+            device_id,
+            profile,
+            width,
+            height,
+        )
         return Response(content=image, media_type="image/png", headers=dict(response.headers))
 
     return app

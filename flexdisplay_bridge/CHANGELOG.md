@@ -1,5 +1,43 @@
 # Changelog
 
+## 0.21.0
+
+- Added a Branded Fetch Screen designer to Dashboard Studio with fleet-default
+  and per-device designs, exact X3/X4 previews, logo uploads, four layouts, and
+  device, owner, area, and profile tokens.
+- Added `always`, manual-wake, USB-only, and disabled display policies.
+- The Bridge renders an exact one-bit BMP and advertises its URL and SHA-256 in
+  the normal dashboard response. Firmware downloads it only when the design
+  changes, validates it, and keeps it on the SD card for instant offline use.
+- Added an atomic device cache update with checksum, BMP, and panel-dimension
+  validation plus automatic fallback to the built-in fetching message.
+- Bundled shared runtime-detected X3/X4 firmware `0.21.0`.
+- Made packaged firmware option migration repair mixed release metadata, such
+  as an old advertised version paired with a newer packaged URL and checksum,
+  while preserving genuinely custom manifests.
+- Fixed Home Assistant camera and image imports through the Supervisor Core
+  API proxy so signed `/api/camera_proxy` paths retain the required `/core`
+  prefix instead of returning HTTP 403.
+
+## 0.20.0
+
+- Added an App-only Home Assistant entity path using full MQTT Discovery for
+  sensors, binary sensors, buttons, switches, numbers, selects, update
+  controls, text/timezone settings, and physical-button events.
+- Added the `home_assistant_entity_source` migration guard. Existing installs
+  default to `hacs`, `mqtt` enables the App-only device, and `both` is reserved
+  for short migration testing.
+- Added a Fleet Health workspace with power, battery, Wi-Fi, firmware,
+  dashboard, next-wake, and actionable problem states.
+- Added bounded, durable X3/X4 screen history with current-screen previews and
+  exact one-shot resend from either the API or Fleet Health.
+- Added a retained MQTT Image entity for the current e-paper screen and native
+  firmware-update progress in the MQTT Update entity.
+- Added automatic release of stale OTA install commands after a configurable
+  timeout while preserving failure and rollout audit evidence.
+- Existing shared X3/X4 firmware `0.19.0` remains compatible; this release does
+  not require a USB reflash.
+
 ## 0.19.0
 
 - Added Home Assistant controls to cancel active commands, retry failed
