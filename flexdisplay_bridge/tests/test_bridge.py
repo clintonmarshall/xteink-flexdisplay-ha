@@ -2555,6 +2555,53 @@ def test_rollout_reset_does_not_bypass_usb_canary_gate(tmp_path: Path) -> None:
         assert "requires USB power" in blocked.json()["detail"]
 
 
+def test_install_acknowledgement_replaces_stale_verification_metadata(
+    tmp_path: Path,
+) -> None:
+    store = DeviceStore(tmp_path / "state.json")
+    device_id = "X3-ACK001"
+    target = "1.4.1-flexdisplay.0.23.0"
+    stale_verified_at = "2026-01-01T00:00:00+00:00"
+    store.touch(
+        device_id,
+        {
+            "firmware": "1.4.1-flexdisplay.0.22.0",
+            "sd_ready": True,
+            "usb_connected": True,
+            "firmware_verified_at": stale_verified_at,
+            "firmware_verification_method": "usb_recovery",
+        },
+    )
+    store.reset_firmware_rollout(target, canary_required=True)
+    store.queue_firmware_install(
+        device_id,
+        target,
+        canary_required=True,
+        max_parallel=1,
+    )
+    assert store.consume_commands(device_id) == ["install"]
+    dispatched = store.get(device_id)
+    assert dispatched is not None
+    command_id = dispatched["dispatched_command_id"]
+
+    store.touch(device_id, {"firmware": target})
+    assert store.acknowledge(device_id, "install:complete", command_id) is True
+
+    verified = store.get(device_id)
+    assert verified is not None
+    assert verified["firmware_update_status"] == "verified"
+    assert verified["firmware_verified_at"] != stale_verified_at
+    assert verified["firmware_verification_method"] == "device_checkin"
+    assert (
+        verified["command_history"][-1]["verification_method"]
+        == "device_checkin"
+    )
+    rollout = store.firmware_rollout()
+    assert rollout["status"] == "canary_verified"
+    assert rollout["last_verified_at"] == verified["firmware_verified_at"]
+    assert rollout["last_verification_method"] == "device_checkin"
+
+
 def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> None:
     firmware = FirmwareConfig(
         version="1.4.1-flexdisplay.0.13.0",
