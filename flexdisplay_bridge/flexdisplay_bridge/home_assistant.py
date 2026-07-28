@@ -47,6 +47,22 @@ class HomeAssistantClient:
         results: list[EntityState] = []
         error = ""
         for entity in selected_entities:
+            if entity.source == "static":
+                results.append(
+                    EntityState(
+                        entity.entity_id,
+                        entity.label,
+                        entity.value,
+                        entity.unit,
+                        True,
+                        entity.icon,
+                        entity.style,
+                        entity.minimum,
+                        entity.maximum,
+                        image_fit=entity.image_fit,
+                    )
+                )
+                continue
             # device.* values are synthetic FlexDisplay telemetry. They are
             # resolved by dashboards.py and must never be requested from HA.
             if entity.entity_id.startswith("device."):

@@ -17,7 +17,8 @@ from .config import (
 
 PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
 LAYOUTS = {"auto", "single", "rows", "columns", "grid"}
-TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image"}
+TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image", "name_card"}
+TILE_SOURCES = {"home_assistant", "static"}
 IMAGE_FITS = {"cover", "contain"}
 ICONS = {
     "auto",
@@ -56,6 +57,11 @@ class DashboardValidationError(ValueError):
 def _bounded_text(value: Any, fallback: str, maximum: int) -> str:
     selected = str(value or fallback).replace("\r", " ").replace("\n", " ").strip()
     return selected[:maximum] or fallback
+
+
+def _bounded_value(value: Any, maximum: int = 1024) -> str:
+    selected = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return selected[:maximum]
 
 
 def _number(value: Any, fallback: float) -> float:
@@ -164,19 +170,42 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                     f"Tile {tile_index + 1} on page {page_index + 1} must be an object"
                 )
             style = str(raw_entity.get("style") or "value")
+            source = str(raw_entity.get("source") or "home_assistant")
             icon = str(raw_entity.get("icon") or "auto")
             if style not in TILE_STYLES:
                 raise DashboardValidationError(
                     f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported style"
                 )
+            if source not in TILE_SOURCES:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported data source"
+                )
+            if style == "name_card" and source != "static":
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} name cards must use fixed content"
+                )
+            if style == "image" and source == "static":
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} images must use an image URL or Home Assistant entity"
+                )
             image_url = _image_url(raw_entity.get("image_url")) if style == "image" else ""
             entity_id = _bounded_text(raw_entity.get("entity_id"), "", 128)
             if image_url and (not entity_id or entity_id == "sensor.example"):
                 entity_id = f"image_url.page_{page_index + 1}_tile_{tile_index + 1}"
+            if source == "static":
+                entity_id = (
+                    entity_id
+                    if entity_id.startswith("static.")
+                    else f"static.page_{page_index + 1}_tile_{tile_index + 1}"
+                )
             if not entity_id or "." not in entity_id:
-                source = "an image URL or Home Assistant entity ID" if style == "image" else "an entity ID"
+                source_hint = (
+                    "an image URL or Home Assistant entity ID"
+                    if style == "image"
+                    else "an entity ID"
+                )
                 raise DashboardValidationError(
-                    f"Tile {tile_index + 1} on page {page_index + 1} needs {source}"
+                    f"Tile {tile_index + 1} on page {page_index + 1} needs {source_hint}"
                 )
             if icon not in ICONS:
                 raise DashboardValidationError(f"{entity_id} has an unsupported icon")
@@ -187,17 +216,24 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
             maximum = _number(raw_entity.get("maximum"), 100.0)
             if maximum <= minimum:
                 raise DashboardValidationError(f"{entity_id} maximum must be greater than minimum")
+            static_value = _bounded_value(raw_entity.get("value"))
+            if source == "static" and not static_value:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} needs fixed content"
+                )
             entities.append(
                 EntityConfig(
                     entity_id=entity_id,
                     label=_bounded_text(raw_entity.get("label"), entity_id, 64),
-                    unit=_bounded_text(raw_entity.get("unit"), "", 16),
+                    unit=_bounded_text(raw_entity.get("unit"), "", 64),
                     icon=icon,
                     style=style,
                     minimum=minimum,
                     maximum=maximum,
                     image_url=image_url,
                     image_fit=image_fit,
+                    source=source,
+                    value=static_value,
                 )
             )
         pages.append(

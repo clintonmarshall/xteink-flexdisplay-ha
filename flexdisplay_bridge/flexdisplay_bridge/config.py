@@ -31,6 +31,8 @@ class EntityConfig:
     maximum: float = 100.0
     image_url: str = ""
     image_fit: str = "cover"
+    source: str = "home_assistant"
+    value: str = ""
 
 
 @dataclass(frozen=True)
@@ -219,6 +221,8 @@ def _entity(value: dict[str, Any]) -> EntityConfig:
         maximum=maximum,
         image_url=str(value.get("image_url") or ""),
         image_fit=str(value.get("image_fit") or "cover"),
+        source=str(value.get("source") or "home_assistant"),
+        value=str(value.get("value") or ""),
     )
 
 

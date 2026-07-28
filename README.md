@@ -42,8 +42,14 @@ gauge, progress bar, 24-hour history sparkline, QR code, or a dithered image
 from a Home Assistant camera/image entity or direct HTTP(S) URL. Use its X3/X4
 selector to inspect the exact device-sized render before assigning the profile.
 Pages can also be scheduled by time or promoted to priority alerts using live
-Home Assistant entity conditions. Five starter templates cover doorbells,
-alarms, daytime energy, running appliances, and weather alerts.
+Home Assistant entity conditions. Six starter templates cover doorbells,
+alarms, daytime energy, running appliances, weather alerts, and ID passes.
+
+Tiles can also use fixed content without a Home Assistant entity. The
+standalone Name Card / ID Pass template combines large identity fields with a
+QR code, while the QR editor converts a typed URL or arbitrary text directly
+into an e-ink-safe code. Fixed-only profiles remain usable when Home Assistant
+entity access is unavailable.
 
 The App uses Home Assistant's internal API token. No long-lived Home Assistant
 token is required in the App options.

@@ -9,6 +9,7 @@ from typing import Any
 
 import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
+from qrcode.exceptions import DataOverflowError
 
 from .home_assistant import EntityState
 
@@ -382,12 +383,25 @@ def _draw_tile_visual(
     width = right - left
     height = bottom - top
     if entity.style == "qr":
-        code = qrcode.QRCode(version=None, box_size=2, border=1)
-        code.add_data(entity.state)
-        code.make(fit=True)
-        qr = code.make_image(fill_color="black", back_color="white").convert("L")
-        size = min(width, height)
-        image.paste(qr.resize((size, size), Image.Resampling.NEAREST), (left + (width - size) // 2, top))
+        try:
+            code = qrcode.QRCode(version=None, box_size=1, border=2)
+            code.add_data(entity.state)
+            code.make(fit=True)
+            qr = code.make_image(fill_color="black", back_color="white").convert("L")
+            size = min(width, height)
+            scale = max(1, size // qr.width)
+            rendered_size = qr.width * scale
+            if rendered_size > size:
+                raise ValueError("QR content is too dense for this tile")
+            image.paste(
+                qr.resize((rendered_size, rendered_size), Image.Resampling.NEAREST),
+                (
+                    left + (width - rendered_size) // 2,
+                    top + (height - rendered_size) // 2,
+                ),
+            )
+        except (DataOverflowError, ValueError):
+            _draw_icon(draw, "alert", box)
         return
 
     fraction = _normalized(entity)
@@ -488,6 +502,105 @@ def _draw_image_tile(
         return False
 
 
+def _draw_name_card(
+    draw: ImageDraw.ImageDraw,
+    entity: EntityState,
+    box: tuple[int, int, int, int],
+) -> None:
+    """Render a standalone, high-contrast identification card."""
+    left, top, right, bottom = box
+    width = right - left
+    height = bottom - top
+    center_x = (left + right) // 2
+    padding = max(14, width // 24)
+
+    badge_font = _font(max(13, width // 31), True)
+    badge = "IDENTIFICATION"
+    badge_width = draw.textbbox((0, 0), badge, font=badge_font)[2]
+    draw.text((center_x - badge_width // 2, top + padding), badge, fill=0, font=badge_font)
+    rule_y = top + padding + max(24, height // 22)
+    draw.line((left + padding, rule_y, right - padding, rule_y), fill=0, width=2)
+
+    portrait_size = min(max(72, width // 4), max(72, height // 4))
+    portrait_top = rule_y + max(12, height // 40)
+    portrait_left = center_x - portrait_size // 2
+    stroke = max(3, portrait_size // 24)
+    draw.ellipse(
+        (
+            portrait_left,
+            portrait_top,
+            portrait_left + portrait_size,
+            portrait_top + portrait_size,
+        ),
+        outline=0,
+        width=stroke,
+    )
+    head_radius = portrait_size // 7
+    draw.ellipse(
+        (
+            center_x - head_radius,
+            portrait_top + portrait_size // 5,
+            center_x + head_radius,
+            portrait_top + portrait_size // 5 + head_radius * 2,
+        ),
+        fill=0,
+    )
+    shoulder_top = portrait_top + portrait_size // 2
+    draw.pieslice(
+        (
+            center_x - portrait_size // 3,
+            shoulder_top,
+            center_x + portrait_size // 3,
+            shoulder_top + portrait_size // 2,
+        ),
+        180,
+        360,
+        fill=0,
+    )
+
+    name_top = portrait_top + portrait_size + max(14, height // 45)
+    name_font, name_lines = _wrap_label(
+        draw,
+        entity.label,
+        width - padding * 2,
+        max(34, width // 10),
+        max(21, width // 18),
+    )
+    name_y = name_top
+    for line in name_lines[:2]:
+        bounds = draw.textbbox((0, 0), line, font=name_font)
+        line_width = bounds[2] - bounds[0]
+        draw.text((center_x - line_width // 2, name_y), line, fill=0, font=name_font)
+        name_y += bounds[3] - bounds[1] + 5
+
+    role = entity.state or "Team member"
+    role_font = _fit(
+        draw,
+        role,
+        width - padding * 2,
+        max(22, width // 17),
+        True,
+        14,
+    )
+    role_bounds = draw.textbbox((0, 0), role, font=role_font)
+    role_width = role_bounds[2] - role_bounds[0]
+    role_y = min(bottom - max(84, height // 7), name_y + max(10, height // 50))
+    draw.text((center_x - role_width // 2, role_y), role, fill=0, font=role_font)
+
+    if entity.unit:
+        detail_font = _fit(
+            draw,
+            entity.unit,
+            width - padding * 2,
+            max(18, width // 23),
+            False,
+            12,
+        )
+        detail_width = draw.textbbox((0, 0), entity.unit, font=detail_font)[2]
+        detail_y = min(bottom - padding - 20, role_y + max(34, height // 18))
+        draw.text((center_x - detail_width // 2, detail_y), entity.unit, fill=0, font=detail_font)
+
+
 class DashboardRenderer:
     def render(
         self,
@@ -562,6 +675,14 @@ class DashboardRenderer:
                     outline=0,
                     width=2,
                 )
+
+                if entity.style == "name_card":
+                    _draw_name_card(
+                        draw,
+                        entity,
+                        (left + 4, top + 4, right - 4, bottom - 4),
+                    )
+                    continue
 
                 if entity.style == "image":
                     inset = 4
@@ -643,7 +764,7 @@ class DashboardRenderer:
                     )
                     label_y += label_bbox[3] - label_bbox[1] + 4
 
-                value = entity.state
+                value = entity.unit or "SCAN ME" if entity.style == "qr" else entity.state
                 if entity.unit and entity.unit not in value:
                     value = f"{value} {entity.unit}"
                 value_font = _fit(draw, value, cell_width - 20, max(52, width // 9), True, 22)
@@ -679,7 +800,17 @@ class DashboardRenderer:
             cursor_x += 28
             draw.text((cursor_x, status_y - 3), f"{rssi} dBm", fill=0, font=status_font)
 
-        connection = "HA ERROR" if ha_error else "HA CONNECTED"
+        uses_home_assistant = any(
+            not entity.entity_id.startswith(("static.", "device.", "image_url."))
+            for entity in values
+        )
+        connection = (
+            "HA ERROR"
+            if ha_error
+            else "HA CONNECTED"
+            if uses_home_assistant
+            else "STANDALONE"
+        )
         connection_font = _fit(draw, connection, width // 3, max(13, width // 34), True, 11)
         connection_width = draw.textbbox((0, 0), connection, font=connection_font)[2]
         badge_left = width - margin - connection_width - 24

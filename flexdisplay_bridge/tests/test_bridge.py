@@ -1413,6 +1413,84 @@ def test_dashboard_studio_uses_searchable_full_catalogue_entity_picker(
     assert 'list="entityOptions"' not in response.text
 
 
+def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    profile = {
+        "pages": [
+            {
+                "title": "ID PASS",
+                "layout": "rows",
+                "entities": [
+                    {
+                        "entity_id": "static.id_card",
+                        "label": "Alex Morgan",
+                        "unit": "LDCS · Visitor 042",
+                        "icon": "home",
+                        "style": "name_card",
+                        "source": "static",
+                        "value": "Showroom Guest",
+                    },
+                    {
+                        "entity_id": "static.id_qr",
+                        "label": "Visitor details",
+                        "unit": "SCAN ME",
+                        "style": "qr",
+                        "source": "static",
+                        "value": "https://example.test/visitor/042",
+                    },
+                ],
+            }
+        ]
+    }
+
+    with TestClient(create_app(config)) as client:
+        studio = client.get("/studio/")
+        assert "Fixed content (no HA entity)" in studio.text
+        assert "Name card / ID pass" in studio.text
+        assert 'id="addQrTile"' in studio.text
+
+        saved = client.put("/api/v1/studio/profiles/visitor", json=profile)
+        assert saved.status_code == 200
+        tiles = saved.json()["profile"]["pages"][0]["entities"]
+        assert tiles[0]["source"] == "static"
+        assert tiles[0]["value"] == "Showroom Guest"
+        assert tiles[1]["value"] == "https://example.test/visitor/042"
+
+        preview = client.post(
+            "/api/v1/studio/preview",
+            json={"model": "X4", "profile": profile, "page_index": 0},
+        )
+        assert preview.status_code == 200
+        assert preview.headers["x-flexdisplay-preview-ha-error"] == "false"
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.size == (480, 800)
+            assert image.mode == "1"
+            assert image.getextrema() == (0, 255)
+
+
+def test_static_entities_do_not_call_home_assistant() -> None:
+    client = HomeAssistantClient(HomeAssistantConfig(token=""))
+    states, error = client.fetch(
+        (
+            EntityConfig(
+                "static.message",
+                "Welcome",
+                source="static",
+                value="Clinton Marshall",
+            ),
+        )
+    )
+
+    assert error == ""
+    assert states[0].available is True
+    assert states[0].state == "Clinton Marshall"
+
+
 def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
     tmp_path: Path,
 ) -> None:
@@ -1754,6 +1832,25 @@ def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
             },
         )
         assert embedded_credentials.status_code == 400
+        dynamic_name_card = client.put(
+            "/api/v1/studio/profiles/wall",
+            json={
+                "pages": [
+                    {
+                        "title": "Pass",
+                        "entities": [
+                            {
+                                "entity_id": "sensor.person",
+                                "label": "Person",
+                                "style": "name_card",
+                                "source": "home_assistant",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert dynamic_name_card.status_code == 400
 
 
 def test_dashboard_studio_accepts_an_external_image_without_an_ha_entity(tmp_path: Path) -> None:
@@ -1932,12 +2029,12 @@ def test_state_aware_device_alert_restores_default_playlist(tmp_path: Path) -> N
 
 def test_dashboard_renderer_supports_visual_tile_styles() -> None:
     renderer = DashboardRenderer()
-    for style in ("value", "gauge", "progress", "history", "qr"):
+    for style in ("value", "gauge", "progress", "history", "qr", "name_card"):
         entity = EntityState(
             "sensor.visual",
             style.title(),
-            "https://example.test" if style == "qr" else "64",
-            "" if style == "qr" else "%",
+            "https://example.test" if style == "qr" else "Engineer" if style == "name_card" else "64",
+            "LDCS" if style == "name_card" else "" if style == "qr" else "%",
             True,
             "battery",
             style,
