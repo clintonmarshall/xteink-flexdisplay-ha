@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.23.1
+
+- Fixed the first-canary USB safety gate after a rollout reset. A reset rollout
+  now continues to require positive device-reported USB power before accepting
+  its first firmware installation.
+- Added a regression test that verifies a fully charged, SD-ready device cannot
+  bypass the USB canary requirement after the previous rollout is archived.
+
 ## 0.23.0
 
 - Added capability-negotiated zero-byte responses when a device confirms that

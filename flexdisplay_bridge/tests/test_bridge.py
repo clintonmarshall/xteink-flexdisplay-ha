@@ -2516,6 +2516,45 @@ def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
         assert "Rollout paused after failure on X4-FLEET01" in paused.json()["detail"]
 
 
+def test_rollout_reset_does_not_bypass_usb_canary_gate(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.23.0",
+        url="https://example.test/firmware.bin",
+        sha256="ef" * 32,
+        size=5_500_000,
+        minimum_battery_percent=40,
+        canary_required=True,
+        require_usb_for_canary=True,
+        max_parallel=1,
+    )
+    config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-NOUSB1",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.22.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "false",
+                "X-FlexDisplay-Battery-Percent": "100",
+            },
+        )
+        reset = client.post("/api/v1/firmware/rollout/reset")
+        assert reset.status_code == 200
+        assert reset.json()["rollout"]["status"] == "awaiting_canary"
+
+        record = client.get("/api/v1/devices/X3-NOUSB1").json()
+        assert record["firmware_install_ready"] is False
+        assert (
+            "The first canary installation requires USB power"
+            in record["firmware_install_blockers"]
+        )
+
+        blocked = client.post("/api/v1/devices/X3-NOUSB1/commands/install")
+        assert blocked.status_code == 409
+        assert "requires USB power" in blocked.json()["detail"]
+
+
 def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> None:
     firmware = FirmwareConfig(
         version="1.4.1-flexdisplay.0.13.0",

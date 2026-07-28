@@ -170,6 +170,14 @@ def _firmware_install_blockers(
             and canary_id != record.get("device_id")
         ):
             blockers.append(f"Waiting for canary {canary_id} to boot and acknowledge")
+        elif (
+            firmware.canary_required
+            and firmware.require_usb_for_canary
+            and status == "awaiting_canary"
+            and not canary_id
+            and not usb_connected
+        ):
+            blockers.append("The first canary installation requires USB power")
     elif firmware.canary_required and firmware.require_usb_for_canary and not usb_connected:
         blockers.append("The first canary installation requires USB power")
 
