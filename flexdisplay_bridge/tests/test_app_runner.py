@@ -40,6 +40,15 @@ def test_firmware_options_migrates_exact_packaged_release() -> None:
     }
 
 
+def test_firmware_options_repairs_mixed_packaged_release_metadata() -> None:
+    options = dict(LEGACY_PACKAGED_FIRMWARE[0])
+    options["firmware_version"] = LEGACY_PACKAGED_FIRMWARE[1]["firmware_version"]
+
+    assert firmware_options(options) == {
+        name: str(value) for name, value in DEFAULT_FIRMWARE.items()
+    }
+
+
 def test_firmware_options_preserves_custom_manifest() -> None:
     options = dict(LEGACY_PACKAGED_FIRMWARE[0])
     options["firmware_url"] = "https://example.test/custom.bin"

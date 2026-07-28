@@ -45,6 +45,13 @@ workspace and a bounded history of exact rendered X3/X4 screens. Existing
 HACS users remain on the duplicate-safe `hacs` entity source until they
 explicitly migrate. Shared firmware `0.19.0` remains compatible.
 
+FlexDisplay `0.21.0` adds **Branded Fetch Screens**. Dashboard Studio can
+create a fleet-default or per-device loading screen with a logo, headline,
+message, owner, device name, and area. The exact X3/X4 one-bit preview is
+cached on the device SD card after its next successful check-in, so showing it
+adds no network request to later dashboard fetches. Policies can show it on
+every fetch, only after a manual wake, only on USB power, or never.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

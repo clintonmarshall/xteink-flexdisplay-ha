@@ -109,6 +109,124 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert record["assigned_name"] == "Test X4"
 
 
+def test_v021_screen_advertises_cached_branded_fetch_asset(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        devices={
+            "X4-BRAND01": DeviceConfig(
+                name="Showroom Display",
+                area="Melbourne",
+                model="X4",
+                width=480,
+                height=800,
+            )
+        },
+    )
+    with TestClient(create_app(config)) as client:
+        saved = client.put(
+            "/api/v1/loading-screens/X4-BRAND01",
+            json={
+                "enabled": True,
+                "policy": "manual",
+                "layout": "identity",
+                "headline": "Welcome to {area}",
+                "message": "Updating {device_name}",
+                "owner_name": "LDCS",
+                "show_device_name": True,
+                "show_owner": True,
+                "show_area": True,
+            },
+        )
+        assert saved.status_code == 200
+
+        screen = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-BRAND01",
+                "X-FlexDisplay-Width": "480",
+                "X-FlexDisplay-Height": "800",
+            },
+        )
+        assert screen.status_code == 200
+        assert screen.headers["x-flexdisplay-loading-enabled"] == "true"
+        assert screen.headers["x-flexdisplay-loading-policy"] == "manual"
+        assert len(screen.headers["x-flexdisplay-loading-sha256"]) == 64
+        assert screen.headers["x-flexdisplay-loading-url"].endswith(
+            "/api/v1/devices/X4-BRAND01/loading-screen.bmp"
+        )
+
+        asset = client.get("/api/v1/devices/X4-BRAND01/loading-screen.bmp")
+        assert asset.status_code == 200
+        assert asset.headers["content-type"] == "image/bmp"
+        assert (
+            hashlib.sha256(asset.content).hexdigest()
+            == screen.headers["x-flexdisplay-loading-sha256"]
+        )
+        with Image.open(io.BytesIO(asset.content)) as image:
+            assert image.size == (480, 800)
+            assert image.mode == "1"
+
+
+def test_v021_loading_screen_studio_upload_preview_and_inheritance(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        devices={"X3-BRAND01": DeviceConfig(name="Kitchen", model="X3")},
+    )
+    logo = Image.new("RGB", (220, 80), "white")
+    logo_output = io.BytesIO()
+    logo.save(logo_output, format="PNG")
+
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-BRAND01"},
+        )
+        uploaded = client.post(
+            "/api/v1/loading-screens/default/logo",
+            content=logo_output.getvalue(),
+            headers={"X-FlexDisplay-Filename": "company-logo.png"},
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["config"]["logo_filename"] == "company-logo.png"
+        assert uploaded.json()["refresh_queued"] == ["X3-BRAND01"]
+
+        inherited = client.get("/api/v1/loading-screens/X3-BRAND01").json()
+        assert inherited["config"]["inherited"] is True
+        assert inherited["config"]["logo_sha256"]
+
+        preview = client.post(
+            "/api/v1/loading-screens/default/preview",
+            json={
+                "model": "X3",
+                "device_id": "X3-BRAND01",
+                "config": {
+                    **inherited["config"],
+                    "headline": "Hello {device_name}",
+                    "message": "Owned by {owner}",
+                    "owner_name": "Facilities",
+                    "show_owner": True,
+                },
+            },
+        )
+        assert preview.status_code == 200
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.size == (528, 792)
+
+        overridden = client.put(
+            "/api/v1/loading-screens/X3-BRAND01",
+            json={"headline": "Device override", "message": "Please wait"},
+        )
+        assert overridden.status_code == 200
+        assert overridden.json()["config"]["inherited"] is False
+        reset = client.delete("/api/v1/loading-screens/X3-BRAND01")
+        assert reset.status_code == 200
+        assert reset.json()["config"]["inherited"] is True
+
+
 def test_v020_screen_history_can_preview_and_resend_exact_image(tmp_path: Path) -> None:
     profile = DashboardProfileConfig(
         name="two-pages",

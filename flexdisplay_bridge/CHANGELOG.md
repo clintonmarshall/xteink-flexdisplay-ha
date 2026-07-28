@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.21.0
+
+- Added a Branded Fetch Screen designer to Dashboard Studio with fleet-default
+  and per-device designs, exact X3/X4 previews, logo uploads, four layouts, and
+  device, owner, area, and profile tokens.
+- Added `always`, manual-wake, USB-only, and disabled display policies.
+- The Bridge renders an exact one-bit BMP and advertises its URL and SHA-256 in
+  the normal dashboard response. Firmware downloads it only when the design
+  changes, validates it, and keeps it on the SD card for instant offline use.
+- Added an atomic device cache update with checksum, BMP, and panel-dimension
+  validation plus automatic fallback to the built-in fetching message.
+- Bundled shared runtime-detected X3/X4 firmware `0.21.0`.
+- Made packaged firmware option migration repair mixed release metadata, such
+  as an old advertised version paired with a newer packaged URL and checksum,
+  while preserving genuinely custom manifests.
+
 ## 0.20.0
 
 - Added an App-only Home Assistant entity path using full MQTT Discovery for

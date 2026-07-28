@@ -35,6 +35,11 @@ from .dashboard_store import (
 from .dashboards import build_dashboard_pages, select_active_pages
 from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
 from .home_assistant import HomeAssistantClient
+from .loading_screen import (
+    MAX_LOGO_BYTES,
+    LoadingScreenStore,
+    LoadingScreenValidationError,
+)
 from .mqtt_service import MqttService
 from .photo_frame import (
     MAX_IMAGE_BYTES,
@@ -721,6 +726,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     photo_frames = PhotoFrameMediaStore(
         settings.state_path.with_name("flexdisplay-photo-frame.json")
     )
+    loading_screens = LoadingScreenStore(
+        settings.state_path.with_name("flexdisplay-loading-screens.json")
+    )
     firmware_mirror = FirmwareMirror(
         settings.state_path.with_name("firmware-cache")
     )
@@ -972,6 +980,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.store = store
     app.state.dashboards = dashboards
     app.state.photo_frames = photo_frames
+    app.state.loading_screens = loading_screens
     app.state.firmware_mirror = firmware_mirror
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
@@ -980,6 +989,44 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if settings.firmware.mirror_enabled:
             return str(request.url_for("firmware_binary"))
         return settings.firmware.url
+
+    def apply_loading_screen_headers(
+        response: Response,
+        request: Request,
+        device_id: str,
+        profile: DeviceConfig,
+        width: int,
+        height: int,
+    ) -> None:
+        config = loading_screens.effective(device_id)
+        _, digest = loading_screens.render(
+            device_id,
+            {
+                "name": profile.name,
+                "area": profile.area,
+                "profile": profile.profile,
+            },
+            width,
+            height,
+        )
+        response.headers["X-FlexDisplay-Loading-Enabled"] = (
+            "true" if config["enabled"] else "false"
+        )
+        response.headers["X-FlexDisplay-Loading-Policy"] = str(config["policy"])
+        response.headers["X-FlexDisplay-Loading-SHA256"] = digest
+        response.headers["X-FlexDisplay-Loading-URL"] = str(
+            request.url_for("device_loading_screen", device_id=device_id)
+        )
+
+    def queue_loading_screen_refresh(target: str) -> list[str]:
+        refreshed: list[str] = []
+        for current in store.all():
+            device_id = str(current.get("device_id") or "")
+            if target != "default" and device_id != target:
+                continue
+            store.queue_command(device_id, "refresh")
+            refreshed.append(device_id)
+        return refreshed
 
     @app.middleware("http")
     async def normalize_ingress_path(request: Request, call_next):
@@ -1336,6 +1383,214 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         services, error = ha.service_catalog()
         return {"services": services, "error": error}
+
+    @app.get("/api/v1/loading-screens")
+    def loading_screen_settings(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return loading_screens.payload()
+
+    @app.get("/api/v1/loading-screens/{target}")
+    def loading_screen_setting(target: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        return {"target": target, "config": loading_screens.effective(target)}
+
+    @app.put("/api/v1/loading-screens/{target}")
+    def save_loading_screen_setting(
+        target: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        try:
+            config = loading_screens.put(target, payload)
+        except LoadingScreenValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        refreshed = queue_loading_screen_refresh(target)
+        return {"target": target, "config": config, "refresh_queued": refreshed}
+
+    @app.delete("/api/v1/loading-screens/{device_id}")
+    def reset_loading_screen_setting(
+        device_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        config = loading_screens.reset(selected)
+        store.queue_command(selected, "refresh")
+        return {"target": selected, "config": config, "refresh_queued": [selected]}
+
+    @app.post("/api/v1/loading-screens/{target}/logo")
+    async def upload_loading_screen_logo(
+        target: str,
+        request: Request,
+        x_flexdisplay_filename: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        content_length = _integer(
+            request.headers.get("Content-Length"),
+            0,
+            0,
+            MAX_LOGO_BYTES + 1,
+        )
+        if content_length > MAX_LOGO_BYTES:
+            raise HTTPException(status_code=413, detail="Logo may not exceed 2 MB")
+        content = await request.body()
+        try:
+            config = loading_screens.put_logo(
+                target,
+                content,
+                x_flexdisplay_filename or "logo",
+            )
+        except LoadingScreenValidationError as err:
+            status = 413 if len(content) > MAX_LOGO_BYTES else 400
+            raise HTTPException(status_code=status, detail=str(err)) from err
+        return {
+            "target": target,
+            "config": config,
+            "refresh_queued": queue_loading_screen_refresh(target),
+        }
+
+    @app.delete("/api/v1/loading-screens/{target}/logo")
+    def delete_loading_screen_logo(
+        target: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        return {
+            "target": target,
+            "config": loading_screens.clear_logo(target),
+            "refresh_queued": queue_loading_screen_refresh(target),
+        }
+
+    @app.post("/api/v1/loading-screens/{target}/preview")
+    def preview_loading_screen(
+        target: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> Response:
+        authorize(request)
+        if target != "default":
+            _device_id(target)
+        model = str(payload.get("model") or "X4").upper()
+        default_width, default_height = (
+            (528, 792) if model == "X3" else (480, 800)
+        )
+        width = _integer(
+            str(payload.get("width") or default_width),
+            default_width,
+            240,
+            1200,
+        )
+        height = _integer(
+            str(payload.get("height") or default_height),
+            default_height,
+            240,
+            1600,
+        )
+        selected_device_id = (
+            str(payload.get("device_id") or "")
+            or (target if target != "default" else f"{model}-PREVIEW")
+        )
+        current = store.get(selected_device_id) or {
+            "device_id": selected_device_id,
+            "name": f"{model} Preview",
+            "area": "Showroom",
+            "model": model,
+            "width": width,
+            "height": height,
+        }
+        configured = settings.device(selected_device_id, width, height, model)
+        profile = _effective_device(configured, current)
+        raw_config = payload.get("config")
+        if raw_config is not None and not isinstance(raw_config, dict):
+            raise HTTPException(
+                status_code=400,
+                detail="Loading-screen configuration must be an object",
+            )
+        try:
+            content, digest = loading_screens.render(
+                selected_device_id,
+                {
+                    "name": profile.name,
+                    "area": profile.area,
+                    "profile": profile.profile,
+                },
+                width,
+                height,
+                config_override=raw_config,
+                target_override=target,
+            )
+        except LoadingScreenValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return Response(
+            content=content,
+            media_type="image/bmp",
+            headers={"ETag": f'"{digest}"'},
+        )
+
+    @app.get(
+        "/api/v1/devices/{device_id}/loading-screen.bmp",
+        name="device_loading_screen",
+    )
+    def device_loading_screen(
+        device_id: str,
+        width: int | None = None,
+        height: int | None = None,
+    ) -> Response:
+        selected = _device_id(device_id)
+        current = store.get(selected) or {}
+        model = str(
+            current.get("model")
+            or ("X4" if selected.startswith("X4-") else "X3")
+        )
+        default_width, default_height = (
+            (480, 800) if "X4" in model.upper() else (528, 792)
+        )
+        selected_width = _integer(
+            str(width or current.get("width") or default_width),
+            default_width,
+            240,
+            1200,
+        )
+        selected_height = _integer(
+            str(height or current.get("height") or default_height),
+            default_height,
+            240,
+            1600,
+        )
+        configured = settings.device(
+            selected,
+            selected_width,
+            selected_height,
+            model,
+        )
+        profile = _effective_device(configured, current)
+        content, digest = loading_screens.render(
+            selected,
+            {
+                "name": profile.name,
+                "area": profile.area,
+                "profile": profile.profile,
+            },
+            selected_width,
+            selected_height,
+        )
+        return Response(
+            content=content,
+            media_type="image/bmp",
+            headers={
+                "ETag": f'"{digest}"',
+                "X-FlexDisplay-Loading-SHA256": digest,
+            },
+        )
 
     @app.get("/api/v1/photo-frame")
     def photo_frame_library(request: Request) -> dict[str, Any]:
@@ -2082,6 +2337,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                         settings.firmware.minimum_battery_percent
                     )
+                apply_loading_screen_headers(
+                    response,
+                    request,
+                    device_id,
+                    profile,
+                    width,
+                    height,
+                )
                 return Response(
                     content=image,
                     media_type=str(
@@ -2236,6 +2499,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                     settings.firmware.minimum_battery_percent
                 )
+            apply_loading_screen_headers(
+                response,
+                request,
+                device_id,
+                profile,
+                width,
+                height,
+            )
             return Response(
                 content=image,
                 media_type="image/bmp",
@@ -2418,6 +2689,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                 settings.firmware.minimum_battery_percent
             )
+        apply_loading_screen_headers(
+            response,
+            request,
+            device_id,
+            profile,
+            width,
+            height,
+        )
         return Response(content=image, media_type="image/png", headers=dict(response.headers))
 
     return app

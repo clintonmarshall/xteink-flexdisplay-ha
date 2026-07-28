@@ -12,15 +12,24 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.19.0",
+    "firmware_version": "1.4.1-flexdisplay.0.21.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/firmware-v0.19.0/firmware.bin"
+        "releases/download/firmware-v0.21.0/firmware.bin"
     ),
-    "firmware_sha256": "812e07bfd9b7c0d67f1446609d2040b0ca876ba94c04ede76f7f290e072af3fb",
-    "firmware_size": 5_489_488,
+    "firmware_sha256": "06b09c2038777d27a01611f4c7d2fa95a2e07bf89a3360b597e036a7c18e6b2a",
+    "firmware_size": 5_492_960,
 }
 LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.4.1-flexdisplay.0.19.0",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+            "releases/download/firmware-v0.19.0/firmware.bin"
+        ),
+        "firmware_sha256": "812e07bfd9b7c0d67f1446609d2040b0ca876ba94c04ede76f7f290e072af3fb",
+        "firmware_size": 5_489_488,
+    },
     {
         "firmware_version": "1.4.1-flexdisplay.0.18.0",
         "firmware_url": (
@@ -77,10 +86,17 @@ def firmware_option(options: dict, name: str) -> str:
 
 
 def firmware_options(options: dict) -> dict[str, str]:
-    """Migrate exact packaged manifests while preserving custom overrides."""
-    for legacy in LEGACY_PACKAGED_FIRMWARE:
-        if all(str(options.get(name, "")) == str(value) for name, value in legacy.items()):
-            return {name: str(value) for name, value in DEFAULT_FIRMWARE.items()}
+    """Migrate packaged or mixed-packaged manifests while preserving custom overrides."""
+    packaged = (DEFAULT_FIRMWARE, *LEGACY_PACKAGED_FIRMWARE)
+    if all(
+        str(options.get(name, "")) in {
+            "",
+            "0" if name == "firmware_size" else "",
+            *(str(release[name]) for release in packaged),
+        }
+        for name in DEFAULT_FIRMWARE
+    ):
+        return {name: str(value) for name, value in DEFAULT_FIRMWARE.items()}
     return {name: firmware_option(options, name) for name in DEFAULT_FIRMWARE}
 
 

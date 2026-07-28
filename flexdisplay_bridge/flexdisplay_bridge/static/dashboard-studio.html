@@ -266,6 +266,12 @@
       display: grid; gap: 8px; padding: 14px; border: 1px dashed #607383;
       border-radius: 10px; background: rgba(103,214,193,.04); text-align: center;
     }
+    .loading-shell { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 22px; padding: 20px; }
+    .loading-controls { display: grid; align-content: start; gap: 12px; }
+    .loading-preview-shell { display: grid; place-items: center; min-height: 580px; padding: 22px; border-radius: 14px; background: #0c141b; }
+    .loading-preview { display: block; width: min(100%, 390px); max-height: 680px; object-fit: contain; background: white; box-shadow: var(--shadow); }
+    .check-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
+    .check-row input { width: auto; min-height: auto; }
     .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
     @media (max-width: 1120px) {
       .app { grid-template-columns: 230px 1fr; }
@@ -280,6 +286,7 @@
       .canvas-shell { min-height: 520px; padding: 18px; }
       .tile-list { grid-template-columns: 1fr; }
       .library-shell { grid-template-columns: 1fr; }
+      .loading-shell { grid-template-columns: 1fr; }
       .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
       .fleet-grid { grid-template-columns: 1fr; padding: 14px; }
     }
@@ -333,6 +340,12 @@
         <div class="section-head"><h2>Photo Frame</h2><span class="rule-badge">v0.18</span></div>
         <button id="openPhotoLibrary" class="primary" style="width:100%">Open media library</button>
         <p class="small muted" style="margin:10px 0 0">Upload JPEG, PNG, WebP, or BMP images and preview their exact X3/X4 e-paper conversion.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Fetch screen</h2><span class="rule-badge">v0.21</span></div>
+        <button id="openLoadingScreen" class="primary" style="width:100%">Design fetch screen</button>
+        <p class="small muted" style="margin:10px 0 0">Show a locally cached logo, message, owner, or device identity while a dashboard updates.</p>
       </div>
     </aside>
 
@@ -634,6 +647,70 @@
       <div class="empty">Loading fleet health…</div>
     </div>
   </dialog>
+  <dialog id="loadingScreenDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Branded Fetch Screen v0.21</div><h2 style="font-size:20px">Loading-screen designer</h2></div>
+      <button id="closeLoadingScreen" class="icon" title="Close">×</button>
+    </div>
+    <div class="loading-shell">
+      <div class="loading-controls">
+        <label>Apply design to<select id="loadingTarget"></select></label>
+        <div id="loadingInheritance" class="small muted"></div>
+        <button id="resetLoadingScreen" hidden>Use fleet default</button>
+        <div class="field-grid">
+          <label>Display
+            <select id="loadingEnabled">
+              <option value="true">Enabled</option>
+              <option value="false">Disabled</option>
+            </select>
+          </label>
+          <label>When to show
+            <select id="loadingPolicy">
+              <option value="always">Every fetch</option>
+              <option value="manual">Manual wakes only</option>
+              <option value="usb">Only on USB power</option>
+              <option value="never">Never</option>
+            </select>
+          </label>
+        </div>
+        <label>Layout
+          <select id="loadingLayout">
+            <option value="centered">Centered brand</option>
+            <option value="logo">Large logo</option>
+            <option value="identity">Device identity</option>
+            <option value="minimal">Minimal status</option>
+          </select>
+        </label>
+        <label>Headline<input id="loadingHeadline" maxlength="80" placeholder="Updating dashboard"></label>
+        <label>Message<input id="loadingMessage" maxlength="120" placeholder="Fetching the latest information"></label>
+        <label>Owner name<input id="loadingOwner" maxlength="80" placeholder="Optional owner or department"></label>
+        <div class="field-grid">
+          <label class="check-row"><input id="loadingShowDevice" type="checkbox">Device name</label>
+          <label class="check-row"><input id="loadingShowOwner" type="checkbox">Owner name</label>
+          <label class="check-row"><input id="loadingShowArea" type="checkbox">Area/location</label>
+        </div>
+        <div class="upload-drop">
+          <strong>Company logo or icon</strong>
+          <span id="loadingLogoName" class="small muted">No custom logo · built-in sync icon will be used</span>
+          <input id="loadingLogoUpload" type="file" accept="image/jpeg,image/png,image/webp,image/bmp">
+          <button id="removeLoadingLogo" class="danger">Remove logo</button>
+        </div>
+        <p class="small muted">Tokens: {device_name}, {device_id}, {owner}, {area}, {profile}</p>
+        <div class="field-grid">
+          <label>Preview model
+            <select id="loadingModel">
+              <option value="X3">X3 · 528 × 792</option>
+              <option value="X4">X4 · 480 × 800</option>
+            </select>
+          </label>
+          <button id="saveLoadingScreen" class="primary" style="align-self:end">Save and refresh</button>
+        </div>
+      </div>
+      <div class="loading-preview-shell">
+        <img id="loadingPreview" class="loading-preview" alt="Branded fetch-screen preview">
+      </div>
+    </div>
+  </dialog>
   <div id="toast" role="status"></div>
 
   <script>
@@ -652,6 +729,9 @@
       previewRequest: 0,
       photoLibrary: {albums: {}, assignments: {}},
       photoPreviewUrls: [],
+      loadingScreens: {default: {}, devices: {}},
+      loadingPreviewUrl: "",
+      loadingPreviewTimer: null,
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1182,6 +1262,161 @@
           body: {album_id: selectedPhotoAlbumId()},
         });
         toast(`Assigned ${selectedPhotoAlbumId()} to ${deviceId}.`);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function loadingTarget() {
+      return $("#loadingTarget").value || "default";
+    }
+
+    function loadingDraft() {
+      return {
+        enabled: $("#loadingEnabled").value === "true",
+        policy: $("#loadingPolicy").value,
+        layout: $("#loadingLayout").value,
+        headline: $("#loadingHeadline").value.trim(),
+        message: $("#loadingMessage").value.trim(),
+        owner_name: $("#loadingOwner").value.trim(),
+        show_device_name: $("#loadingShowDevice").checked,
+        show_owner: $("#loadingShowOwner").checked,
+        show_area: $("#loadingShowArea").checked,
+      };
+    }
+
+    async function openLoadingScreen() {
+      $("#loadingScreenDialog").showModal();
+      await loadLoadingScreens();
+    }
+
+    async function loadLoadingScreens(preferredTarget = "") {
+      try {
+        const response = await api("loading-screens");
+        state.loadingScreens = await response.json();
+        const previous = preferredTarget || $("#loadingTarget").value || "default";
+        $("#loadingTarget").innerHTML = [
+          '<option value="default">Fleet default</option>',
+          ...state.devices.map((device) =>
+            `<option value="${escapeHtml(device.device_id)}">${escapeHtml(device.name || device.device_id)} · ${escapeHtml(device.model || "X3")}</option>`
+          ),
+        ].join("");
+        $("#loadingTarget").value = [...$("#loadingTarget").options].some((option) => option.value === previous)
+          ? previous
+          : "default";
+        renderLoadingScreenForm();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderLoadingScreenForm() {
+      const target = loadingTarget();
+      const override = target === "default" ? state.loadingScreens.default : state.loadingScreens.devices?.[target];
+      const config = clone(override || state.loadingScreens.default || {});
+      const inherited = target !== "default" && !override;
+      $("#loadingEnabled").value = String(config.enabled ?? true);
+      $("#loadingPolicy").value = config.policy || "always";
+      $("#loadingLayout").value = config.layout || "centered";
+      $("#loadingHeadline").value = config.headline || "Updating dashboard";
+      $("#loadingMessage").value = config.message || "Fetching the latest information";
+      $("#loadingOwner").value = config.owner_name || "";
+      $("#loadingShowDevice").checked = config.show_device_name !== false;
+      $("#loadingShowOwner").checked = Boolean(config.show_owner);
+      $("#loadingShowArea").checked = Boolean(config.show_area);
+      $("#loadingLogoName").textContent = config.logo_filename
+        ? `${config.logo_filename} · cached on device after the next refresh`
+        : "No custom logo · built-in sync icon will be used";
+      $("#removeLoadingLogo").disabled = !config.logo_sha256;
+      $("#resetLoadingScreen").hidden = target === "default" || inherited;
+      $("#loadingInheritance").textContent = target === "default"
+        ? "Used automatically by every device without its own override."
+        : inherited
+          ? "This device currently inherits the fleet default."
+          : "This device has its own fetch-screen design.";
+      const device = state.devices.find((item) => item.device_id === target);
+      if (device) $("#loadingModel").value = String(device.model || "").toUpperCase().includes("X4") ? "X4" : "X3";
+      scheduleLoadingPreview();
+    }
+
+    function scheduleLoadingPreview() {
+      clearTimeout(state.loadingPreviewTimer);
+      state.loadingPreviewTimer = setTimeout(renderLoadingPreview, 250);
+    }
+
+    async function renderLoadingPreview() {
+      const target = loadingTarget();
+      try {
+        const response = await api(`loading-screens/${encodeURIComponent(target)}/preview`, {
+          method: "POST",
+          body: {
+            model: $("#loadingModel").value,
+            device_id: target === "default" ? "" : target,
+            config: loadingDraft(),
+          },
+        });
+        const blob = await response.blob();
+        if (state.loadingPreviewUrl) URL.revokeObjectURL(state.loadingPreviewUrl);
+        state.loadingPreviewUrl = URL.createObjectURL(blob);
+        $("#loadingPreview").src = state.loadingPreviewUrl;
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function saveLoadingScreen() {
+      const target = loadingTarget();
+      try {
+        const response = await api(`loading-screens/${encodeURIComponent(target)}`, {
+          method: "PUT",
+          body: loadingDraft(),
+        });
+        const payload = await response.json();
+        toast(payload.refresh_queued?.length
+          ? `Fetch screen saved. Refresh queued for ${payload.refresh_queued.length} device${payload.refresh_queued.length === 1 ? "" : "s"}.`
+          : "Fetch screen saved.");
+        await loadLoadingScreens(target);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function resetLoadingScreen() {
+      const target = loadingTarget();
+      if (target === "default") return;
+      try {
+        await api(`loading-screens/${encodeURIComponent(target)}`, {method: "DELETE"});
+        toast(`${target} now uses the fleet-default fetch screen.`);
+        await loadLoadingScreens(target);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function uploadLoadingLogo() {
+      const file = $("#loadingLogoUpload").files?.[0];
+      if (!file) return;
+      const target = loadingTarget();
+      try {
+        await api(`loading-screens/${encodeURIComponent(target)}/logo`, {
+          method: "POST",
+          headers: {"X-FlexDisplay-Filename": file.name},
+          body: file,
+        });
+        $("#loadingLogoUpload").value = "";
+        toast("Logo uploaded. Save the design when the preview looks right.");
+        await loadLoadingScreens(target);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function removeLoadingLogo() {
+      const target = loadingTarget();
+      try {
+        await api(`loading-screens/${encodeURIComponent(target)}/logo`, {method: "DELETE"});
+        toast("Logo removed; the built-in sync icon will be used.");
+        await loadLoadingScreens(target);
       } catch (error) {
         toast(error.message, true);
       }
@@ -1865,6 +2100,22 @@
       if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
     });
     $("#openPhotoLibrary").addEventListener("click", openPhotoLibrary);
+    $("#openLoadingScreen").addEventListener("click", openLoadingScreen);
+    $("#closeLoadingScreen").addEventListener("click", () => $("#loadingScreenDialog").close());
+    $("#loadingTarget").addEventListener("change", renderLoadingScreenForm);
+    $("#loadingModel").addEventListener("change", scheduleLoadingPreview);
+    $("#saveLoadingScreen").addEventListener("click", saveLoadingScreen);
+    $("#resetLoadingScreen").addEventListener("click", resetLoadingScreen);
+    $("#loadingLogoUpload").addEventListener("change", uploadLoadingLogo);
+    $("#removeLoadingLogo").addEventListener("click", removeLoadingLogo);
+    for (const selector of [
+      "#loadingEnabled", "#loadingPolicy", "#loadingLayout", "#loadingHeadline",
+      "#loadingMessage", "#loadingOwner", "#loadingShowDevice", "#loadingShowOwner",
+      "#loadingShowArea",
+    ]) {
+      $(selector).addEventListener("input", scheduleLoadingPreview);
+      $(selector).addEventListener("change", scheduleLoadingPreview);
+    }
     $("#openFleetHealth").addEventListener("click", () => {
       $("#fleetHealthDialog").showModal();
       loadFleetHealth();
