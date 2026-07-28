@@ -34,6 +34,11 @@ DESCRIPTIONS = (
     FlexDisplayButtonDescription(key="sleep", translation_key="sleep", command="sleep"),
     FlexDisplayButtonDescription(key="power_off", translation_key="power_off", command="power-off"),
     FlexDisplayButtonDescription(key="restart", translation_key="restart", command="restart"),
+    FlexDisplayButtonDescription(
+        key="flip_display",
+        translation_key="flip_display",
+        command="rotate-toggle",
+    ),
 )
 
 

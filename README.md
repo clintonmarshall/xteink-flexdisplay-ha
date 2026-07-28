@@ -227,6 +227,13 @@ trend sparklines, battery-runtime estimates, missed check-ins, reset/watchdog
 diagnostics, SD failure counts, and optional timezone-aware OTA maintenance
 windows. MQTT Discovery publishes the same diagnostics and problem sensors.
 
+Firmware, Bridge, and integration `0.25.0` add persistent 0°/180° mounting
+orientation for lanyards and inverted installations. Hold Left and Right
+together for one second to flip the display offline, or use Dashboard Studio
+and Home Assistant controls. Rotation is applied in the common renderer, so it
+covers Reader, Home Assistant, TRMNL, OpenDisplay, Photo Frame, menus, and
+future screen updates on both X3 and X4.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

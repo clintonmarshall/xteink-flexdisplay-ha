@@ -111,7 +111,7 @@ Delivery: Bridge/Firmware `0.23.0`.
 
 ## v0.24 — Advanced fleet health
 
-Status: implemented, pending release and canary deployment.
+Status: released and deployed.
 Delivery: Bridge/Firmware `0.24.0`.
 
 - Device boot identifiers and reset reasons for power, software, panic,
@@ -124,3 +124,14 @@ Delivery: Bridge/Firmware `0.24.0`.
 - Optional timezone-aware overnight OTA maintenance windows with a
   configurable USB-powered override.
 - Automatic repair of stale OTA acknowledgement evidence.
+
+## v0.25 — Persistent display orientation
+
+Status: implemented, pending release and canary deployment.
+Delivery: Bridge/Firmware/Integration `0.25.0`.
+
+- Persistent 0°/180° renderer-level orientation shared by X3 and X4.
+- Offline one-second Left+Right hardware chord for lanyard use.
+- Durable remote rotate, reset-orientation, and toggle commands.
+- Dashboard Studio and Home Assistant orientation controls and telemetry.
+- Assignable physical-button rotation action.

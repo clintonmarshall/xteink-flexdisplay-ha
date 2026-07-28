@@ -215,6 +215,12 @@ class MqttService:
                 "name": "Current mode",
                 "value_template": "{{ value_json.mode }}",
             },
+            "display_rotation": {
+                "name": "Display orientation",
+                "unit_of_measurement": "°",
+                "value_template": "{{ value_json.rotation_degrees | default(0) }}",
+                "entity_category": "diagnostic",
+            },
             "power_state": {
                 "name": "Power state",
                 "value_template": "{{ value_json.power_state }}",
@@ -486,6 +492,7 @@ class MqttService:
             "sleep": ("Sleep now", "sleep"),
             "power_off": ("Power off until button wake", "power-off"),
             "restart": ("Restart", "restart"),
+            "flip_display": ("Flip display 180°", "rotate-toggle"),
             "cancel": ("Cancel active commands", "cancel"),
             "firmware_retry": ("Retry firmware update", "firmware-retry"),
             "rollout_reset": ("Reset firmware rollout", "rollout-reset"),
@@ -631,6 +638,12 @@ class MqttService:
                 "set-profile",
                 state.get("available_profiles") or [profile.profile],
             ),
+            "display_rotation": (
+                "Display orientation",
+                "rotation_degrees",
+                "set-display-rotation",
+                ["0°", "180°"],
+            ),
         }
         for key, (name, field, command, options) in selects.items():
             payload = {
@@ -640,7 +653,11 @@ class MqttService:
                     state_topic=state_topic,
                 ),
                 "name": name,
-                "value_template": f"{{{{ value_json.{field} }}}}",
+                "value_template": (
+                    "{{ (value_json.rotation_degrees | default(0) | string) ~ '°' }}"
+                    if key == "display_rotation"
+                    else f"{{{{ value_json.{field} }}}}"
+                ),
                 "command_topic": f"{command_root}/{command}",
                 "options": list(dict.fromkeys(str(option) for option in options if option)),
                 "entity_category": "config",

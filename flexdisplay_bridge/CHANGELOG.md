@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.25.0
+
+- Added persistent 0°/180° display mounting orientation across Reader, Home
+  Assistant, TRMNL, OpenDisplay, Photo Frame, menus, and status screens.
+- Added an offline hardware shortcut: hold Left and Right together for one
+  second to flip the display, even when Home Assistant is unavailable.
+- Added durable `rotate-0`, `rotate-180`, and `rotate-toggle` device commands
+  with immediate repaint of the current screen.
+- Added a Display orientation select and Flip display button to Dashboard
+  Studio and both Home Assistant integration paths.
+- Added display-orientation telemetry and an assignable physical-button
+  `Toggle display 180°` action.
+- Added shared X3/X4 firmware `1.4.1-flexdisplay.0.25.0`.
+
 ## 0.24.0
 
 - Added per-boot reset telemetry with stable boot identifiers and explicit
