@@ -400,6 +400,8 @@ def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> No
     assert "homeassistant/text/x4_mqtt01/timezone/config" in topics
     assert "homeassistant/number/x4_mqtt01/manual_wake_grace/config" in topics
     assert "homeassistant/image/x4_mqtt01/current_screen/config" in topics
+    assert "homeassistant/sensor/x4_mqtt01/transfer_bytes/config" in topics
+    assert "homeassistant/sensor/x4_mqtt01/transfer_savings/config" in topics
     assert topics["flexdisplay/X4-MQTT01/screen"] == b"png-screen"
     assert json.loads(
         topics["homeassistant/select/x4_mqtt01/profile/config"]
@@ -877,11 +879,75 @@ def test_screen_marks_matching_image_as_unchanged(tmp_path: Path) -> None:
             },
         )
         assert second.headers["x-flexdisplay-image-unchanged"] == "true"
+        assert second.content
+        assert second.headers["x-flexdisplay-transfer-encoding"] == "png"
         assert second.headers["x-flexdisplay-sleep-reason"] in {
             "unchanged_image",
             "low_battery_unchanged",
             "outside_active_hours",
         }
+
+
+def test_capable_device_skips_unchanged_screen_body_safely(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    with TestClient(create_app(config)) as client:
+        first = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-TRANSFER1",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "false",
+            },
+        )
+        assert first.status_code == 200
+        assert first.content
+        digest = first.headers["x-flexdisplay-image-sha256"]
+
+        unchanged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-TRANSFER1",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "true",
+                "X-FlexDisplay-Image-SHA256": digest,
+            },
+        )
+        assert unchanged.status_code == 200
+        assert unchanged.content == b""
+        assert unchanged.headers["x-flexdisplay-image-unchanged"] == "true"
+        assert (
+            unchanged.headers["x-flexdisplay-transfer-encoding"]
+            == "empty-unchanged"
+        )
+        assert unchanged.headers["x-flexdisplay-transfer-bytes"] == "0"
+        assert unchanged.headers["x-flexdisplay-transfer-savings"] == "100"
+
+        record = client.get("/api/v1/devices/X3-TRANSFER1").json()
+        assert record["last_transfer_encoding"] == "empty-unchanged"
+        assert record["last_transfer_bytes"] == 0
+        assert record["last_transfer_saved_bytes"] > 0
+        assert record["last_transfer_savings_percent"] == 100
+
+        missing_cache = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-TRANSFER1",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "false",
+                "X-FlexDisplay-Image-SHA256": digest,
+            },
+        )
+        assert missing_cache.status_code == 200
+        assert missing_cache.content
+        assert (
+            missing_cache.headers["x-flexdisplay-transfer-encoding"]
+            == "png"
+        )
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
@@ -1756,6 +1822,26 @@ def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
         assert fleet_frame.headers["x-flexdisplay-assigned-mode"] == "photo_frame"
         assert fleet_frame.headers["x-flexdisplay-photo-album"] == "family"
         with Image.open(io.BytesIO(fleet_frame.content)) as rendered:
+            assert rendered.size == (480, 800)
+            assert rendered.mode == "1"
+
+        optimized_frame = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-PHOTO1",
+                "X-FlexDisplay-Width": "480",
+                "X-FlexDisplay-Height": "800",
+                "X-FlexDisplay-Mode": "photo_frame",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "false",
+            },
+        )
+        assert optimized_frame.status_code == 200
+        assert optimized_frame.headers["content-type"] == "image/png"
+        assert optimized_frame.headers["x-flexdisplay-transfer-encoding"] == "png"
+        assert len(optimized_frame.content) < len(fleet_frame.content)
+        with Image.open(io.BytesIO(optimized_frame.content)) as rendered:
             assert rendered.size == (480, 800)
             assert rendered.mode == "1"
 

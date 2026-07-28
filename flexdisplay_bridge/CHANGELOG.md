@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.23.0
+
+- Added capability-negotiated zero-byte responses when a device confirms that
+  the matching dashboard image is physically cached on its SD card.
+- Added PNG Photo Frame delivery for upgraded X3/X4 devices while preserving
+  BMP responses for earlier firmware.
+- Added per-device transfer encoding, delivered bytes, saved bytes, and
+  savings-percentage diagnostics through MQTT Discovery.
+- Added shared X3/X4 firmware `1.4.1-flexdisplay.0.23.0` with cache-safe
+  capability advertisement, PNG conversion, and transfer telemetry parsing.
+
 ## 0.22.3
 
 - Added per-tile text sizing from 60% to 180% with immediate X3/X4 preview

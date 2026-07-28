@@ -214,6 +214,12 @@ Dashboard Studio's Fleet Content workspace distributes revised managed photos,
 books, logos, and assets to one or many displays without erasing personal
 files or device settings.
 
+Firmware and Bridge `0.23.0` add capability-negotiated screen transfer
+optimization. A device with a verified cached frame receives a zero-byte
+unchanged response, while Photo Frame mode uses PNG instead of raw BMP.
+Older firmware retains the full-image protocol, and Home Assistant receives
+per-device transfer-size and savings diagnostics.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing

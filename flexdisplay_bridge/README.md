@@ -83,6 +83,13 @@ FlexDisplay Bridge `0.22.3` adds independent per-tile **Text size** and
 now reserve separate label, code, and caption regions so enlarged codes remain
 readable without colliding with surrounding text. This is also Bridge-only.
 
+FlexDisplay `0.23.0` reduces network and battery overhead. Upgraded devices
+confirm that an image is physically cached before the Bridge returns an
+unchanged response with no image body, and Photo Frame transfers use optimized
+PNG instead of raw BMP. Earlier firmware continues receiving full images.
+Home Assistant diagnostic sensors expose the last transfer format, size,
+bytes saved, and percentage saved.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
