@@ -12,15 +12,24 @@ import uvicorn
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.4.1-flexdisplay.0.23.0",
+    "firmware_version": "1.4.1-flexdisplay.0.24.0",
     "firmware_url": (
         "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/firmware-v0.23.0/firmware.bin"
+        "releases/download/firmware-v0.24.0/firmware.bin"
     ),
-    "firmware_sha256": "cb16136e09512b2cb58ab51db6ff381afb2f98c41fdd45e97665650a67decc5f",
-    "firmware_size": 5_512_016,
+    "firmware_sha256": "a913c956568d571014da928319623af84e64ca191a20a3a1e97c7c32c9a55e96",
+    "firmware_size": 5_512_576,
 }
 LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.4.1-flexdisplay.0.23.0",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+            "releases/download/firmware-v0.23.0/firmware.bin"
+        ),
+        "firmware_sha256": "cb16136e09512b2cb58ab51db6ff381afb2f98c41fdd45e97665650a67decc5f",
+        "firmware_size": 5_512_016,
+    },
     {
         "firmware_version": "1.4.1-flexdisplay.0.22.0",
         "firmware_url": (
@@ -169,6 +178,21 @@ def main() -> None:
     )
     os.environ["FLEXDISPLAY_FIRMWARE_STALE_INSTALL_SECONDS"] = option(
         options, "firmware_stale_install_seconds", 1800
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_ENABLED"] = option(
+        options, "firmware_maintenance_enabled", False
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_START"] = option(
+        options, "firmware_maintenance_start", "01:00"
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_END"] = option(
+        options, "firmware_maintenance_end", "05:00"
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_TIMEZONE"] = option(
+        options, "firmware_maintenance_timezone", "Australia/Melbourne"
+    )
+    os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_USB_OVERRIDE"] = option(
+        options, "firmware_maintenance_usb_override", True
     )
 
     if not CONFIG_PATH.exists():

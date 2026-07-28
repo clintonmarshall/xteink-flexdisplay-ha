@@ -163,6 +163,33 @@ class MqttService:
                 "value_template": "{{ value_json.rssi }}",
                 "entity_category": "diagnostic",
             },
+            "wifi_average": {
+                "name": "Wi-Fi average",
+                "device_class": "signal_strength",
+                "state_class": "measurement",
+                "unit_of_measurement": "dBm",
+                "value_template": "{{ value_json.wifi_average_rssi }}",
+                "entity_category": "diagnostic",
+            },
+            "wifi_trend": {
+                "name": "Wi-Fi trend",
+                "value_template": "{{ value_json.wifi_trend }}",
+                "entity_category": "diagnostic",
+            },
+            "battery_runtime": {
+                "name": "Estimated battery runtime",
+                "state_class": "measurement",
+                "unit_of_measurement": "h",
+                "value_template": "{{ value_json.estimated_battery_runtime_hours }}",
+                "entity_category": "diagnostic",
+            },
+            "battery_drain": {
+                "name": "Battery drain",
+                "state_class": "measurement",
+                "unit_of_measurement": "%/d",
+                "value_template": "{{ value_json.battery_drain_percent_per_day }}",
+                "entity_category": "diagnostic",
+            },
             "last_seen": {
                 "name": "Last check-in",
                 "device_class": "timestamp",
@@ -224,6 +251,49 @@ class MqttService:
             "wake_reason": {
                 "name": "Wake reason",
                 "value_template": "{{ value_json.wake_reason }}",
+                "entity_category": "diagnostic",
+            },
+            "reset_reason": {
+                "name": "Reset reason",
+                "value_template": "{{ value_json.reset_reason }}",
+                "entity_category": "diagnostic",
+            },
+            "reset_count": {
+                "name": "Recorded boots",
+                "state_class": "total_increasing",
+                "value_template": "{{ value_json.reset_count }}",
+                "entity_category": "diagnostic",
+            },
+            "watchdog_resets": {
+                "name": "Watchdog resets",
+                "state_class": "total_increasing",
+                "value_template": "{{ value_json.watchdog_reset_count }}",
+                "entity_category": "diagnostic",
+            },
+            "sd_failure_events": {
+                "name": "SD failure events",
+                "state_class": "total_increasing",
+                "value_template": "{{ value_json.sd_failure_events }}",
+                "entity_category": "diagnostic",
+            },
+            "checkin_health": {
+                "name": "Check-in health",
+                "value_template": "{{ value_json.checkin_health }}",
+                "entity_category": "diagnostic",
+            },
+            "missed_checkins": {
+                "name": "Estimated missed check-ins",
+                "state_class": "measurement",
+                "value_template": "{{ value_json.missed_checkins }}",
+                "entity_category": "diagnostic",
+            },
+            "maintenance_window": {
+                "name": "Firmware maintenance window",
+                "value_template": (
+                    "{{ value_json.firmware_maintenance_start ~ '-' ~ "
+                    "value_json.firmware_maintenance_end ~ ' ' ~ "
+                    "value_json.firmware_maintenance_timezone }}"
+                ),
                 "entity_category": "diagnostic",
             },
             "uptime": {
@@ -328,6 +398,41 @@ class MqttService:
                 "name": "USB power",
                 "device_class": "plug",
                 "value_template": "{{ 'ON' if value_json.usb_connected else 'OFF' }}",
+            },
+            "checkin_overdue": {
+                "name": "Check-in overdue",
+                "device_class": "problem",
+                "value_template": (
+                    "{{ 'ON' if (value_json.missed_checkins | default(0) | int) >= 2 "
+                    "else 'OFF' }}"
+                ),
+                "entity_category": "diagnostic",
+            },
+            "problem_reset": {
+                "name": "Problem reset detected",
+                "device_class": "problem",
+                "value_template": (
+                    "{{ 'ON' if value_json.reset_reason in "
+                    "['panic','interrupt_watchdog','task_watchdog','watchdog','brownout'] "
+                    "else 'OFF' }}"
+                ),
+                "entity_category": "diagnostic",
+            },
+            "repeated_sd_failure": {
+                "name": "Repeated SD failure",
+                "device_class": "problem",
+                "value_template": (
+                    "{{ 'ON' if (value_json.consecutive_sd_failures | default(0) | int) >= 2 "
+                    "else 'OFF' }}"
+                ),
+                "entity_category": "diagnostic",
+            },
+            "maintenance_window_open": {
+                "name": "Firmware maintenance window open",
+                "value_template": (
+                    "{{ 'ON' if value_json.firmware_maintenance_window_open else 'OFF' }}"
+                ),
+                "entity_category": "diagnostic",
             },
             "sd_ready": {
                 "name": "SD card ready",

@@ -8,7 +8,12 @@ from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from flexdisplay_bridge.app import _sleep_plan, create_app
+from flexdisplay_bridge.app import (
+    _advanced_health_metrics,
+    _firmware_maintenance_status,
+    _sleep_plan,
+    create_app,
+)
 from flexdisplay_bridge.config import (
     BridgeConfig,
     DashboardPageConfig,
@@ -95,6 +100,103 @@ def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
     assert persisted["command_sequence"] == 1
 
 
+def test_checkin_history_counts_unique_boots_and_sd_failures(tmp_path: Path) -> None:
+    store = DeviceStore(tmp_path / "state.json")
+    base = {
+        "model": "XTEINK_X3",
+        "firmware": "1.4.1-flexdisplay.0.24.0",
+        "battery_percent": 90,
+        "rssi": -61,
+        "sd_ready": True,
+        "boot_id": "boot-a",
+        "reset_reason": "power_on",
+    }
+    first = store.touch("X3-HEALTH", base)
+    assert first["reset_count"] == 1
+    assert first["checkin_count"] == 1
+
+    repeated = store.touch("X3-HEALTH", {**base, "sd_ready": False})
+    assert repeated["reset_count"] == 1
+    assert repeated["sd_failure_events"] == 1
+    assert repeated["consecutive_sd_failures"] == 1
+
+    watchdog = store.touch(
+        "X3-HEALTH",
+        {
+            **base,
+            "boot_id": "boot-b",
+            "reset_reason": "task_watchdog",
+            "sd_ready": False,
+        },
+    )
+    assert watchdog["reset_count"] == 2
+    assert watchdog["watchdog_reset_count"] == 1
+    assert watchdog["sd_failure_events"] == 1
+    assert watchdog["consecutive_sd_failures"] == 2
+    assert len(watchdog["checkin_history"]) == 3
+    assert watchdog["reset_history"][-1]["reason"] == "task_watchdog"
+
+
+def test_advanced_health_predicts_battery_and_wifi_trends() -> None:
+    current = datetime(2026, 7, 28, 12, 0, tzinfo=UTC)
+    record = {
+        "last_seen": (current - timedelta(minutes=5)).isoformat(),
+        "sleep_seconds": 900,
+        "checkin_history": [
+            {
+                "at": (current - timedelta(days=2)).isoformat(),
+                "battery_percent": 90,
+                "rssi": -70,
+                "usb_connected": False,
+            },
+            {
+                "at": (current - timedelta(days=1)).isoformat(),
+                "battery_percent": 84,
+                "rssi": -66,
+                "usb_connected": False,
+            },
+            {
+                "at": current.isoformat(),
+                "battery_percent": 78,
+                "rssi": -62,
+                "usb_connected": False,
+            },
+        ],
+    }
+    metrics = _advanced_health_metrics(
+        record,
+        DeviceConfig(name="Health test", refresh_interval_seconds=900),
+        current,
+    )
+    assert metrics["wifi_trend"] == "improving"
+    assert metrics["wifi_trend_delta_db"] == 8
+    assert metrics["battery_drain_percent_per_day"] == 6
+    assert metrics["estimated_battery_runtime_hours"] == 312
+    assert metrics["checkin_health"] == "on_time"
+
+
+def test_firmware_maintenance_window_handles_overnight_schedule() -> None:
+    firmware = FirmwareConfig(
+        maintenance_window_enabled=True,
+        maintenance_start="22:00",
+        maintenance_end="06:00",
+        maintenance_timezone="UTC",
+    )
+    config = BridgeConfig(firmware=firmware)
+    open_status = _firmware_maintenance_status(
+        config,
+        datetime(2026, 7, 28, 23, 30, tzinfo=UTC),
+    )
+    closed_status = _firmware_maintenance_status(
+        config,
+        datetime(2026, 7, 28, 12, 0, tzinfo=UTC),
+    )
+    assert open_status["open"] is True
+    assert open_status["next_start"] is None
+    assert closed_status["open"] is False
+    assert closed_status["next_start"] == "2026-07-28T22:00:00+00:00"
+
+
 def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",
@@ -110,6 +212,8 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
                 "X-FlexDisplay-Height": "800",
                 "X-FlexDisplay-Battery-Percent": "76",
                 "X-FlexDisplay-RSSI": "-54",
+                "X-FlexDisplay-Boot-ID": "a1b2c3d4",
+                "X-FlexDisplay-Reset-Reason": "power_on",
             },
         )
         assert response.status_code == 200
@@ -118,6 +222,11 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert response.headers["x-flexdisplay-provisioned"] == "true"
         assert response.headers["x-flexdisplay-device-name"] == "Test X4"
         assert response.headers["x-flexdisplay-assigned-mode"] == "home_assistant"
+        device = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert device["boot_id"] == "a1b2c3d4"
+        assert device["reset_reason"] == "power_on"
+        assert device["reset_count"] == 1
+        assert device["checkin_history_count"] == 1
         assert response.headers["x-flexdisplay-auto-start"] == "true"
         assert response.headers["x-flexdisplay-sleep-action"] == "scheduled"
         assert int(response.headers["x-flexdisplay-sleep-seconds"]) >= 60
@@ -2600,6 +2709,23 @@ def test_install_acknowledgement_replaces_stale_verification_metadata(
     assert rollout["status"] == "canary_verified"
     assert rollout["last_verified_at"] == verified["firmware_verified_at"]
     assert rollout["last_verification_method"] == "device_checkin"
+
+    store.touch(
+        device_id,
+        {
+            "firmware_verified_at": stale_verified_at,
+            "firmware_verification_method": "usb_recovery",
+        },
+    )
+    repaired = store.reconcile_running_firmware(
+        device_id,
+        target,
+        canary_required=True,
+        require_usb_for_canary=True,
+    )
+    assert repaired is not None
+    assert repaired["firmware_verification_method"] == "device_checkin"
+    assert repaired["firmware_verified_at"] == repaired["command_completed_at"]
 
 
 def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> None:

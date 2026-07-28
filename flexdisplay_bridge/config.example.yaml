@@ -62,6 +62,11 @@ firmware:
   mirror_enabled: true
   mirror_retry_seconds: 300
   stale_install_seconds: 1800
+  maintenance_window_enabled: false
+  maintenance_start: "01:00"
+  maintenance_end: "05:00"
+  maintenance_timezone: Australia/Melbourne
+  maintenance_usb_override: true
 
 dashboard:
   title: HOME ASSISTANT

@@ -8,6 +8,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+CHECKIN_HISTORY_LIMIT = 48
+RESET_HISTORY_LIMIT = 24
+PROBLEM_RESET_REASONS = {
+    "panic",
+    "interrupt_watchdog",
+    "task_watchdog",
+    "watchdog",
+    "brownout",
+}
+
 
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
@@ -78,8 +88,76 @@ class DeviceStore:
                     "render_revision": 0,
                 },
             )
+            is_checkin = "firmware" in telemetry and "model" in telemetry
+            previous_sd_ready = record.get("sd_ready")
+            previous_boot_id = str(record.get("boot_id") or "")
+            now = utc_now()
             record.update({key: value for key, value in telemetry.items() if value is not None})
-            record["last_seen"] = utc_now()
+            record["last_seen"] = now
+            if is_checkin:
+                record["checkin_count"] = int(record.get("checkin_count") or 0) + 1
+                history = record.setdefault("checkin_history", [])
+                point = {
+                    "at": now,
+                    "battery_percent": telemetry.get("battery_percent"),
+                    "battery_voltage": telemetry.get("battery_voltage"),
+                    "rssi": telemetry.get("rssi"),
+                    "usb_connected": telemetry.get("usb_connected"),
+                    "sd_ready": telemetry.get("sd_ready"),
+                    "uptime_seconds": telemetry.get("uptime_seconds"),
+                    "free_heap": telemetry.get("free_heap"),
+                    "wake_reason": telemetry.get("wake_reason"),
+                    "reset_reason": telemetry.get("reset_reason"),
+                    "boot_id": telemetry.get("boot_id"),
+                }
+                history.append(
+                    {key: value for key, value in point.items() if value is not None}
+                )
+                record["checkin_history"] = history[-CHECKIN_HISTORY_LIMIT:]
+
+                if telemetry.get("sd_ready") is False:
+                    record["consecutive_sd_failures"] = int(
+                        record.get("consecutive_sd_failures") or 0
+                    ) + 1
+                    record["last_sd_failure_at"] = now
+                    if previous_sd_ready is not False:
+                        record["sd_failure_events"] = int(
+                            record.get("sd_failure_events") or 0
+                        ) + 1
+                elif telemetry.get("sd_ready") is True:
+                    record["consecutive_sd_failures"] = 0
+
+                boot_id = str(telemetry.get("boot_id") or "")
+                if boot_id and boot_id != previous_boot_id:
+                    reason = str(telemetry.get("reset_reason") or "unknown")
+                    record["boot_id"] = boot_id
+                    record["reset_reason"] = reason
+                    record["reset_count"] = int(record.get("reset_count") or 0) + 1
+                    if "watchdog" in reason:
+                        record["watchdog_reset_count"] = int(
+                            record.get("watchdog_reset_count") or 0
+                        ) + 1
+                    if reason == "panic":
+                        record["panic_reset_count"] = int(
+                            record.get("panic_reset_count") or 0
+                        ) + 1
+                    if reason == "brownout":
+                        record["brownout_reset_count"] = int(
+                            record.get("brownout_reset_count") or 0
+                        ) + 1
+                    resets = record.setdefault("reset_history", [])
+                    resets.append(
+                        {
+                            "at": now,
+                            "boot_id": boot_id,
+                            "reason": reason,
+                            "wake_reason": telemetry.get("wake_reason"),
+                        }
+                    )
+                    record["reset_history"] = resets[-RESET_HISTORY_LIMIT:]
+                    if reason in PROBLEM_RESET_REASONS:
+                        record["last_problem_reset_at"] = now
+                        record["last_problem_reset_reason"] = reason
             self._save()
             return deepcopy(record)
 
@@ -578,6 +656,34 @@ class DeviceStore:
             if not record or not target_version or record.get("firmware") != target_version:
                 return deepcopy(record) if record else None
             if record.get("firmware_update_status") == "verified":
+                successful_ack = record.get("last_command_result") in {
+                    "install:complete",
+                    "install:boot-confirmed",
+                }
+                tracked_target = str(record.get("firmware_update_target") or "")
+                completed_at = str(record.get("command_completed_at") or "")
+                verified_at = str(record.get("firmware_verified_at") or "")
+                stale_evidence = (
+                    record.get("firmware_verification_method") != "device_checkin"
+                    or not verified_at
+                    or (completed_at and verified_at < completed_at)
+                )
+                if successful_ack and tracked_target == target_version and stale_evidence:
+                    current_verification = completed_at or utc_now()
+                    record["firmware_verified_at"] = current_verification
+                    record["firmware_verification_method"] = "device_checkin"
+                    record["firmware_update_stage_at"] = current_verification
+                    history = record.get("command_history") or []
+                    if history and history[-1].get("result") == record.get(
+                        "last_command_result"
+                    ):
+                        history[-1]["verification_method"] = "device_checkin"
+                    rollout = self._state.get("firmware_rollout") or {}
+                    if rollout.get("target_version") == target_version:
+                        rollout["last_verified_at"] = current_verification
+                        rollout["last_verified_device_id"] = device_id
+                        rollout["last_verification_method"] = "device_checkin"
+                    self._save()
                 return deepcopy(record)
 
             tracked_target = str(record.get("firmware_update_target") or "")

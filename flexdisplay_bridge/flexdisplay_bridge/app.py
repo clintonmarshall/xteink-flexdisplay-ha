@@ -127,6 +127,54 @@ def _firmware_metadata_error(settings: BridgeConfig) -> str:
     return ""
 
 
+def _firmware_maintenance_status(
+    settings: BridgeConfig,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    firmware = settings.firmware
+    if not firmware.maintenance_window_enabled:
+        return {
+            "enabled": False,
+            "open": True,
+            "start": firmware.maintenance_start,
+            "end": firmware.maintenance_end,
+            "timezone": firmware.maintenance_timezone,
+            "next_start": None,
+            "usb_override": firmware.maintenance_usb_override,
+        }
+    try:
+        zone = ZoneInfo(firmware.maintenance_timezone)
+    except ZoneInfoNotFoundError:
+        zone = ZoneInfo("UTC")
+    current = (now or datetime.now(UTC)).astimezone(zone)
+    start = _clock_minutes(firmware.maintenance_start, 60)
+    end = _clock_minutes(firmware.maintenance_end, 5 * 60)
+    minute = current.hour * 60 + current.minute
+    open_now = (
+        True
+        if start == end
+        else (start <= minute < end if start < end else minute >= start or minute < end)
+    )
+    next_start = datetime.combine(
+        current.date(),
+        time(start // 60, start % 60),
+        tzinfo=zone,
+    )
+    if next_start <= current:
+        next_start += timedelta(days=1)
+    return {
+        "enabled": True,
+        "open": open_now,
+        "start": f"{start // 60:02d}:{start % 60:02d}",
+        "end": f"{end // 60:02d}:{end % 60:02d}",
+        "timezone": str(zone),
+        "next_start": (
+            None if open_now else next_start.astimezone(UTC).isoformat(timespec="seconds")
+        ),
+        "usb_override": firmware.maintenance_usb_override,
+    }
+
+
 def _firmware_install_blockers(
     record: dict[str, Any],
     settings: BridgeConfig,
@@ -153,6 +201,16 @@ def _firmware_install_blockers(
         blockers.append("Another command is pending")
     if record.get("dispatched_commands") and "install" not in record["dispatched_commands"]:
         blockers.append("Waiting for the previous command acknowledgement")
+    maintenance = _firmware_maintenance_status(settings)
+    if (
+        not maintenance["open"]
+        and not (maintenance["usb_override"] and usb_connected)
+    ):
+        blockers.append(
+            "Outside firmware maintenance window "
+            f"{maintenance['start']}-{maintenance['end']} "
+            f"{maintenance['timezone']}"
+        )
 
     rollout = store.firmware_rollout()
     if rollout.get("target_version") == firmware.version:
@@ -296,6 +354,119 @@ def _usb_recovery_blockers(
     return blockers
 
 
+def _advanced_health_metrics(
+    record: dict[str, Any],
+    profile: DeviceConfig,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    current = now or datetime.now(UTC)
+    history = [
+        point
+        for point in (record.get("checkin_history") or [])
+        if isinstance(point, dict)
+    ]
+
+    wifi_points: list[tuple[datetime, float]] = []
+    battery_points: list[tuple[datetime, float]] = []
+    for point in history:
+        try:
+            observed = datetime.fromisoformat(str(point.get("at") or ""))
+        except ValueError:
+            continue
+        rssi = point.get("rssi")
+        if isinstance(rssi, (int, float)):
+            wifi_points.append((observed, float(rssi)))
+        battery = point.get("battery_percent")
+        if (
+            isinstance(battery, (int, float))
+            and point.get("usb_connected") is not True
+        ):
+            battery_points.append((observed, float(battery)))
+
+    wifi_recent = wifi_points[-8:]
+    wifi_average = (
+        round(sum(value for _, value in wifi_recent) / len(wifi_recent), 1)
+        if wifi_recent
+        else None
+    )
+    wifi_delta = (
+        round(wifi_recent[-1][1] - wifi_recent[0][1], 1)
+        if len(wifi_recent) >= 2
+        else None
+    )
+    wifi_trend = "unknown"
+    if wifi_delta is not None:
+        wifi_trend = (
+            "improving"
+            if wifi_delta >= 3
+            else "declining"
+            if wifi_delta <= -3
+            else "stable"
+        )
+
+    battery_drain_per_day: float | None = None
+    battery_runtime_hours: float | None = None
+    if len(battery_points) >= 2:
+        latest_at, latest_percent = battery_points[-1]
+        baseline: tuple[datetime, float] | None = None
+        for candidate in battery_points:
+            elapsed = (latest_at - candidate[0]).total_seconds()
+            if elapsed >= 1800 and candidate[1] > latest_percent:
+                baseline = candidate
+                break
+        if baseline:
+            elapsed_days = (latest_at - baseline[0]).total_seconds() / 86400
+            dropped = baseline[1] - latest_percent
+            if elapsed_days > 0 and dropped >= 0.5:
+                battery_drain_per_day = round(dropped / elapsed_days, 2)
+                if battery_drain_per_day > 0:
+                    battery_runtime_hours = round(
+                        min(8760, latest_percent / battery_drain_per_day * 24),
+                        1,
+                    )
+
+    checkin_age_seconds: int | None = None
+    missed_checkins = 0
+    expected_interval = max(
+        60,
+        int(record.get("sleep_seconds") or profile.refresh_interval_seconds),
+    )
+    try:
+        seen = datetime.fromisoformat(str(record.get("last_seen") or ""))
+        checkin_age_seconds = max(0, int((current - seen).total_seconds()))
+        if checkin_age_seconds > expected_interval * 1.5 + 60:
+            missed_checkins = max(1, checkin_age_seconds // expected_interval - 1)
+    except ValueError:
+        pass
+
+    return {
+        "checkin_history_count": len(history),
+        "checkin_age_seconds": checkin_age_seconds,
+        "expected_checkin_interval_seconds": expected_interval,
+        "missed_checkins": int(missed_checkins),
+        "checkin_health": (
+            "overdue"
+            if missed_checkins >= 2
+            else "late"
+            if missed_checkins == 1
+            else "on_time"
+        ),
+        "wifi_average_rssi": wifi_average,
+        "wifi_trend_delta_db": wifi_delta,
+        "wifi_trend": wifi_trend,
+        "battery_drain_percent_per_day": battery_drain_per_day,
+        "estimated_battery_runtime_hours": battery_runtime_hours,
+        "sd_failure_events": int(record.get("sd_failure_events") or 0),
+        "consecutive_sd_failures": int(
+            record.get("consecutive_sd_failures") or 0
+        ),
+        "reset_count": int(record.get("reset_count") or 0),
+        "watchdog_reset_count": int(record.get("watchdog_reset_count") or 0),
+        "panic_reset_count": int(record.get("panic_reset_count") or 0),
+        "brownout_reset_count": int(record.get("brownout_reset_count") or 0),
+    }
+
+
 def _decorate_device(
     record: dict[str, Any],
     settings: BridgeConfig,
@@ -367,6 +538,15 @@ def _decorate_device(
     result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
     result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
+    result.update(_advanced_health_metrics(result, profile))
+    maintenance = _firmware_maintenance_status(settings)
+    result["firmware_maintenance_enabled"] = maintenance["enabled"]
+    result["firmware_maintenance_window_open"] = maintenance["open"]
+    result["firmware_maintenance_start"] = maintenance["start"]
+    result["firmware_maintenance_end"] = maintenance["end"]
+    result["firmware_maintenance_timezone"] = maintenance["timezone"]
+    result["firmware_maintenance_next_start"] = maintenance["next_start"]
+    result["firmware_maintenance_usb_override"] = maintenance["usb_override"]
     result["available_profiles"] = available_profiles or list(settings.profiles)
     result["available_modes"] = sorted(SUPPORTED_MODES)
     result["update_available"] = bool(
@@ -422,6 +602,20 @@ def _decorate_device(
         health_issues.append("firmware_update")
     if result["low_battery"]:
         health_issues.append("low_battery")
+    if result.get("missed_checkins", 0) >= 2:
+        health_issues.append("checkin_overdue")
+    if result.get("wifi_average_rssi") is not None and result["wifi_average_rssi"] <= -80:
+        health_issues.append("weak_wifi")
+    if result.get("consecutive_sd_failures", 0) >= 2:
+        health_issues.append("repeated_sd_failure")
+    if str(result.get("reset_reason") or "") in {
+        "panic",
+        "interrupt_watchdog",
+        "task_watchdog",
+        "watchdog",
+        "brownout",
+    }:
+        health_issues.append("problem_reset")
     if health_issues:
         result["health_state"] = (
             "offline"
@@ -1195,6 +1389,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "screen_history_enabled": settings.screen_history.enabled,
             "screen_history_limit": settings.screen_history.limit,
             "firmware_mirror": firmware_mirror.status(settings.firmware),
+            "firmware_maintenance": _firmware_maintenance_status(settings),
         }
 
     @app.get("/api/v1/firmware/current.bin", name="firmware_binary")
@@ -2423,6 +2618,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_min_free_heap: str | None = Header(default=None),
         x_flexdisplay_sd_ready: str | None = Header(default=None),
         x_flexdisplay_wake_reason: str | None = Header(default=None),
+        x_flexdisplay_reset_reason: str | None = Header(default=None),
+        x_flexdisplay_boot_id: str | None = Header(default=None),
         x_flexdisplay_button_events: str | None = Header(default=None),
         x_flexdisplay_image_sha256: str | None = Header(default=None),
         x_flexdisplay_image_cached: str | None = Header(default=None),
@@ -2453,6 +2650,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "min_free_heap": _optional_integer(x_flexdisplay_min_free_heap, 0, 1_000_000),
             "sd_ready": _boolean(x_flexdisplay_sd_ready),
             "wake_reason": x_flexdisplay_wake_reason or None,
+            "reset_reason": x_flexdisplay_reset_reason or None,
+            "boot_id": x_flexdisplay_boot_id or None,
             "transfer_capabilities": sorted(capabilities),
             "image_cached": image_cached,
         }

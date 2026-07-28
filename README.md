@@ -220,6 +220,13 @@ unchanged response, while Photo Frame mode uses PNG instead of raw BMP.
 Older firmware retains the full-image protocol, and Home Assistant receives
 per-device transfer-size and savings diagnostics.
 
+Firmware and Bridge `0.24.0` add advanced fleet health. X3/X4 devices report
+their boot identity and reset reason, while the Bridge keeps bounded check-in,
+reset, battery, Wi-Fi, SD, memory, and uptime history. Fleet Health shows
+trend sparklines, battery-runtime estimates, missed check-ins, reset/watchdog
+diagnostics, SD failure counts, and optional timezone-aware OTA maintenance
+windows. MQTT Discovery publishes the same diagnostics and problem sensors.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing
