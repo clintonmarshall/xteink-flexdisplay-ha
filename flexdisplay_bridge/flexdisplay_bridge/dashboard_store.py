@@ -20,6 +20,8 @@ LAYOUTS = {"auto", "single", "rows", "columns", "grid"}
 TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image", "name_card"}
 TILE_SOURCES = {"home_assistant", "static"}
 IMAGE_FITS = {"cover", "contain"}
+BADGE_THEMES = {"classic", "bold", "diagonal", "halftone"}
+BADGE_ASSET_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 ICONS = {
     "auto",
     "home",
@@ -221,6 +223,23 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                 raise DashboardValidationError(
                     f"Tile {tile_index + 1} on page {page_index + 1} needs fixed content"
                 )
+            badge_theme = str(raw_entity.get("badge_theme") or "classic").lower()
+            if badge_theme not in BADGE_THEMES:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported badge theme"
+                )
+            badge_photo_id = _bounded_text(
+                raw_entity.get("badge_photo_id"),
+                "",
+                24,
+            )
+            if badge_photo_id and not BADGE_ASSET_PATTERN.fullmatch(badge_photo_id):
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an invalid profile photo"
+                )
+            if style != "name_card":
+                badge_photo_id = ""
+                badge_theme = "classic"
             entities.append(
                 EntityConfig(
                     entity_id=entity_id,
@@ -234,6 +253,17 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                     image_fit=image_fit,
                     source=source,
                     value=static_value,
+                    badge_photo_id=badge_photo_id,
+                    badge_photo_filename=(
+                        _bounded_text(
+                            raw_entity.get("badge_photo_filename"),
+                            "",
+                            160,
+                        )
+                        if badge_photo_id
+                        else ""
+                    ),
+                    badge_theme=badge_theme,
                 )
             )
         pages.append(

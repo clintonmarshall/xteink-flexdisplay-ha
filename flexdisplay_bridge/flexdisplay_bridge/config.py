@@ -33,6 +33,9 @@ class EntityConfig:
     image_fit: str = "cover"
     source: str = "home_assistant"
     value: str = ""
+    badge_photo_id: str = ""
+    badge_photo_filename: str = ""
+    badge_theme: str = "classic"
 
 
 @dataclass(frozen=True)

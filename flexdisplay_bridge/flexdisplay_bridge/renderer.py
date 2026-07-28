@@ -502,62 +502,250 @@ def _draw_image_tile(
         return False
 
 
+def _draw_badge_background(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    theme: str,
+) -> tuple[int, int]:
+    left, top, right, bottom = box
+    width = right - left
+    height = bottom - top
+    header_height = max(38, min(62, height // 6))
+    header_bottom = top + header_height
+    if theme == "bold":
+        draw.rectangle((left, top, right, header_bottom), fill=0)
+        draw.rectangle((left, header_bottom, left + max(8, width // 35), bottom), fill=0)
+    elif theme == "diagonal":
+        draw.polygon(
+            [
+                (left, top),
+                (right, top),
+                (right - width // 8, header_bottom),
+                (left, header_bottom),
+            ],
+            fill=0,
+        )
+        spacing = max(14, width // 28)
+        pattern_height = max(36, min(height // 3, width // 4))
+        for x in range(left, right, spacing):
+            draw.line(
+                (
+                    x,
+                    bottom,
+                    min(right, x + pattern_height),
+                    bottom - min(pattern_height, right - x),
+                ),
+                fill=0,
+                width=1,
+            )
+    elif theme == "halftone":
+        dot = max(2, width // 150)
+        spacing = max(10, width // 38)
+        corner_width = width // 4
+        corner_height = height // 3
+        for y in range(top + spacing, top + corner_height, spacing):
+            for x in range(left + spacing, left + corner_width, spacing):
+                if (x + y) // spacing % 2 == 0:
+                    draw.ellipse((x - dot, y - dot, x + dot, y + dot), fill=0)
+        for y in range(bottom - corner_height, bottom - spacing, spacing):
+            for x in range(right - corner_width, right - spacing, spacing):
+                if (x + y) // spacing % 2 == 0:
+                    draw.ellipse((x - dot, y - dot, x + dot, y + dot), fill=0)
+        draw.rectangle((left, top, right, header_bottom), outline=0, width=3)
+    else:
+        draw.line((left, header_bottom, right, header_bottom), fill=0, width=2)
+    return header_bottom, 255 if theme in {"bold", "diagonal"} else 0
+
+
+def _draw_badge_portrait(
+    canvas: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    entity: EntityState,
+    box: tuple[int, int, int, int],
+    *,
+    rounded: bool,
+) -> None:
+    left, top, right, bottom = box
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    stroke = max(3, min(width, height) // 32)
+    mask = Image.new("L", (width, height), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    if rounded:
+        mask_draw.rounded_rectangle(
+            (0, 0, width - 1, height - 1),
+            radius=max(12, width // 7),
+            fill=255,
+        )
+    else:
+        mask_draw.ellipse((0, 0, width - 1, height - 1), fill=255)
+
+    rendered = False
+    if entity.image_bytes:
+        try:
+            with Image.open(BytesIO(entity.image_bytes)) as source:
+                normalized = ImageOps.autocontrast(
+                    ImageOps.exif_transpose(source).convert("L")
+                )
+                fitted = ImageOps.fit(
+                    normalized,
+                    (width, height),
+                    Image.Resampling.LANCZOS,
+                    centering=(0.5, 0.38),
+                )
+                dithered = fitted.convert(
+                    "1",
+                    dither=Image.Dither.FLOYDSTEINBERG,
+                ).convert("L")
+                canvas.paste(dithered, (left, top), mask)
+                rendered = True
+        except (UnidentifiedImageError, OSError, ValueError):
+            rendered = False
+
+    if not rendered:
+        center_x = (left + right) // 2
+        head_radius = max(8, width // 7)
+        head_top = top + height // 5
+        draw.ellipse(
+            (
+                center_x - head_radius,
+                head_top,
+                center_x + head_radius,
+                head_top + head_radius * 2,
+            ),
+            fill=0,
+        )
+        shoulder_top = top + height // 2
+        draw.pieslice(
+            (
+                center_x - width // 3,
+                shoulder_top,
+                center_x + width // 3,
+                shoulder_top + height // 2,
+            ),
+            180,
+            360,
+            fill=0,
+        )
+    if rounded:
+        draw.rounded_rectangle(
+            box,
+            radius=max(12, width // 7),
+            outline=0,
+            width=stroke,
+        )
+    else:
+        draw.ellipse(box, outline=0, width=stroke)
+
+
 def _draw_name_card(
+    canvas: Image.Image,
     draw: ImageDraw.ImageDraw,
     entity: EntityState,
     box: tuple[int, int, int, int],
 ) -> None:
-    """Render a standalone, high-contrast identification card."""
+    """Render a themed, photo-capable, high-contrast identification card."""
     left, top, right, bottom = box
     width = right - left
     height = bottom - top
     center_x = (left + right) // 2
     padding = max(14, width // 24)
-
-    badge_font = _font(max(13, width // 31), True)
+    theme = entity.badge_theme if entity.badge_theme in {
+        "classic",
+        "bold",
+        "diagonal",
+        "halftone",
+    } else "classic"
+    header_bottom, header_fill = _draw_badge_background(draw, box, theme)
     badge = "IDENTIFICATION"
+    badge_font = _font(max(13, min(22, width // 25)), True)
     badge_width = draw.textbbox((0, 0), badge, font=badge_font)[2]
-    draw.text((center_x - badge_width // 2, top + padding), badge, fill=0, font=badge_font)
-    rule_y = top + padding + max(24, height // 22)
-    draw.line((left + padding, rule_y, right - padding, rule_y), fill=0, width=2)
+    draw.text(
+        (center_x - badge_width // 2, top + max(9, (header_bottom - top) // 4)),
+        badge,
+        fill=header_fill,
+        font=badge_font,
+    )
 
-    portrait_size = min(max(72, width // 4), max(72, height // 4))
-    portrait_top = rule_y + max(12, height // 40)
+    if width >= height * 1.2:
+        content_top = header_bottom + max(12, height // 28)
+        portrait_size = min(
+            height - (content_top - top) - padding,
+            max(92, width // 3),
+        )
+        portrait_left = left + padding + (max(0, width // 3 - portrait_size) // 2)
+        portrait_top = content_top + max(
+            0,
+            (bottom - padding - content_top - portrait_size) // 2,
+        )
+        _draw_badge_portrait(
+            canvas,
+            draw,
+            entity,
+            (
+                portrait_left,
+                portrait_top,
+                portrait_left + portrait_size,
+                portrait_top + portrait_size,
+            ),
+            rounded=theme in {"bold", "diagonal"},
+        )
+        text_left = left + max(width // 3, portrait_left + portrait_size - left) + padding
+        text_width = max(80, right - padding - text_left)
+        name_font, name_lines = _wrap_label(
+            draw,
+            entity.label,
+            text_width,
+            max(28, width // 13),
+            max(18, width // 23),
+        )
+        name_y = content_top + max(2, height // 55)
+        for line in name_lines[:2]:
+            bounds = draw.textbbox((0, 0), line, font=name_font)
+            draw.text((text_left, name_y), line, fill=0, font=name_font)
+            name_y += bounds[3] - bounds[1] + 4
+        role = entity.state or "Team member"
+        role_font = _fit(draw, role, text_width, max(19, width // 24), True, 13)
+        role_y = min(bottom - 70, name_y + max(8, height // 35))
+        draw.text((text_left, role_y), role, fill=0, font=role_font)
+        accent_y = role_y + draw.textbbox((0, 0), role, font=role_font)[3] + 7
+        draw.line(
+            (text_left, accent_y, min(right - padding, text_left + text_width * 2 // 3), accent_y),
+            fill=0,
+            width=max(2, width // 180),
+        )
+        if entity.unit:
+            detail_font = _fit(
+                draw,
+                entity.unit,
+                text_width,
+                max(16, width // 29),
+                False,
+                11,
+            )
+            draw.text(
+                (text_left, min(bottom - padding - 18, accent_y + 10)),
+                entity.unit,
+                fill=0,
+                font=detail_font,
+            )
+        return
+
+    portrait_size = min(max(82, width // 3), max(82, height // 3))
+    portrait_top = header_bottom + max(14, height // 40)
     portrait_left = center_x - portrait_size // 2
-    stroke = max(3, portrait_size // 24)
-    draw.ellipse(
+    _draw_badge_portrait(
+        canvas,
+        draw,
+        entity,
         (
             portrait_left,
             portrait_top,
             portrait_left + portrait_size,
             portrait_top + portrait_size,
         ),
-        outline=0,
-        width=stroke,
+        rounded=theme in {"bold", "diagonal"},
     )
-    head_radius = portrait_size // 7
-    draw.ellipse(
-        (
-            center_x - head_radius,
-            portrait_top + portrait_size // 5,
-            center_x + head_radius,
-            portrait_top + portrait_size // 5 + head_radius * 2,
-        ),
-        fill=0,
-    )
-    shoulder_top = portrait_top + portrait_size // 2
-    draw.pieslice(
-        (
-            center_x - portrait_size // 3,
-            shoulder_top,
-            center_x + portrait_size // 3,
-            shoulder_top + portrait_size // 2,
-        ),
-        180,
-        360,
-        fill=0,
-    )
-
     name_top = portrait_top + portrait_size + max(14, height // 45)
     name_font, name_lines = _wrap_label(
         draw,
@@ -572,7 +760,6 @@ def _draw_name_card(
         line_width = bounds[2] - bounds[0]
         draw.text((center_x - line_width // 2, name_y), line, fill=0, font=name_font)
         name_y += bounds[3] - bounds[1] + 5
-
     role = entity.state or "Team member"
     role_font = _fit(
         draw,
@@ -582,11 +769,9 @@ def _draw_name_card(
         True,
         14,
     )
-    role_bounds = draw.textbbox((0, 0), role, font=role_font)
-    role_width = role_bounds[2] - role_bounds[0]
+    role_width = draw.textbbox((0, 0), role, font=role_font)[2]
     role_y = min(bottom - max(84, height // 7), name_y + max(10, height // 50))
     draw.text((center_x - role_width // 2, role_y), role, fill=0, font=role_font)
-
     if entity.unit:
         detail_font = _fit(
             draw,
@@ -598,7 +783,12 @@ def _draw_name_card(
         )
         detail_width = draw.textbbox((0, 0), entity.unit, font=detail_font)[2]
         detail_y = min(bottom - padding - 20, role_y + max(34, height // 18))
-        draw.text((center_x - detail_width // 2, detail_y), entity.unit, fill=0, font=detail_font)
+        draw.text(
+            (center_x - detail_width // 2, detail_y),
+            entity.unit,
+            fill=0,
+            font=detail_font,
+        )
 
 
 class DashboardRenderer:
@@ -678,6 +868,7 @@ class DashboardRenderer:
 
                 if entity.style == "name_card":
                     _draw_name_card(
+                        image,
                         draw,
                         entity,
                         (left + 4, top + 4, right - 4, bottom - 4),

@@ -31,6 +31,7 @@ class EntityState:
     last_changed: datetime | None = None
     image_bytes: bytes = b""
     image_fit: str = "cover"
+    badge_theme: str = "classic"
 
 
 class HomeAssistantClient:

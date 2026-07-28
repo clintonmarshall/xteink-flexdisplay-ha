@@ -1,6 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.22.2
+
+- Added a QR Code Page template with a full-page, single-tile layout.
+- Added guided QR builders for website links, plain text, Wi-Fi networks,
+  LinkedIn profiles, contact cards, email messages, and phone numbers.
+- Added safe profile-photo uploads for standalone ID badges. Photos are
+  normalized, cropped, dithered, and stored in Bridge-managed data.
+- Added Classic, Bold Band, Diagonal, and Halftone ID badge themes designed
+  for high-contrast X3/X4 e-paper output.
 
 ## 0.22.1
 

@@ -64,6 +64,11 @@ tiles, encode text or URLs directly as QR codes, or apply the Name Card / ID
 Pass template without selecting a Home Assistant entity. This is a Bridge-only
 update; the shared X3/X4 firmware remains `0.22.0`.
 
+FlexDisplay Bridge `0.22.2` expands standalone Studio content with a dedicated
+QR Code Page, guided email, LinkedIn, website, contact, phone, Wi-Fi, and text
+QR builders, profile-photo uploads, and four e-ink ID badge themes. This is
+also a Bridge-only update; the shared X3/X4 firmware remains `0.22.0`.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
@@ -100,8 +105,19 @@ other fixed values. Use **QR code** to encode a URL or arbitrary text directly;
 the encoded value is not printed below the code unless it is separately added
 as a caption.
 
+The **QR code page** template creates a full-page QR display. Choose a website,
+LinkedIn profile, plain text, Wi-Fi network, contact card, email message, or
+phone number and Studio builds the standard QR payload from friendly fields.
+The original text editor remains available through the plain-text type for
+custom payloads.
+
 The **Name card / ID pass** page template creates a large name-card tile plus a
-QR tile. Edit the full name, role/title, organisation or ID, QR content, and
-caption in Studio, then preview and assign it like any other dashboard
-profile. A profile containing only fixed content does not require Home
-Assistant entity access and displays `STANDALONE` in its status footer.
+QR tile. Edit the full name, role/title, organisation or ID, upload a profile
+picture, and choose the Classic, Bold Band, Diagonal, or Halftone badge theme.
+The QR tile can open an email draft, LinkedIn profile, website, contact card,
+phone number, Wi-Fi setup, or custom text. Uploaded JPEG, PNG, WebP, and BMP
+photos are normalized into Bridge-managed PNG assets (maximum 5 MB), then
+cropped and dithered specifically for the X3/X4 e-paper display. Preview and
+assign the finished pass like any other dashboard profile. A profile
+containing only fixed content does not require Home Assistant entity access
+and displays `STANDALONE` in its status footer.
