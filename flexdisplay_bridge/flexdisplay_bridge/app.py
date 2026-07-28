@@ -692,6 +692,23 @@ def _dispatch_button_actions(
     return navigation, latest
 
 
+def _button_action_activation(record: dict[str, Any]) -> dict[str, Any]:
+    current_mode = str(record.get("mode") or "unknown")
+    active_mode = current_mode == BUTTON_ACTION_MODE
+    return {
+        "saved_on_bridge": True,
+        "active_now": active_mode,
+        "status": "ready" if active_mode else "waiting_for_home_assistant_mode",
+        "current_mode": current_mode,
+        "applies_in_mode": BUTTON_ACTION_MODE,
+        "requires_device_sync": False,
+        "updated_at": record.get("button_actions_updated_at"),
+        "last_seen": record.get("last_seen"),
+        "last_executed_at": record.get("last_button_action_at"),
+        "last_result": record.get("last_button_action_result"),
+    }
+
+
 def _number(value: str | None) -> float | None:
     try:
         return float(value) if value not in (None, "") else None
@@ -1300,6 +1317,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "device_id": selected,
             "mode": BUTTON_ACTION_MODE,
             "mappings": mappings_payload(record.get("button_action_mappings")),
+            "show_indicators": bool(record.get("button_action_indicators")),
+            "activation": _button_action_activation(record),
         }
 
     @app.put("/api/v1/devices/{device_id}/button-actions")
@@ -1314,13 +1333,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             mappings = normalize_mappings(payload)
         except ButtonActionValidationError as err:
             raise HTTPException(status_code=400, detail=str(err)) from err
-        record = store.set_button_actions(selected, mappings)
+        show_indicators = payload.get("show_indicators") is True
+        record = store.set_button_actions(
+            selected,
+            mappings,
+            show_indicators,
+        )
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
         return {
             "device_id": selected,
             "mode": BUTTON_ACTION_MODE,
             "mappings": mappings_payload(record.get("button_action_mappings")),
+            "show_indicators": bool(record.get("button_action_indicators")),
+            "activation": _button_action_activation(record),
         }
 
     def authorize(request: Request) -> None:
@@ -1987,6 +2013,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             page_count=len(pages),
             ha_error=ha_error,
             layout=page.layout,
+            button_actions=mappings_payload(
+                record.get("button_action_mappings")
+            ),
+            show_button_indicators=bool(
+                record.get("button_action_indicators")
+            ),
         )
         return Response(
             content=image,
@@ -2775,6 +2807,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             page_count=len(pages),
             ha_error=ha_error,
             layout=page.layout,
+            button_actions=mappings_payload(
+                record.get("button_action_mappings")
+            ),
+            show_button_indicators=bool(
+                record.get("button_action_indicators")
+            ),
         )
         digest = hashlib.sha256(image).hexdigest()
         image_unchanged = bool(x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest)

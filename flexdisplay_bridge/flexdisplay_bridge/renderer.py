@@ -806,6 +806,124 @@ def _draw_name_card(
         )
 
 
+def _draw_dotted_line(
+    draw: ImageDraw.ImageDraw,
+    start: int,
+    end: int,
+    y: int,
+    width: int,
+) -> None:
+    segment = max(3, width * 2)
+    gap = max(3, width * 2)
+    cursor = start
+    while cursor < end:
+        draw.line(
+            (cursor, y, min(end, cursor + segment), y),
+            fill=0,
+            width=width,
+        )
+        cursor += segment + gap
+
+
+def _draw_button_action_indicators(
+    draw: ImageDraw.ImageDraw,
+    width: int,
+    top: int,
+    bottom: int,
+    mappings: Iterable[dict[str, Any]],
+) -> None:
+    """Draw a compact edge legend for configured physical-button gestures."""
+    labels = {
+        "confirm": "OK",
+        "left": "L",
+        "right": "R",
+        "up": "U",
+        "down": "D",
+    }
+    grouped: dict[str, set[str]] = {}
+    for mapping in mappings:
+        action = mapping.get("action")
+        if not isinstance(action, dict) or action.get("type") == "none":
+            continue
+        button = str(mapping.get("button") or "")
+        gesture = str(mapping.get("gesture") or "")
+        if button in labels and gesture in {"short", "double", "long"}:
+            grouped.setdefault(button, set()).add(gesture)
+    buttons = [
+        button
+        for button in ("left", "up", "confirm", "down", "right")
+        if button in grouped
+    ]
+    if not buttons:
+        return
+
+    margin = max(14, width // 26)
+    draw.line((margin, top, width - margin, top), fill=0, width=1)
+    slot_width = max(54, (width - margin * 2) // len(buttons))
+    label_font = _font(max(11, width // 42), True)
+    stroke = max(1, width // 240)
+    center_y = (top + bottom) // 2
+    for index, button in enumerate(buttons):
+        slot_left = margin + index * slot_width
+        slot_right = min(width - margin, slot_left + slot_width)
+        label = labels[button]
+        label_bounds = draw.textbbox((0, 0), label, font=label_font)
+        label_width = label_bounds[2] - label_bounds[0]
+        label_left = slot_left + 4
+        label_top = center_y - (label_bounds[3] - label_bounds[1]) // 2
+        draw.rounded_rectangle(
+            (
+                label_left,
+                center_y - 10,
+                label_left + label_width + 10,
+                center_y + 10,
+            ),
+            radius=4,
+            outline=0,
+            width=stroke,
+        )
+        draw.text(
+            (label_left + 5, label_top - label_bounds[1]),
+            label,
+            fill=0,
+            font=label_font,
+        )
+        line_start = label_left + label_width + 16
+        line_end = slot_right - 5
+        if line_end <= line_start:
+            continue
+        gestures = grouped[button]
+        if "short" in gestures:
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y - 6,
+                stroke,
+            )
+        if "double" in gestures:
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y - 1,
+                stroke,
+            )
+            _draw_dotted_line(
+                draw,
+                line_start,
+                line_end,
+                center_y + 4,
+                stroke,
+            )
+        if "long" in gestures:
+            draw.line(
+                (line_start, center_y + 8, line_end, center_y + 8),
+                fill=0,
+                width=max(2, stroke + 1),
+            )
+
+
 class DashboardRenderer:
     def render(
         self,
@@ -819,6 +937,8 @@ class DashboardRenderer:
         page_count: int = 1,
         ha_error: str = "",
         layout: str = "auto",
+        button_actions: Iterable[dict[str, Any]] = (),
+        show_button_indicators: bool = False,
     ) -> bytes:
         width = max(240, min(1200, width))
         height = max(240, min(1600, height))
@@ -848,9 +968,21 @@ class DashboardRenderer:
         draw.text((width - margin - date_width, header_height - 27), date_text, fill=255, font=date_font)
 
         values = list(entities)[:4]
+        configured_button_actions = [
+            mapping
+            for mapping in button_actions
+            if isinstance(mapping, dict)
+            and isinstance(mapping.get("action"), dict)
+            and mapping["action"].get("type") != "none"
+        ]
+        indicator_height = (
+            max(32, height // 24)
+            if show_button_indicators and configured_button_actions
+            else 0
+        )
         grid_top = header_height + gap
         footer_top = height - footer_height
-        grid_bottom = footer_top - gap
+        grid_bottom = footer_top - gap - indicator_height
 
         if values:
             if layout == "single" or len(values) == 1:
@@ -1114,6 +1246,15 @@ class DashboardRenderer:
             draw.text((margin + 106, box_top + 34), "Bridge connected", fill=0, font=heading)
             draw.text((margin + 24, box_top + 125), "Add entity IDs to config.yaml", fill=0, font=body)
             draw.text((margin + 24, box_top + 160), "to display live Home Assistant values.", fill=0, font=body)
+
+        if indicator_height:
+            _draw_button_action_indicators(
+                draw,
+                width,
+                footer_top - indicator_height,
+                footer_top - 2,
+                configured_button_actions,
+            )
 
         draw.line((margin, footer_top, width - margin, footer_top), fill=0, width=2)
         status_font = _font(max(13, width // 34), True)

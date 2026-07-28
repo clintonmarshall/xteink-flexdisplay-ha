@@ -10,6 +10,11 @@
   preventing enlarged codes from colliding with text.
 - Added larger, readable defaults to the QR Page and ID Badge templates while
   preserving 100% defaults for existing profiles.
+- Made physical-button activation explicit in Studio with Ready/Waiting mode
+  status, Bridge save time, last execution result, and clearer save feedback.
+- Added optional e-paper button indicators: dotted for short press,
+  double-dotted for double press, and solid for long press. Indicators identify
+  Left, Up, Confirm, Down, and Right without covering dashboard tiles.
 
 ## 0.22.2
 

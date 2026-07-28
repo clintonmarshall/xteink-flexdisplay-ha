@@ -24,6 +24,14 @@ presses for dashboard navigation, entity controls, scenes, scripts,
 automations, and validated Home Assistant services. Back and Power remain
 reserved recovery controls.
 
+Bridge `0.22.3` makes activation state explicit in Studio: mappings are saved
+on the Bridge immediately and show **Ready** while the device is in Home
+Assistant mode or **Waiting** when another device mode is active. An optional
+on-screen legend can identify assigned buttons using a dotted line for short
+press, double-dotted line for double press, and solid line for long press.
+The legend is rendered above the status footer and does not cover dashboard
+tiles.
+
 FlexDisplay `0.18.0` adds a **Photo Frame** workspace to Dashboard Studio.
 Create albums, upload JPEG/PNG/WebP/BMP images, import `camera.*` or `image.*`
 entities, select crop/contain and rotation, add captions, preview the exact

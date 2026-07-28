@@ -1174,10 +1174,14 @@ def test_configurable_double_press_calls_home_assistant_once(
         devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
     )
     with TestClient(create_app(config)) as client:
-        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
+        initial_screen = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-DEMO01"},
+        )
         saved = client.put(
             "/api/v1/devices/X3-DEMO01/button-actions",
             json={
+                "show_indicators": True,
                 "mappings": [
                     {
                         "mode": "home_assistant",
@@ -1194,6 +1198,14 @@ def test_configurable_double_press_calls_home_assistant_once(
             },
         )
         assert saved.status_code == 200
+        assert saved.json()["show_indicators"] is True
+        assert saved.json()["activation"]["active_now"] is True
+        assert saved.json()["activation"]["requires_device_sync"] is False
+        configured = client.get(
+            "/api/v1/devices/X3-DEMO01/button-actions"
+        ).json()
+        assert configured["show_indicators"] is True
+        assert configured["activation"]["status"] == "ready"
 
         response = client.get(
             "/api/v1/screen",
@@ -1206,6 +1218,7 @@ def test_configurable_double_press_calls_home_assistant_once(
             },
         )
         assert response.headers["x-flexdisplay-page-title"] == "CLIMATE"
+        assert response.content != initial_screen.content
         assert calls == [("light.toggle", "light.showroom", {"transition": 1})]
 
         # Firmware retries remain replay-safe.
@@ -1461,6 +1474,11 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
         assert 'id="addQrTile"' in studio.text
         assert 'class="tile-text-scale"' in studio.text
         assert 'class="tile-qr-scale"' in studio.text
+        assert "Save &amp; activate" in studio.text
+        assert "Show assigned-button indicators" in studio.text
+        assert "Saved actions are active immediately on the Bridge" in studio.text
+        assert "gesture-mark short" in studio.text
+        assert "gesture-mark long" in studio.text
 
         portrait = io.BytesIO()
         photo = Image.new("RGB", (300, 420), "white")
