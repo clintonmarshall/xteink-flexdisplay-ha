@@ -26,6 +26,7 @@ from .button_actions import (
     resolve_action,
 )
 from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
+from .content_pack import ContentPackError, ContentPackStore, MAX_PACK_BYTES
 from .dashboard_store import (
     DashboardProfileStore,
     DashboardValidationError,
@@ -729,6 +730,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     loading_screens = LoadingScreenStore(
         settings.state_path.with_name("flexdisplay-loading-screens.json")
     )
+    content_packs = ContentPackStore(
+        settings.state_path.with_name("flexdisplay-content-packs.json"),
+        settings.state_path.with_name("content-packs"),
+    )
     firmware_mirror = FirmwareMirror(
         settings.state_path.with_name("firmware-cache")
     )
@@ -981,6 +986,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.dashboards = dashboards
     app.state.photo_frames = photo_frames
     app.state.loading_screens = loading_screens
+    app.state.content_packs = content_packs
     app.state.firmware_mirror = firmware_mirror
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
@@ -1017,6 +1023,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["X-FlexDisplay-Loading-URL"] = str(
             request.url_for("device_loading_screen", device_id=device_id)
         )
+
+    def apply_content_pack_headers(
+        response: Response,
+        request: Request,
+        device_id: str,
+    ) -> None:
+        assignment = content_packs.desired(device_id)
+        if not assignment:
+            return
+        version = str(assignment["desired_version"])
+        base_url = str(request.base_url).rstrip("/")
+        _, digest = content_packs.manifest(version, base_url)
+        response.headers["X-FlexDisplay-Content-Version"] = version
+        response.headers["X-FlexDisplay-Content-Manifest-URL"] = (
+            f"{base_url}/api/v1/content-packs/{version}/manifest.json"
+        )
+        response.headers["X-FlexDisplay-Content-Manifest-SHA256"] = digest
 
     def queue_loading_screen_refresh(target: str) -> list[str]:
         refreshed: list[str] = []
@@ -2127,6 +2150,74 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "device": _decorate_device(record, settings, store, dashboards.names()),
         }
 
+    @app.get("/api/v1/content-packs")
+    def list_content_packs(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return content_packs.payload()
+
+    @app.post("/api/v1/content-packs")
+    async def upload_content_pack(request: Request) -> dict[str, Any]:
+        authorize(request)
+        content_length = _optional_integer(
+            request.headers.get("content-length"), 0, MAX_PACK_BYTES + 1
+        )
+        if content_length is not None and content_length > MAX_PACK_BYTES:
+            raise HTTPException(status_code=413, detail="Content pack is too large")
+        archive = await request.body()
+        try:
+            pack = content_packs.install(archive)
+        except ContentPackError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"pack": pack}
+
+    @app.post("/api/v1/content-packs/{version}/rollout")
+    def rollout_content_pack(
+        version: str, payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = payload.get("device_ids")
+        if not isinstance(selected, list) or not selected:
+            raise HTTPException(status_code=400, detail="Select at least one device")
+        device_ids = [_device_id(str(value)) for value in selected]
+        known = {str(item.get("device_id") or "") for item in store.all()}
+        missing = [device_id for device_id in device_ids if device_id not in known]
+        if missing:
+            raise HTTPException(
+                status_code=404, detail=f"Unknown devices: {', '.join(missing)}"
+            )
+        try:
+            assignments = content_packs.assign(version, device_ids)
+        except ContentPackError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        for device_id in device_ids:
+            store.queue_command(device_id, "refresh")
+        return {"version": version, "device_ids": device_ids, "assignments": assignments}
+
+    @app.get(
+        "/api/v1/content-packs/{version}/manifest.json",
+        name="device_content_pack_manifest",
+    )
+    def content_pack_manifest(version: str, request: Request) -> Response:
+        try:
+            content, digest = content_packs.manifest(
+                version, str(request.base_url).rstrip("/")
+            )
+        except ContentPackError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        return Response(
+            content=content,
+            media_type="application/json",
+            headers={"X-Content-SHA256": digest, "Cache-Control": "no-cache"},
+        )
+
+    @app.get("/api/v1/content-packs/{version}/files/{source:path}")
+    def content_pack_file(version: str, source: str) -> FileResponse:
+        try:
+            path = content_packs.file_path(version, source)
+        except ContentPackError as err:
+            raise HTTPException(status_code=404, detail=str(err)) from err
+        return FileResponse(path)
+
     @app.get("/api/v1/screen")
     def screen(
         response: Response,
@@ -2150,6 +2241,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_button_events: str | None = Header(default=None),
         x_flexdisplay_image_sha256: str | None = Header(default=None),
+        x_flexdisplay_content_version: str | None = Header(default=None),
+        x_flexdisplay_content_status: str | None = Header(default=None),
+        x_flexdisplay_content_error: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -2172,6 +2266,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "wake_reason": x_flexdisplay_wake_reason or None,
         }
         record = store.touch(device_id, telemetry)
+        content_assignment = content_packs.observe(
+            device_id,
+            x_flexdisplay_content_version or "",
+            x_flexdisplay_content_status or "",
+            x_flexdisplay_content_error or "",
+        )
+        if content_assignment:
+            record = store.touch(
+                device_id,
+                {
+                    "content_pack_desired": content_assignment.get("desired_version"),
+                    "content_pack_version": content_assignment.get("installed_version"),
+                    "content_pack_status": content_assignment.get("status"),
+                    "content_pack_error": content_assignment.get("error"),
+                },
+            )
         configured = settings.device(device_id, width, height, model)
         if settings.provisioning.enabled:
             record = store.ensure_provisioning(
@@ -2345,6 +2455,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     width,
                     height,
                 )
+                apply_content_pack_headers(response, request, device_id)
                 return Response(
                     content=image,
                     media_type=str(
@@ -2507,6 +2618,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 width,
                 height,
             )
+            apply_content_pack_headers(response, request, device_id)
             return Response(
                 content=image,
                 media_type="image/bmp",
@@ -2697,6 +2809,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             width,
             height,
         )
+        apply_content_pack_headers(response, request, device_id)
         return Response(content=image, media_type="image/png", headers=dict(response.headers))
 
     return app

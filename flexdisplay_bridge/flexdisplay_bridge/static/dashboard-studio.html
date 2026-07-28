@@ -337,6 +337,12 @@
       </div>
 
       <div class="section">
+        <div class="section-head"><h2>Fleet content</h2><span class="rule-badge">v0.22</span></div>
+        <button id="openContentPacks" class="primary" style="width:100%">Manage content packs</button>
+        <p class="small muted" style="margin:10px 0 0">Roll out managed photos, books, logos, and assets to multiple X3/X4 devices with acknowledgements.</p>
+      </div>
+
+      <div class="section">
         <div class="section-head"><h2>Photo Frame</h2><span class="rule-badge">v0.18</span></div>
         <button id="openPhotoLibrary" class="primary" style="width:100%">Open media library</button>
         <p class="small muted" style="margin:10px 0 0">Upload JPEG, PNG, WebP, or BMP images and preview their exact X3/X4 e-paper conversion.</p>
@@ -711,6 +717,30 @@
       </div>
     </div>
   </dialog>
+  <dialog id="contentPackDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Fleet Content v0.22</div><h2 style="font-size:20px">Content-pack rollout</h2></div>
+      <button id="closeContentPacks" class="icon" title="Close">×</button>
+    </div>
+    <div class="loading-shell">
+      <div class="loading-controls">
+        <div class="upload-drop">
+          <strong>Install a content-pack ZIP</strong>
+          <span class="small muted">The ZIP contains content-pack.json plus managed photos, books, logos, or assets.</span>
+          <input id="contentPackUpload" type="file" accept=".zip,application/zip">
+        </div>
+        <label>Pack to deploy<select id="contentPackVersion"></select></label>
+        <div class="section-head" style="margin-top:14px"><h2>Target devices</h2><button id="selectAllContentDevices">Select all</button></div>
+        <div id="contentPackDevices" class="tile-list"></div>
+        <button id="deployContentPack" class="primary">Deploy to selected devices</button>
+        <p class="small muted">Sleeping displays receive the pack at their next scheduled or physical-button wake. Personal files and settings are preserved.</p>
+      </div>
+      <div>
+        <div class="section-head"><h2>Rollout status</h2><button id="refreshContentPacks">Refresh</button></div>
+        <div id="contentPackStatus" class="fleet-grid"><div class="empty">No content packs loaded.</div></div>
+      </div>
+    </div>
+  </dialog>
   <div id="toast" role="status"></div>
 
   <script>
@@ -732,6 +762,7 @@
       loadingScreens: {default: {}, devices: {}},
       loadingPreviewUrl: "",
       loadingPreviewTimer: null,
+      contentPacks: {packs: {}, assignments: {}},
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -832,6 +863,72 @@
         populateDevices();
       } catch (error) {
         grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    async function loadContentPacks() {
+      try {
+        const response = await api("content-packs");
+        state.contentPacks = await response.json();
+        const versions = Object.keys(state.contentPacks.packs || {}).sort().reverse();
+        $("#contentPackVersion").innerHTML = versions.length
+          ? versions.map((version) => `<option value="${escapeHtml(version)}">${escapeHtml(state.contentPacks.packs[version].name || version)} · ${escapeHtml(version)}</option>`).join("")
+          : '<option value="">Upload a content pack first</option>';
+        $("#contentPackDevices").innerHTML = state.devices.length
+          ? state.devices.map((device) => `
+              <label class="check-row">
+                <input type="checkbox" data-content-device value="${escapeHtml(device.device_id)}">
+                ${escapeHtml(device.name || device.device_id)} · ${escapeHtml(device.model || "X3")}
+              </label>`).join("")
+          : '<div class="empty">No FlexDisplay devices have checked in yet.</div>';
+        const assignments = state.contentPacks.assignments || {};
+        $("#contentPackStatus").innerHTML = Object.keys(assignments).length
+          ? Object.entries(assignments).map(([deviceId, item]) => `
+              <article class="fleet-card">
+                <div class="section-head"><strong>${escapeHtml(deviceId)}</strong><span class="rule-badge">${escapeHtml(item.status || "pending")}</span></div>
+                <div class="small muted">Desired ${escapeHtml(item.desired_version || "—")} · Installed ${escapeHtml(item.installed_version || "waiting")}</div>
+                ${item.error ? `<div class="small" style="color:var(--danger);margin-top:8px">${escapeHtml(item.error)}</div>` : ""}
+              </article>`).join("")
+          : '<div class="empty">No content rollout has been assigned.</div>';
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function uploadContentPack() {
+      const file = $("#contentPackUpload").files?.[0];
+      if (!file) return;
+      try {
+        const response = await api("content-packs", {
+          method: "POST",
+          headers: {"Content-Type": "application/zip"},
+          body: file,
+        });
+        const payload = await response.json();
+        $("#contentPackUpload").value = "";
+        toast(`Content pack ${payload.pack.version} installed in the Bridge.`);
+        await loadContentPacks();
+        $("#contentPackVersion").value = payload.pack.version;
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function deployContentPack() {
+      const version = $("#contentPackVersion").value;
+      const deviceIds = [...document.querySelectorAll("[data-content-device]:checked")]
+        .map((node) => node.value);
+      if (!version) return toast("Upload or select a content pack first.", true);
+      if (!deviceIds.length) return toast("Select at least one device.", true);
+      try {
+        await api(`content-packs/${encodeURIComponent(version)}/rollout`, {
+          method: "POST",
+          body: {device_ids: deviceIds},
+        });
+        toast(`${version} queued for ${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}.`);
+        await loadContentPacks();
+      } catch (error) {
+        toast(error.message, true);
       }
     }
 
@@ -2122,6 +2219,17 @@
     });
     $("#refreshFleetHealth").addEventListener("click", loadFleetHealth);
     $("#closeFleetHealth").addEventListener("click", () => $("#fleetHealthDialog").close());
+    $("#openContentPacks").addEventListener("click", () => {
+      $("#contentPackDialog").showModal();
+      loadContentPacks();
+    });
+    $("#closeContentPacks").addEventListener("click", () => $("#contentPackDialog").close());
+    $("#refreshContentPacks").addEventListener("click", loadContentPacks);
+    $("#contentPackUpload").addEventListener("change", uploadContentPack);
+    $("#deployContentPack").addEventListener("click", deployContentPack);
+    $("#selectAllContentDevices").addEventListener("click", () => {
+      document.querySelectorAll("[data-content-device]").forEach((node) => { node.checked = true; });
+    });
     $("#fleetHealthGrid").addEventListener("click", (event) => {
       const command = event.target.closest("[data-fleet-command]");
       if (command) return fleetCommand(command.dataset.fleetDevice, command.dataset.fleetCommand);

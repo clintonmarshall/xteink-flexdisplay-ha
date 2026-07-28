@@ -52,6 +52,13 @@ cached on the device SD card after its next successful check-in, so showing it
 adds no network request to later dashboard fetches. Policies can show it on
 every fetch, only after a manual wake, only on USB power, or never.
 
+FlexDisplay `0.22.0` adds **Fleet Content** to Dashboard Studio. Upload a
+validated content-pack ZIP, select one or many X3/X4 devices, and deploy
+managed photos, books, logos, and other assets. Devices verify the manifest,
+file sizes, and SHA-256 checksums before installing, then report pending,
+installed, or failed at their next check-in. This is non-destructive and is
+separate from the USB-only LDCS Factory Kit.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

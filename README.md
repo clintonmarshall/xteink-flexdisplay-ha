@@ -201,6 +201,13 @@ dashboard. Fleet-default and per-device designs support always, manual-wake,
 USB-only, and disabled policies, with the original text screen retained as a
 safe fallback.
 
+Firmware, Bridge, and integration `0.22.0` add an LDCS Factory Kit and
+acknowledged fleet content packs. The private local USB kit can return either
+an X3 or X4 to a known firmware and SD-card setup. For working devices,
+Dashboard Studio's Fleet Content workspace distributes revised managed photos,
+books, logos, and assets to one or many displays without erasing personal
+files or device settings.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing
