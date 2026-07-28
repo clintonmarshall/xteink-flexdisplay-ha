@@ -67,7 +67,7 @@ Delivery: Bridge/HACS/Firmware `0.19.0`.
 
 ## v0.20 — Device health and screen history
 
-Status: implemented, pending release and Home Assistant deployment.
+Status: released and deployed.
 Delivery: Bridge/HACS `0.20.0`; existing shared firmware `0.19.0` is compatible.
 
 - HACS-optional App-only installation using complete MQTT Discovery.
@@ -99,7 +99,7 @@ Status: queued.
 
 ## v0.23 — Transfer optimization
 
-Status: implemented, pending release and device deployment.
+Status: released and deployed.
 Delivery: Bridge/Firmware `0.23.0`.
 
 - Zero-byte unchanged-screen responses only when the device confirms that the
@@ -108,3 +108,19 @@ Delivery: Bridge/Firmware `0.23.0`.
 - Backwards-compatible full-image delivery for firmware before `0.23.0`.
 - Home Assistant diagnostics for transfer format, delivered bytes, bytes
   saved, and percentage saved.
+
+## v0.24 — Advanced fleet health
+
+Status: implemented, pending release and canary deployment.
+Delivery: Bridge/Firmware `0.24.0`.
+
+- Device boot identifiers and reset reasons for power, software, panic,
+  watchdog, deep-sleep, brownout, external, and unknown resets.
+- Bounded check-in, reset, battery, Wi-Fi, SD, memory, and uptime history.
+- Battery drain/runtime estimates, Wi-Fi trend, missed-check-in detection,
+  repeated SD failure counters, and problem-reset diagnostics.
+- Fleet Health battery and Wi-Fi sparklines plus complete MQTT Discovery
+  diagnostic and problem entities.
+- Optional timezone-aware overnight OTA maintenance windows with a
+  configurable USB-powered override.
+- Automatic repair of stale OTA acknowledgement evidence.

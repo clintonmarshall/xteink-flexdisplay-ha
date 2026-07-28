@@ -155,6 +155,11 @@ class FirmwareConfig:
     mirror_enabled: bool = True
     mirror_retry_seconds: int = 300
     stale_install_seconds: int = 1800
+    maintenance_window_enabled: bool = False
+    maintenance_start: str = "01:00"
+    maintenance_end: str = "05:00"
+    maintenance_timezone: str = "Australia/Melbourne"
+    maintenance_usb_override: bool = True
 
 
 @dataclass(frozen=True)
@@ -487,6 +492,32 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
                     )
                 ),
             ),
+        ),
+        maintenance_window_enabled=_env_bool(
+            "FLEXDISPLAY_FIRMWARE_MAINTENANCE_ENABLED",
+            bool(firmware_raw.get("maintenance_window_enabled", False)),
+        ),
+        maintenance_start=str(
+            os.getenv(
+                "FLEXDISPLAY_FIRMWARE_MAINTENANCE_START",
+                firmware_raw.get("maintenance_start", "01:00"),
+            )
+        ),
+        maintenance_end=str(
+            os.getenv(
+                "FLEXDISPLAY_FIRMWARE_MAINTENANCE_END",
+                firmware_raw.get("maintenance_end", "05:00"),
+            )
+        ),
+        maintenance_timezone=str(
+            os.getenv(
+                "FLEXDISPLAY_FIRMWARE_MAINTENANCE_TIMEZONE",
+                firmware_raw.get("maintenance_timezone", "Australia/Melbourne"),
+            )
+        ),
+        maintenance_usb_override=_env_bool(
+            "FLEXDISPLAY_FIRMWARE_MAINTENANCE_USB_OVERRIDE",
+            bool(firmware_raw.get("maintenance_usb_override", True)),
         ),
     )
 

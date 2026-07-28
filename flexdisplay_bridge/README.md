@@ -90,6 +90,15 @@ PNG instead of raw BMP. Earlier firmware continues receiving full images.
 Home Assistant diagnostic sensors expose the last transfer format, size,
 bytes saved, and percentage saved.
 
+FlexDisplay `0.24.0` adds advanced fleet health. Shared X3/X4 firmware reports
+a unique identifier for each boot and the ESP reset reason, including panic,
+watchdog, brownout, deep-sleep, software, and power resets. The Bridge keeps a
+bounded history and derives Wi-Fi trend, battery drain/runtime, missed
+check-ins, repeated SD failures, and reset counters. Fleet Health visualizes
+battery and Wi-Fi trends, and MQTT Discovery publishes matching diagnostic and
+problem entities. Optional overnight firmware maintenance windows can gate
+battery-powered rollouts while still allowing an explicit USB override.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

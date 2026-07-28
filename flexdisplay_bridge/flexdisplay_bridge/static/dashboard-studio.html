@@ -287,6 +287,10 @@
     .fleet-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-content: start; }
     .fleet-fact { padding: 7px; border-radius: 7px; background: var(--panel-2); }
     .fleet-fact strong { display: block; font-size: 12px; }
+    .fleet-trends { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
+    .fleet-trend { padding: 7px; border-radius: 7px; background: var(--panel-2); }
+    .fleet-spark { display: block; width: 100%; height: 28px; margin-top: 4px; }
+    .fleet-spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
     .health-badge { padding: 3px 8px; border-radius: 999px; color: #08130f; background: var(--accent-2); font-size: 10px; font-weight: 850; text-transform: uppercase; }
     .health-badge.needs_attention, .health-badge.offline { color: #24100f; background: var(--danger); }
     .screen-strip { display: flex; gap: 7px; padding: 0 12px 12px; overflow-x: auto; }
@@ -870,6 +874,22 @@
       })[character]);
     }
 
+    function sparkline(history, key) {
+      const values = (history || [])
+        .map((point) => Number(point?.[key]))
+        .filter((value) => Number.isFinite(value));
+      if (values.length < 2) return '<span class="small muted">Collecting history…</span>';
+      const minimum = Math.min(...values);
+      const maximum = Math.max(...values);
+      const spread = Math.max(1, maximum - minimum);
+      const points = values.map((value, index) => {
+        const x = values.length === 1 ? 50 : (index / (values.length - 1)) * 100;
+        const y = 26 - ((value - minimum) / spread) * 22;
+        return `${x.toFixed(1)},${y.toFixed(1)}`;
+      }).join(" ");
+      return `<svg class="fleet-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}"></polyline></svg>`;
+    }
+
     async function loadFleetHealth() {
       const grid = $("#fleetHealthGrid");
       grid.innerHTML = '<div class="empty">Loading fleet health…</div>';
@@ -900,6 +920,18 @@
             <button class="screen-thumb" data-resend-device="${id}" data-resend-screen="${escapeHtml(item.id)}" title="Resend ${escapeHtml(item.title || item.captured_at)}">
               <img src="${API(`devices/${encodeURIComponent(device.device_id)}/screens/${encodeURIComponent(item.id)}`)}" alt="${escapeHtml(item.title || "Saved screen")}">
             </button>`).join("");
+          const runtime = Number(device.estimated_battery_runtime_hours);
+          const runtimeLabel = Number.isFinite(runtime)
+            ? `${runtime >= 48 ? (runtime / 24).toFixed(1) + " d" : runtime.toFixed(1) + " h"} est.`
+            : "learning";
+          const wifiArrow = device.wifi_trend === "improving"
+            ? "↗"
+            : device.wifi_trend === "declining"
+            ? "↘"
+            : "→";
+          const maintenance = device.firmware_maintenance_window_open
+            ? "open"
+            : `${device.firmware_maintenance_start || "—"}–${device.firmware_maintenance_end || "—"}`;
           return `
             <article class="fleet-card">
               <div class="fleet-card-head">
@@ -910,12 +942,20 @@
                 ${preview}
                 <div>
                   <div class="fleet-facts">
-                    <div class="fleet-fact"><span class="small muted">Battery</span><strong>${escapeHtml(device.battery_percent ?? "—")}%</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Wi-Fi</span><strong>${escapeHtml(device.rssi ?? "—")} dBm</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Battery</span><strong>${escapeHtml(device.battery_percent ?? "—")}% · ${escapeHtml(runtimeLabel)}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Wi-Fi</span><strong>${escapeHtml(device.rssi ?? "—")} dBm · ${wifiArrow} ${escapeHtml(device.wifi_trend || "learning")}</strong></div>
                     <div class="fleet-fact"><span class="small muted">Power</span><strong>${escapeHtml(device.power_state || "unknown")}</strong></div>
                     <div class="fleet-fact"><span class="small muted">Firmware</span><strong>${escapeHtml(device.firmware || "unknown")}</strong></div>
                     <div class="fleet-fact"><span class="small muted">Page</span><strong>${escapeHtml(device.dashboard_page_title || device.photo_filename || "—")}</strong></div>
                     <div class="fleet-fact"><span class="small muted">Next wake</span><strong>${escapeHtml(device.next_wake_at || "manual")}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Check-ins</span><strong>${escapeHtml(device.checkin_health || "learning")} · ${escapeHtml(device.missed_checkins || 0)} missed</strong></div>
+                    <div class="fleet-fact"><span class="small muted">Last reset</span><strong>${escapeHtml(device.reset_reason || "awaiting v0.24")}</strong></div>
+                    <div class="fleet-fact"><span class="small muted">SD failures</span><strong>${escapeHtml(device.sd_failure_events || 0)} events</strong></div>
+                    <div class="fleet-fact"><span class="small muted">OTA window</span><strong>${escapeHtml(maintenance)}</strong></div>
+                  </div>
+                  <div class="fleet-trends">
+                    <div class="fleet-trend"><span class="small muted">Battery history</span>${sparkline(device.checkin_history, "battery_percent")}</div>
+                    <div class="fleet-trend"><span class="small muted">Wi-Fi history</span>${sparkline(device.checkin_history, "rssi")}</div>
                   </div>
                   <div class="button-row" style="margin-top:10px">
                     <button data-fleet-command="refresh" data-fleet-device="${id}">Refresh</button>

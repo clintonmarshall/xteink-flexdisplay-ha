@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.24.0
+
+- Added per-boot reset telemetry with stable boot identifiers and explicit
+  power-on, software, panic, watchdog, deep-sleep, brownout, and external
+  reset reasons from the shared X3/X4 firmware.
+- Added bounded check-in, reset, battery, Wi-Fi, SD, uptime, and free-memory
+  history for every device.
+- Added Wi-Fi trend, estimated missed check-ins, SD failure counters, watchdog
+  counters, battery drain rate, and estimated battery runtime diagnostics.
+- Expanded Fleet Health with battery and Wi-Fi sparklines, reset reason,
+  check-in reliability, SD failures, and the active OTA maintenance window.
+- Added complete MQTT Discovery diagnostics and problem sensors for overdue
+  check-ins, watchdog/panic/brownout resets, and repeated SD failures.
+- Added optional timezone-aware firmware maintenance windows with overnight
+  schedules and a configurable USB-powered override. The feature defaults off
+  for backwards-compatible manual rollouts.
+- Added startup/check-in repair for successful OTA records that retained stale
+  verification evidence from an earlier USB recovery.
+- Added shared X3/X4 firmware `1.4.1-flexdisplay.0.24.0`.
+
 ## 0.23.1
 
 - Fixed the first-canary USB safety gate after a rollout reset. A reset rollout
