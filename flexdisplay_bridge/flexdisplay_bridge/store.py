@@ -923,21 +923,28 @@ class DeviceStore:
         running = str(record.get("firmware") or "")
         successful = result in {"install:complete", "install:boot-confirmed"} and running == target
         if successful:
+            verified_at = utc_now()
+            verification_method = "device_checkin"
             record["firmware_update_status"] = "verified"
             record["firmware_update_stage"] = "verified"
             record["firmware_update_percent"] = 100
-            record["firmware_update_stage_at"] = utc_now()
+            record["firmware_update_stage_at"] = verified_at
+            record["firmware_verified_at"] = verified_at
+            record["firmware_verification_method"] = verification_method
             record.pop("firmware_update_error", None)
             record.pop("firmware_update_error_at", None)
+            history = record.get("command_history") or []
+            if history and history[-1].get("result") == result:
+                history[-1]["verification_method"] = verification_method
             updated = rollout.setdefault("updated_devices", [])
             if device_id not in updated:
                 updated.append(device_id)
             if rollout.get("canary_device_id") == device_id:
                 rollout["status"] = "canary_verified"
-                rollout["canary_verified_at"] = utc_now()
-            elif rollout.get("status") == "fleet_active":
-                rollout["last_verified_at"] = utc_now()
+                rollout["canary_verified_at"] = verified_at
+            rollout["last_verified_at"] = verified_at
             rollout["last_verified_device_id"] = device_id
+            rollout["last_verification_method"] = verification_method
             return
 
         record["firmware_update_status"] = "failed"
