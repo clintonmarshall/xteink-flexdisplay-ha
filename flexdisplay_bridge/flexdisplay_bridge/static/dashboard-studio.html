@@ -559,6 +559,19 @@
           <div><h2>Physical-button actions</h2><span class="small muted">Per-device · Home Assistant mode</span></div>
         </div>
         <label>Device<select id="buttonActionDevice"></select></label>
+        <div class="field-grid" style="margin-top:10px">
+          <label>Display orientation
+            <select id="displayRotation">
+              <option value="0">Normal · 0°</option>
+              <option value="180">Lanyard · 180°</option>
+            </select>
+          </label>
+          <div class="button-row" style="align-items:end">
+            <button id="applyDisplayRotation" class="primary">Apply orientation</button>
+            <button id="flipDisplayRotation">Flip 180°</button>
+          </div>
+        </div>
+        <p id="displayRotationStatus" class="small muted" style="margin:8px 0 0">The selected orientation persists across sleep, restarts, and every display mode.</p>
         <div id="buttonActionActivation" class="activation-card waiting">
           <div class="activation-title"><strong>Select a device</strong><span class="activation-state">Waiting</span></div>
           <span class="small muted">Actions are stored on the Bridge and run when a device reports a gesture in Home Assistant mode.</span>
@@ -589,6 +602,7 @@
             <option value="navigation_previous">Previous dashboard page</option>
             <option value="navigation_overview">Dashboard overview</option>
             <option value="navigation_refresh">Refresh current page</option>
+            <option value="device_rotate_toggle">Toggle display 180°</option>
             <option value="toggle">Toggle Home Assistant entity</option>
             <option value="turn_on">Turn entity on</option>
             <option value="turn_off">Turn entity off</option>
@@ -620,7 +634,7 @@
           </span>
         </label>
         <div id="buttonActionSummary" class="action-summary"></div>
-        <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge; no firmware sync is required. They execute after the device sends the gesture during a Home Assistant-mode check-in. Back and Power stay reserved. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
+        <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge. Display rotation requires firmware 0.25 or newer and executes during a Home Assistant-mode check-in. The local Left + Right one-second chord works in every mode without Wi-Fi. Back and Power stay reserved.</p>
       </div>
     </aside>
   </div>
@@ -1104,6 +1118,7 @@
         $("#saveState").textContent = "Saved";
         loadEntities();
         loadServices();
+        renderDisplayRotation();
         if ($("#buttonActionDevice").value) loadButtonActions($("#buttonActionDevice").value);
       } catch (error) {
         $("#saveState").textContent = "Unavailable";
@@ -1685,6 +1700,7 @@
       if (!action) return "default";
       if (action.type === "none") return "none";
       if (action.type === "navigation") return `navigation_${action.command}`;
+      if (action.type === "device" && action.command === "rotate-toggle") return "device_rotate_toggle";
       if (action.type !== "home_assistant") return "default";
       if (action.service.endsWith(".toggle")) return "toggle";
       if (action.service === "automation.trigger") return "activate";
@@ -1701,6 +1717,7 @@
       const action = mapping.action;
       if (action.type === "none") return "Do nothing";
       if (action.type === "navigation") return titleCase(action.command);
+      if (action.type === "device" && action.command === "rotate-toggle") return "Toggle display 180°";
       return `${action.service}${action.entity_id ? ` · ${action.entity_id}` : ""}`;
     }
 
@@ -1778,6 +1795,9 @@
       if (type.startsWith("navigation_")) {
         return {type: "navigation", command: type.replace("navigation_", "")};
       }
+      if (type === "device_rotate_toggle") {
+        return {type: "device", command: "rotate-toggle"};
+      }
       const entityId = $("#buttonActionEntity").value.trim().toLowerCase();
       if (!entityId.includes(".")) throw new Error("Choose a valid Home Assistant target entity.");
       const domain = entityId.split(".", 1)[0];
@@ -1845,6 +1865,35 @@
           toast("Button action saved. It will activate when the device enters Home Assistant mode.");
         }
         schedulePreview();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderDisplayRotation() {
+      const deviceId = $("#buttonActionDevice").value;
+      const device = state.devices.find((item) => item.device_id === deviceId);
+      const degrees = Number(device?.rotation_degrees) === 180 ? 180 : 0;
+      $("#displayRotation").value = String(degrees);
+      $("#displayRotation").disabled = !deviceId;
+      $("#applyDisplayRotation").disabled = !deviceId;
+      $("#flipDisplayRotation").disabled = !deviceId;
+      $("#displayRotationStatus").textContent = deviceId
+        ? `${device.name || deviceId} last reported ${degrees}°. Changes apply at its next Home Assistant-mode check-in.`
+        : "Select a device. The chosen orientation persists across sleep, restarts, and every display mode.";
+    }
+
+    async function setDisplayRotation(toggle = false) {
+      const deviceId = $("#buttonActionDevice").value;
+      if (!deviceId) return toast("Select a device first.", true);
+      const command = toggle ? "rotate-toggle" : `rotate-${$("#displayRotation").value}`;
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}/commands/${command}`, {method: "POST"});
+        toast(toggle
+          ? "Display flip queued for the device's next check-in."
+          : `${$("#displayRotation").value}° orientation queued for the device's next check-in.`);
+        $("#displayRotationStatus").textContent =
+          "Command queued. The reported orientation updates after the device applies and acknowledges it.";
       } catch (error) {
         toast(error.message, true);
       }
@@ -2805,7 +2854,10 @@
       changed();
     });
     $("#assignProfile").addEventListener("click", assignProfile);
-    $("#buttonActionDevice").addEventListener("change", (event) => loadButtonActions(event.target.value));
+    $("#buttonActionDevice").addEventListener("change", (event) => {
+      renderDisplayRotation();
+      loadButtonActions(event.target.value);
+    });
     $("#buttonActionButton").addEventListener("change", renderButtonAction);
     $("#buttonActionGesture").addEventListener("change", renderButtonAction);
     $("#buttonActionType").addEventListener("change", toggleButtonActionFields);
@@ -2813,6 +2865,8 @@
     $("#clearButtonActions").addEventListener("click", () => {
       if (confirm("Reset every physical-button action for this device?")) saveButtonAction(true);
     });
+    $("#applyDisplayRotation").addEventListener("click", () => setDisplayRotation(false));
+    $("#flipDisplayRotation").addEventListener("click", () => setDisplayRotation(true));
     $("#openPhotoLibrary").addEventListener("click", openPhotoLibrary);
     $("#openLoadingScreen").addEventListener("click", openLoadingScreen);
     $("#closeLoadingScreen").addEventListener("click", () => $("#loadingScreenDialog").close());

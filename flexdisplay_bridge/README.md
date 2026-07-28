@@ -99,6 +99,13 @@ battery and Wi-Fi trends, and MQTT Discovery publishes matching diagnostic and
 problem entities. Optional overnight firmware maintenance windows can gate
 battery-powered rollouts while still allowing an explicit USB override.
 
+FlexDisplay `0.25.0` adds persistent lanyard orientation. Hold Left and Right
+together for one second to flip any X3/X4 between 0° and 180°, even offline.
+The selected orientation applies to every mode and future screen update, and
+survives sleep, reboot, and OTA. Dashboard Studio and Home Assistant also
+provide a Display orientation select and Flip display button, and Studio can
+assign the toggle to another supported physical-button gesture.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

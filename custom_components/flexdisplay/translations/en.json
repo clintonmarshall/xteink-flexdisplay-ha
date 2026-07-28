@@ -34,6 +34,9 @@
       "mode": {
         "name": "Mode"
       },
+      "display_rotation": {
+        "name": "Display orientation"
+      },
       "dashboard_page": {
         "name": "Dashboard page"
       },
@@ -201,6 +204,9 @@
       "restart": {
         "name": "Restart"
       },
+      "flip_display": {
+        "name": "Flip display 180°"
+      },
             "cancel_commands": {
                 "name": "Cancel active commands"
             },
@@ -223,6 +229,9 @@
       },
       "assigned_mode": {
         "name": "Assigned mode"
+      },
+      "display_rotation": {
+        "name": "Display orientation"
       }
     },
     "number": {

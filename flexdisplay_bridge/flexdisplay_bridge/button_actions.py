@@ -8,7 +8,8 @@ BUTTONS = ("confirm", "left", "right", "up", "down")
 GESTURES = ("short", "double", "long")
 MODE = "home_assistant"
 NAVIGATION_COMMANDS = ("next", "previous", "overview", "refresh")
-ACTION_TYPES = ("none", "navigation", "home_assistant")
+DEVICE_COMMANDS = ("rotate-toggle",)
+ACTION_TYPES = ("none", "navigation", "device", "home_assistant")
 
 SERVICE_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
 ENTITY_PATTERN = re.compile(r"^[a-z0-9_]+\.[a-z0-9_]+$")
@@ -63,6 +64,11 @@ def _normalized_action(raw: Any) -> dict[str, Any]:
         if command not in NAVIGATION_COMMANDS:
             raise ButtonActionValidationError("Unsupported navigation command")
         return {"type": "navigation", "command": command}
+    if action_type == "device":
+        command = str(raw.get("command") or "")
+        if command not in DEVICE_COMMANDS:
+            raise ButtonActionValidationError("Unsupported device command")
+        return {"type": "device", "command": command}
 
     service = str(raw.get("service") or "").lower()
     entity_id = str(raw.get("entity_id") or "").lower()

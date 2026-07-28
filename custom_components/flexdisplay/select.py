@@ -92,6 +92,30 @@ class FlexDisplayModeSelect(FlexDisplayEntity, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayRotationSelect(FlexDisplayEntity, SelectEntity):
+    """Select the persistent physical mounting orientation."""
+
+    _attr_translation_key = "display_rotation"
+    _attr_options = ["0°", "180°"]
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_display_rotation_select"
+
+    @property
+    def current_option(self) -> str:
+        return "180°" if int(self.record.get("rotation_degrees") or 0) == 180 else "0°"
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unsupported FlexDisplay orientation: {option}")
+        await self.coordinator.client.command(
+            self.device_id,
+            f"rotate-{option.removesuffix('°')}",
+        )
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -106,5 +130,6 @@ async def async_setup_entry(
             FlexDisplayPageSelect(coordinator, device_id),
             FlexDisplayProfileSelect(coordinator, device_id),
             FlexDisplayModeSelect(coordinator, device_id),
+            FlexDisplayRotationSelect(coordinator, device_id),
         ),
     )

@@ -69,6 +69,9 @@ SUPPORTED_COMMANDS = {
     "power-off",
     "restart",
     "install",
+    "rotate-toggle",
+    "rotate-0",
+    "rotate-180",
 }
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
@@ -887,6 +890,10 @@ def _dispatch_button_actions(
             command = str(action.get("command") or "")
             navigation.append(command)
             success, detail = True, f"navigation:{command}"
+        elif action_type == "device":
+            command = str(action.get("command") or "")
+            store.queue_command(device_id, command)
+            success, detail = True, f"device:{command}"
         elif action_type == "home_assistant":
             success, detail = ha.call_service(
                 str(action.get("service") or ""),
@@ -1212,6 +1219,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     raise ValueError("Unsupported device mode")
                 store.provision(device_id, {"assigned_mode": payload})
                 store.queue_command(device_id, "refresh")
+            elif command == "set-display-rotation":
+                value = payload.strip().replace("°", "")
+                if value not in {"0", "180"}:
+                    raise ValueError("Display rotation must be 0 or 180 degrees")
+                store.queue_command(device_id, f"rotate-{value}")
             elif command == "set-profile":
                 if payload not in dashboards.names():
                     raise ValueError("Unknown dashboard profile")
@@ -2620,6 +2632,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_reset_reason: str | None = Header(default=None),
         x_flexdisplay_boot_id: str | None = Header(default=None),
+        x_flexdisplay_rotation: str | None = Header(default=None),
         x_flexdisplay_button_events: str | None = Header(default=None),
         x_flexdisplay_image_sha256: str | None = Header(default=None),
         x_flexdisplay_image_cached: str | None = Header(default=None),
@@ -2635,6 +2648,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         capabilities = _capabilities(x_flexdisplay_capabilities)
         image_cached = bool(_boolean(x_flexdisplay_image_cached))
         one_bit_bytes = ((width + 7) // 8) * height
+        rotation_degrees = _optional_integer(x_flexdisplay_rotation, 0, 180)
+        if rotation_degrees not in {0, 180}:
+            rotation_degrees = None
         telemetry = {
             "model": model,
             "width": width,
@@ -2652,6 +2668,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "wake_reason": x_flexdisplay_wake_reason or None,
             "reset_reason": x_flexdisplay_reset_reason or None,
             "boot_id": x_flexdisplay_boot_id or None,
+            "rotation_degrees": rotation_degrees,
             "transfer_capabilities": sorted(capabilities),
             "image_cached": image_cached,
         }

@@ -87,6 +87,7 @@ Studio, choose a fleet device, button, gesture, and action, then save it.
 Available actions are:
 
 - next, previous, overview, or refresh dashboard navigation;
+- toggle the display between its persistent 0° and 180° mounting orientation;
 - toggle, turn on, or turn off a Home Assistant entity;
 - activate a `scene.*`, `script.*`, or `automation.*` entity;
 - call a selected `domain.service` with optional JSON service data;
@@ -110,6 +111,26 @@ device reports the gesture to the Bridge. Enable **Show assigned-button
 indicators** to add a narrow screen legend above the device status footer:
 dotted means short press, double-dotted means double press, and solid means
 long press. The indicator is included at the device's next screen render.
+
+## Display mounting orientation
+
+Firmware `0.25.0` applies a persistent mounting orientation at the shared
+renderer layer, so Reader, Home Assistant, TRMNL, OpenDisplay, Photo Frame,
+menus, loading screens, and later updates all remain at the selected 0° or
+180° orientation.
+
+Use any of these controls:
+
+- hold the physical Left and Right buttons together for one second to flip the
+  screen without a network connection;
+- open **Physical-button actions** in Studio and use **Device display
+  orientation**, or assign **Toggle display 180°** to a supported gesture;
+- use the Home Assistant **Display orientation** select or **Flip display
+  180°** button.
+
+Remote changes are durable commands and are collected the next time a sleeping
+device checks in. The setting survives sleep, restart, and OTA firmware updates.
+A full-chip factory erase resets it to 0°.
 
 Options:
 

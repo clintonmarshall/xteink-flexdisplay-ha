@@ -61,6 +61,12 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("mode"),
     ),
     FlexDisplaySensorDescription(
+        key="rotation_degrees",
+        translation_key="display_rotation",
+        native_unit_of_measurement="°",
+        value_fn=lambda record: record.get("rotation_degrees", 0),
+    ),
+    FlexDisplaySensorDescription(
         key="dashboard_page_title",
         translation_key="dashboard_page",
         value_fn=lambda record: record.get("dashboard_page_title") or "Overview",

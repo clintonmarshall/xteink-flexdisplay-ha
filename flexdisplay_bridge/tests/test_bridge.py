@@ -1125,6 +1125,76 @@ def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
         assert len(client.get("/api/v1/devices/X4-DEMO01").json()["command_history"]) == 1
 
 
+def test_persistent_display_rotation_telemetry_and_commands(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        checked_in = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-LANYARD",
+                "X-FlexDisplay-Rotation": "180",
+                "X-FlexDisplay-Capabilities": "display-rotation",
+            },
+        )
+        assert checked_in.status_code == 200
+        record = client.get("/api/v1/devices/X3-LANYARD").json()
+        assert record["rotation_degrees"] == 180
+        assert "display-rotation" in record["transfer_capabilities"]
+
+        queued = client.post(
+            "/api/v1/devices/X3-LANYARD/commands/rotate-0",
+        )
+        assert queued.status_code == 200
+        delivered = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-LANYARD",
+                "X-FlexDisplay-Rotation": "180",
+            },
+        )
+        assert delivered.headers["x-flexdisplay-commands"] == "rotate-0"
+
+
+def test_long_press_can_toggle_device_rotation(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-BADGE"})
+        saved = client.put(
+            "/api/v1/devices/X4-BADGE/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "button": "confirm",
+                        "gesture": "long",
+                        "action": {
+                            "type": "device",
+                            "command": "rotate-toggle",
+                        },
+                    }
+                ]
+            },
+        )
+        assert saved.status_code == 200
+
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-BADGE",
+                "X-FlexDisplay-Mode": "home_assistant",
+                "X-FlexDisplay-Button-Events": (
+                    "1,confirm,pressed,1500,long,home_assistant"
+                ),
+            },
+        )
+        assert response.headers["x-flexdisplay-commands"] == "rotate-toggle"
+        record = client.get("/api/v1/devices/X4-BADGE").json()
+        assert record["last_button_action_result"] == "device:rotate-toggle"
+        assert (
+            record["recent_button_events"][-1]["configured_action"]["command"]
+            == "rotate-toggle"
+        )
+
+
 def test_remote_power_commands_and_queue_cancellation(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",
