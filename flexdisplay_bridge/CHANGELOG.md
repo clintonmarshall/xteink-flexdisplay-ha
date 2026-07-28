@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.22.1
+
 - Added fixed-content Dashboard Studio tiles that render without a Home
   Assistant entity or token.
 - Added a Name Card / ID Pass visual and starter template with large,

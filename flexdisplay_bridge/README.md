@@ -59,6 +59,11 @@ file sizes, and SHA-256 checksums before installing, then report pending,
 installed, or failed at their next check-in. This is non-destructive and is
 separate from the USB-only LDCS Factory Kit.
 
+FlexDisplay Bridge `0.22.1` adds standalone Studio content. Create fixed text
+tiles, encode text or URLs directly as QR codes, or apply the Name Card / ID
+Pass template without selecting a Home Assistant entity. This is a Bridge-only
+update; the shared X3/X4 firmware remains `0.22.0`.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
