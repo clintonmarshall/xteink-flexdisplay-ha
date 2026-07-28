@@ -27,7 +27,13 @@ from .button_actions import (
 )
 from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
 from .content_pack import ContentPackError, ContentPackStore, MAX_PACK_BYTES
+from .dashboard_assets import (
+    MAX_BADGE_PHOTO_BYTES,
+    DashboardAssetStore,
+    DashboardAssetValidationError,
+)
 from .dashboard_store import (
+    BADGE_THEMES,
     DashboardProfileStore,
     DashboardValidationError,
     parse_profile,
@@ -724,6 +730,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.profiles,
         settings.default_profile,
     )
+    dashboard_assets = DashboardAssetStore(
+        settings.state_path.with_name("dashboard-assets")
+    )
     photo_frames = PhotoFrameMediaStore(
         settings.state_path.with_name("flexdisplay-photo-frame.json")
     )
@@ -743,6 +752,28 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
+
+    def fetch_dashboard_entities(
+        configured_entities: tuple[EntityConfig, ...],
+    ) -> tuple[list[Any], str]:
+        states, error = ha.fetch(configured_entities)
+        by_id = {entity.entity_id: entity for entity in configured_entities}
+        hydrated = []
+        for state in states:
+            configured = by_id.get(state.entity_id)
+            if configured and configured.style == "name_card":
+                hydrated.append(
+                    replace(
+                        state,
+                        image_bytes=dashboard_assets.profile_photo(
+                            configured.badge_photo_id
+                        ),
+                        badge_theme=configured.badge_theme,
+                    )
+                )
+            else:
+                hydrated.append(state)
+        return hydrated, error
 
     def publish_current(device_id: str) -> None:
         current = store.get(device_id)
@@ -1335,8 +1366,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             },
             "capabilities": {
                 "layouts": ["auto", "single", "rows", "columns", "grid"],
-                "styles": ["value", "gauge", "progress", "history", "qr", "image"],
+                "styles": [
+                    "value",
+                    "gauge",
+                    "progress",
+                    "history",
+                    "qr",
+                    "image",
+                    "name_card",
+                ],
                 "image_fits": ["cover", "contain"],
+                "badge_themes": sorted(BADGE_THEMES),
                 "activation_types": ["always", "schedule", "condition"],
                 "condition_operators": [
                     "equals",
@@ -1348,7 +1388,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "off",
                     "unavailable",
                 ],
-                "templates": ["doorbell", "alarm", "energy", "appliance", "weather_alert"],
+                "templates": [
+                    "doorbell",
+                    "alarm",
+                    "energy",
+                    "appliance",
+                    "weather_alert",
+                    "name_card",
+                    "qr_code",
+                ],
                 "button_action": {
                     "mode": BUTTON_ACTION_MODE,
                     "buttons": list(CONFIGURABLE_BUTTONS),
@@ -1400,6 +1448,34 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
         ]
         return {"entities": synthetic + entities, "error": error}
+
+    @app.post("/api/v1/studio/assets/profile-photo")
+    async def upload_studio_profile_photo(
+        request: Request,
+        x_flexdisplay_filename: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        authorize(request)
+        content_length = _integer(
+            request.headers.get("Content-Length"),
+            0,
+            0,
+            MAX_BADGE_PHOTO_BYTES + 1,
+        )
+        if content_length > MAX_BADGE_PHOTO_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail="Profile photos may not exceed 5 MB",
+            )
+        content = await request.body()
+        try:
+            asset = dashboard_assets.put_profile_photo(
+                content,
+                x_flexdisplay_filename or "profile-photo",
+            )
+        except DashboardAssetValidationError as err:
+            status = 413 if len(content) > MAX_BADGE_PHOTO_BYTES else 400
+            raise HTTPException(status_code=status, detail=str(err)) from err
+        return {"asset": asset}
 
     @app.get("/api/v1/studio/services")
     def studio_services(request: Request) -> dict[str, Any]:
@@ -1888,7 +1964,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "mode": "home_assistant",
             "wake_reason": "power_button",
         }
-        states, ha_error = ha.fetch(DashboardProfileStore.entity_configs(draft))
+        states, ha_error = fetch_dashboard_entities(
+            DashboardProfileStore.entity_configs(draft)
+        )
         pages = build_dashboard_pages(states, record, draft.pages)
         page_index = _integer(
             str(payload.get("page_index") or 0),
@@ -2634,7 +2712,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 else profile.entities
             ),
         )
-        entity_states, ha_error = ha.fetch(profile.entities)
+        entity_states, ha_error = fetch_dashboard_entities(profile.entities)
         configured_pages = build_dashboard_pages(
             entity_states,
             record,

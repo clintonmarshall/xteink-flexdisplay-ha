@@ -1452,25 +1452,153 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
         studio = client.get("/studio/")
         assert "Fixed content (no HA entity)" in studio.text
         assert "Name card / ID pass" in studio.text
+        assert "Profile picture" in studio.text
+        assert "Bold band" in studio.text
+        assert "LinkedIn profile" in studio.text
         assert 'id="addQrTile"' in studio.text
+
+        portrait = io.BytesIO()
+        photo = Image.new("RGB", (300, 420), "white")
+        for y in range(photo.height):
+            shade = round(255 * y / photo.height)
+            for x in range(photo.width):
+                photo.putpixel((x, y), (shade, shade, shade))
+        photo.save(portrait, format="JPEG", quality=90)
+        uploaded = client.post(
+            "/api/v1/studio/assets/profile-photo",
+            content=portrait.getvalue(),
+            headers={
+                "Content-Type": "image/jpeg",
+                "X-FlexDisplay-Filename": "alex-profile.jpg",
+            },
+        )
+        assert uploaded.status_code == 200
+        asset = uploaded.json()["asset"]
+        assert len(asset["id"]) == 24
+        assert asset["filename"] == "alex-profile.jpg"
+        assert (tmp_path / "dashboard-assets" / f"{asset['id']}.png").is_file()
+        profile["pages"][0]["entities"][0].update(
+            {
+                "badge_theme": "bold",
+                "badge_photo_id": asset["id"],
+                "badge_photo_filename": asset["filename"],
+            }
+        )
 
         saved = client.put("/api/v1/studio/profiles/visitor", json=profile)
         assert saved.status_code == 200
         tiles = saved.json()["profile"]["pages"][0]["entities"]
         assert tiles[0]["source"] == "static"
         assert tiles[0]["value"] == "Showroom Guest"
+        assert tiles[0]["badge_theme"] == "bold"
+        assert tiles[0]["badge_photo_id"] == asset["id"]
+        assert tiles[0]["badge_photo_filename"] == "alex-profile.jpg"
         assert tiles[1]["value"] == "https://example.test/visitor/042"
 
-        preview = client.post(
+        rendered_previews = {}
+        for model, expected_size in (("X3", (528, 792)), ("X4", (480, 800))):
+            preview = client.post(
+                "/api/v1/studio/preview",
+                json={"model": model, "profile": profile, "page_index": 0},
+            )
+            assert preview.status_code == 200
+            assert preview.headers["x-flexdisplay-preview-ha-error"] == "false"
+            rendered_previews[model] = preview.content
+            with Image.open(io.BytesIO(preview.content)) as image:
+                assert image.size == expected_size
+                assert image.mode == "1"
+                assert image.getextrema() == (0, 255)
+
+        without_photo = json.loads(json.dumps(profile))
+        without_photo["pages"][0]["entities"][0]["badge_photo_id"] = ""
+        without_photo["pages"][0]["entities"][0]["badge_photo_filename"] = ""
+        fallback_preview = client.post(
             "/api/v1/studio/preview",
-            json={"model": "X4", "profile": profile, "page_index": 0},
+            json={"model": "X4", "profile": without_photo, "page_index": 0},
         )
-        assert preview.status_code == 200
-        assert preview.headers["x-flexdisplay-preview-ha-error"] == "false"
-        with Image.open(io.BytesIO(preview.content)) as image:
-            assert image.size == (480, 800)
-            assert image.mode == "1"
-            assert image.getextrema() == (0, 255)
+        assert fallback_preview.status_code == 200
+        assert fallback_preview.content != rendered_previews["X4"]
+
+        invalid_upload = client.post(
+            "/api/v1/studio/assets/profile-photo",
+            content=b"not an image",
+            headers={"X-FlexDisplay-Filename": "portrait.txt"},
+        )
+        assert invalid_upload.status_code == 400
+
+
+def test_dashboard_studio_offers_qr_page_template_and_common_payload_types(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    payloads = {
+        "website": "https://example.test/visitor",
+        "linkedin": "https://www.linkedin.com/in/alex-morgan",
+        "text": "Welcome to the LDCS showroom",
+        "wifi": "WIFI:T:WPA;S:LDCS Showroom;P:ldcsldcs;H:false;;",
+        "contact": (
+            "BEGIN:VCARD\nVERSION:3.0\nFN:Alex Morgan\nORG:LDCS\n"
+            "TITLE:Visitor\nEMAIL:alex@example.test\nEND:VCARD"
+        ),
+        "email": "mailto:hello@example.test?subject=Showroom%20visit",
+        "phone": "tel:+61300000000",
+    }
+
+    with TestClient(create_app(config)) as client:
+        studio = client.get("/studio/")
+        assert '<option value="qr_code">QR code page</option>' in studio.text
+        assert 'title: "QR CODE", layout: "single"' in studio.text
+        assert "function buildQrPayload" in studio.text
+        assert ".static-fields[hidden]" in studio.text
+        for label in (
+            "Website link",
+            "LinkedIn profile",
+            "Plain text",
+            "Wi-Fi network",
+            "Contact card",
+            "Email message",
+            "Phone number",
+        ):
+            assert label in studio.text
+
+        for qr_type, value in payloads.items():
+            profile = {
+                "pages": [
+                    {
+                        "title": qr_type,
+                        "layout": "single",
+                        "entities": [
+                            {
+                                "entity_id": f"static.qr_{qr_type}",
+                                "label": "Scan me",
+                                "unit": "SCAN",
+                                "style": "qr",
+                                "source": "static",
+                                "value": value,
+                            }
+                        ],
+                    }
+                ]
+            }
+            saved = client.put(
+                f"/api/v1/studio/profiles/qr_{qr_type}",
+                json=profile,
+            )
+            assert saved.status_code == 200
+            assert saved.json()["profile"]["pages"][0]["entities"][0]["value"] == value
+
+            preview = client.post(
+                "/api/v1/studio/preview",
+                json={"model": "X3", "profile": profile, "page_index": 0},
+            )
+            assert preview.status_code == 200
+            with Image.open(io.BytesIO(preview.content)) as image:
+                assert image.size == (528, 792)
+                assert image.mode == "1"
+                assert image.getextrema() == (0, 255)
 
 
 def test_static_entities_do_not_call_home_assistant() -> None:
@@ -1851,6 +1979,27 @@ def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
             },
         )
         assert dynamic_name_card.status_code == 400
+        invalid_badge_theme = client.put(
+            "/api/v1/studio/profiles/wall",
+            json={
+                "pages": [
+                    {
+                        "title": "Pass",
+                        "entities": [
+                            {
+                                "entity_id": "static.person",
+                                "label": "Person",
+                                "style": "name_card",
+                                "source": "static",
+                                "value": "Visitor",
+                                "badge_theme": "low-contrast-rainbow",
+                            }
+                        ],
+                    }
+                ]
+            },
+        )
+        assert invalid_badge_theme.status_code == 400
 
 
 def test_dashboard_studio_accepts_an_external_image_without_an_ha_entity(tmp_path: Path) -> None:

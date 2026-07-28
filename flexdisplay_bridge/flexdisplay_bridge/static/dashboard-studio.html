@@ -184,7 +184,7 @@
     }
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
-    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .url-source[hidden] { display: none; }
+    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden] { display: none; }
     .rule-fields[hidden] { display: none; }
     .action-fields[hidden] { display: none; }
     .entity-picker { position: relative; min-width: 0; }
@@ -266,6 +266,19 @@
       display: grid; gap: 8px; padding: 14px; border: 1px dashed #607383;
       border-radius: 10px; background: rgba(103,214,193,.04); text-align: center;
     }
+    .badge-builder {
+      display: grid; gap: 10px; padding: 12px; border: 1px solid #435463;
+      border-radius: 10px; background: rgba(255,180,84,.045);
+    }
+    .badge-photo-actions { display: flex; justify-content: center; gap: 8px; flex-wrap: wrap; }
+    .badge-photo-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .upload-button {
+      display: inline-grid; min-height: 38px; place-items: center; padding: 8px 12px;
+      border: 1px solid var(--line); border-radius: 9px; background: #0d151d;
+      color: var(--ink); cursor: pointer; font-size: 15px; font-weight: 650;
+      letter-spacing: normal;
+    }
+    .upload-button:hover { border-color: #607383; background: #17232e; }
     .loading-shell { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 22px; padding: 20px; }
     .loading-controls { display: grid; align-content: start; gap: 12px; }
     .loading-preview-shell { display: grid; place-items: center; min-height: 580px; padding: 22px; border-radius: 14px; background: #0c141b; }
@@ -440,6 +453,7 @@
               <option value="appliance">Appliance running</option>
               <option value="weather_alert">Weather alert</option>
               <option value="name_card">Name card / ID pass</option>
+              <option value="qr_code">QR code page</option>
             </select>
           </label>
         </div>
@@ -978,6 +992,9 @@
           ...entity,
           source: entity.source || (entity.entity_id?.startsWith("static.") ? "static" : "home_assistant"),
           value: entity.value || "",
+          badge_photo_id: entity.badge_photo_id || "",
+          badge_photo_filename: entity.badge_photo_filename || "",
+          badge_theme: entity.badge_theme || "classic",
         })),
       }));
       selected.auto_rotate_seconds ||= 0;
@@ -1760,6 +1777,254 @@
       renderTiles();
     }
 
+    function qrPayloadType(value) {
+      const selected = String(value || "").trim();
+      if (selected.startsWith("WIFI:")) return "wifi";
+      if (selected.startsWith("BEGIN:VCARD")) return "contact";
+      if (selected.toLowerCase().startsWith("mailto:")) return "email";
+      if (selected.toLowerCase().startsWith("tel:")) return "phone";
+      if (/^https?:\/\/([a-z0-9-]+\.)?linkedin\.com\//i.test(selected)) return "linkedin";
+      if (/^https?:\/\//i.test(selected)) return "website";
+      return "text";
+    }
+
+    function splitQrParts(value, separator = ";") {
+      const parts = [];
+      let current = "";
+      let escaped = false;
+      for (const character of String(value || "")) {
+        if (escaped) {
+          current += `\\${character}`;
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === separator) {
+          parts.push(current);
+          current = "";
+        } else {
+          current += character;
+        }
+      }
+      if (escaped) current += "\\";
+      parts.push(current);
+      return parts;
+    }
+
+    function unescapeQrValue(value) {
+      return String(value || "").replace(/\\(.)/g, "$1");
+    }
+
+    function escapeWifiValue(value) {
+      return String(value || "").replace(/([\\;,":])/g, "\\$1");
+    }
+
+    function escapeVcardValue(value) {
+      return String(value || "")
+        .replace(/\\/g, "\\\\")
+        .replace(/\n/g, "\\n")
+        .replace(/([;,])/g, "\\$1");
+    }
+
+    function safeDecode(value) {
+      try {
+        return decodeURIComponent(String(value || "").replaceAll("+", " "));
+      } catch {
+        return String(value || "");
+      }
+    }
+
+    function parseQrPayload(value) {
+      const selected = String(value || "");
+      const type = qrPayloadType(selected);
+      if (type === "wifi") {
+        const fields = {};
+        for (const part of splitQrParts(selected.slice(5))) {
+          const separator = part.indexOf(":");
+          if (separator < 0) continue;
+          fields[part.slice(0, separator)] = unescapeQrValue(part.slice(separator + 1));
+        }
+        return {
+          type,
+          security: fields.T || "WPA",
+          ssid: fields.S || "",
+          password: fields.P || "",
+          hidden: String(fields.H || "false").toLowerCase() === "true",
+        };
+      }
+      if (type === "contact") {
+        const fields = {};
+        for (const line of selected.split(/\r?\n/)) {
+          const separator = line.indexOf(":");
+          if (separator < 0) continue;
+          const key = line.slice(0, separator).split(";")[0];
+          fields[key] = unescapeQrValue(line.slice(separator + 1));
+        }
+        return {
+          type,
+          name: fields.FN || "",
+          organisation: fields.ORG || "",
+          title: fields.TITLE || "",
+          phone: fields.TEL || "",
+          email: fields.EMAIL || "",
+          website: fields.URL || "",
+        };
+      }
+      if (type === "email") {
+        const [address, query = ""] = selected.slice(7).split("?", 2);
+        const fields = {};
+        for (const part of query.split("&")) {
+          if (!part) continue;
+          const [key, item = ""] = part.split("=", 2);
+          fields[safeDecode(key)] = safeDecode(item);
+        }
+        return {
+          type,
+          address: safeDecode(address),
+          subject: fields.subject || "",
+          message: fields.body || "",
+        };
+      }
+      if (type === "phone") {
+        return {type, phone: selected.slice(4)};
+      }
+      return {type, content: selected};
+    }
+
+    function defaultQrPayload(type) {
+      return {
+        website: "https://example.com",
+        linkedin: "https://www.linkedin.com/in/your-profile",
+        text: "Your message",
+        wifi: "WIFI:T:WPA;S:Network Name;P:password;H:false;;",
+        contact: "BEGIN:VCARD\nVERSION:3.0\nFN:Your Name\nORG:Organisation\nTITLE:Role\nEMAIL:hello@example.com\nEND:VCARD",
+        email: "mailto:hello@example.com",
+        phone: "tel:+61000000000",
+      }[type] || "Your message";
+    }
+
+    function qrBuilderMarkup(tile) {
+      const payload = parseQrPayload(tile.value);
+      const typeOptions = options(
+        ["website", "linkedin", "email", "contact", "phone", "wifi", "text"],
+        payload.type,
+        (value) => ({
+          website: "Website link",
+          linkedin: "LinkedIn profile",
+          text: "Plain text",
+          wifi: "Wi-Fi network",
+          contact: "Contact card",
+          email: "Email message",
+          phone: "Phone number",
+        })[value]
+      );
+      let fields = "";
+      if (payload.type === "website") {
+        fields = `<label>Website URL<input class="qr-website qr-payload-field" type="url" maxlength="1024" value="${escapeHtml(payload.content)}" placeholder="https://example.com"></label>`;
+      } else if (payload.type === "linkedin") {
+        fields = `<label>LinkedIn profile URL<input class="qr-linkedin qr-payload-field" type="url" maxlength="1024" value="${escapeHtml(payload.content)}" placeholder="https://www.linkedin.com/in/your-profile"></label>`;
+      } else if (payload.type === "text") {
+        fields = `<label>Text to encode<textarea class="qr-text qr-payload-field" maxlength="1024" rows="4" placeholder="Enter any text">${escapeHtml(payload.content)}</textarea></label>`;
+      } else if (payload.type === "wifi") {
+        fields = `
+          <div class="field-grid">
+            <label>Network name<input class="qr-wifi-ssid qr-payload-field" maxlength="128" value="${escapeHtml(payload.ssid)}"></label>
+            <label>Security
+              <select class="qr-wifi-security qr-payload-field">
+                ${options(["WPA", "WEP", "nopass"], payload.security, (value) => value === "nopass" ? "Open network" : value)}
+              </select>
+            </label>
+          </div>
+          <div class="field-grid">
+            <label>Password<input class="qr-wifi-password qr-payload-field" maxlength="256" value="${escapeHtml(payload.password)}"></label>
+            <label>Hidden network
+              <select class="qr-wifi-hidden qr-payload-field">
+                ${options(["false", "true"], String(payload.hidden), (value) => value === "true" ? "Yes" : "No")}
+              </select>
+            </label>
+          </div>`;
+      } else if (payload.type === "contact") {
+        fields = `
+          <label>Full name<input class="qr-contact-name qr-payload-field" maxlength="128" value="${escapeHtml(payload.name)}"></label>
+          <div class="field-grid">
+            <label>Organisation<input class="qr-contact-organisation qr-payload-field" maxlength="128" value="${escapeHtml(payload.organisation)}"></label>
+            <label>Role or title<input class="qr-contact-title qr-payload-field" maxlength="128" value="${escapeHtml(payload.title)}"></label>
+          </div>
+          <div class="field-grid">
+            <label>Phone<input class="qr-contact-phone qr-payload-field" maxlength="64" value="${escapeHtml(payload.phone)}"></label>
+            <label>Email<input class="qr-contact-email qr-payload-field" type="email" maxlength="254" value="${escapeHtml(payload.email)}"></label>
+          </div>
+          <label>Website<input class="qr-contact-website qr-payload-field" type="url" maxlength="512" value="${escapeHtml(payload.website)}"></label>`;
+      } else if (payload.type === "email") {
+        fields = `
+          <label>Email address<input class="qr-email-address qr-payload-field" type="email" maxlength="254" value="${escapeHtml(payload.address)}"></label>
+          <label>Subject<input class="qr-email-subject qr-payload-field" maxlength="256" value="${escapeHtml(payload.subject)}"></label>
+          <label>Message<textarea class="qr-email-message qr-payload-field" maxlength="512" rows="3">${escapeHtml(payload.message)}</textarea></label>`;
+      } else if (payload.type === "phone") {
+        fields = `<label>Phone number<input class="qr-phone qr-payload-field" type="tel" maxlength="64" value="${escapeHtml(payload.phone)}" placeholder="+61…"></label>`;
+      }
+      return `
+        <div class="qr-builder">
+          <label>QR code type
+            <select class="qr-type">${typeOptions}</select>
+          </label>
+          ${fields}
+          <span class="small muted">The preview is the exact QR code sent to the X3/X4. Keep contact cards concise for reliable scanning.</span>
+        </div>`;
+    }
+
+    function buildQrPayload(card) {
+      const type = card.querySelector(".qr-type")?.value || "text";
+      const value = (selector) => card.querySelector(selector)?.value.trim() || "";
+      if (type === "website") {
+        const website = value(".qr-website");
+        return website && !/^[a-z][a-z0-9+.-]*:/i.test(website)
+          ? `https://${website}`
+          : website;
+      }
+      if (type === "linkedin") {
+        const linkedin = value(".qr-linkedin");
+        return linkedin && !/^[a-z][a-z0-9+.-]*:/i.test(linkedin)
+          ? `https://${linkedin}`
+          : linkedin;
+      }
+      if (type === "text") return card.querySelector(".qr-text")?.value || "";
+      if (type === "wifi") {
+        const security = value(".qr-wifi-security") || "WPA";
+        const password = security === "nopass" ? "" : value(".qr-wifi-password");
+        return `WIFI:T:${security};S:${escapeWifiValue(value(".qr-wifi-ssid"))};P:${escapeWifiValue(password)};H:${value(".qr-wifi-hidden") === "true"};;`;
+      }
+      if (type === "contact") {
+        const lines = [
+          "BEGIN:VCARD",
+          "VERSION:3.0",
+          `FN:${escapeVcardValue(value(".qr-contact-name"))}`,
+        ];
+        for (const [key, selector] of [
+          ["ORG", ".qr-contact-organisation"],
+          ["TITLE", ".qr-contact-title"],
+          ["TEL", ".qr-contact-phone"],
+          ["EMAIL", ".qr-contact-email"],
+          ["URL", ".qr-contact-website"],
+        ]) {
+          const item = value(selector);
+          if (item) lines.push(`${key}:${escapeVcardValue(item)}`);
+        }
+        lines.push("END:VCARD");
+        return lines.join("\n");
+      }
+      if (type === "email") {
+        const address = value(".qr-email-address");
+        const parameters = [];
+        const subject = value(".qr-email-subject");
+        const message = card.querySelector(".qr-email-message")?.value || "";
+        if (subject) parameters.push(`subject=${encodeURIComponent(subject)}`);
+        if (message) parameters.push(`body=${encodeURIComponent(message)}`);
+        return `mailto:${address}${parameters.length ? `?${parameters.join("&")}` : ""}`;
+      }
+      if (type === "phone") return `tel:${value(".qr-phone")}`;
+      return "";
+    }
+
     function renderTiles() {
       if (!state.profile) return;
       const page = currentPage();
@@ -1769,6 +2034,8 @@
       }
       $("#tileList").innerHTML = page.entities.map((tile, index) => {
         const isImage = tile.style === "image";
+        const isQr = tile.style === "qr";
+        const isBadge = tile.style === "name_card";
         const isStatic = tile.source === "static" || tile.entity_id?.startsWith("static.");
         const imageSource = tile.image_url || tile.entity_id?.startsWith("image_url.")
           ? "url"
@@ -1796,9 +2063,34 @@
             <label class="entity-source" ${(isImage && imageSource === "url") || (!isImage && isStatic) ? "hidden" : ""}>${isImage ? "Home Assistant image or camera entity" : "Home Assistant entity"}
               <input class="tile-entity" value="${escapeHtml(tile.entity_id)}" placeholder="Search entity name or ID…" autocomplete="off">
             </label>
-            <label class="static-fields" ${!isImage && isStatic ? "" : "hidden"}>${valueLabel}
+            <label class="static-fields" ${!isImage && isStatic && !isQr ? "" : "hidden"}>${valueLabel}
               <textarea class="tile-static-value" maxlength="1024" rows="${tile.style === "qr" ? "4" : "2"}" placeholder="${tile.style === "qr" ? "A URL, Wi-Fi details, contact card, or any text" : "Text shown on the display"}">${escapeHtml(tile.value || "")}</textarea>
             </label>
+            ${isQr && isStatic ? qrBuilderMarkup(tile) : ""}
+            <div class="badge-builder" ${isBadge ? "" : "hidden"}>
+              <label>Badge design
+                <select class="badge-theme">
+                  ${options(["classic", "bold", "diagonal", "halftone"], tile.badge_theme || "classic", (value) => ({
+                    classic: "Classic",
+                    bold: "Bold band",
+                    diagonal: "Diagonal",
+                    halftone: "Halftone",
+                  })[value])}
+                </select>
+              </label>
+              <div class="upload-drop">
+                <strong>Profile picture</strong>
+                <span class="small muted badge-photo-name">${escapeHtml(tile.badge_photo_filename || "No profile photo selected")}</span>
+                <div class="badge-photo-actions">
+                  <label class="upload-button">
+                    ${tile.badge_photo_id ? "Replace photo" : "Upload photo"}
+                    <input class="badge-photo-upload" type="file" accept="image/jpeg,image/png,image/webp,image/bmp" hidden>
+                  </label>
+                  <button class="secondary badge-photo-remove" type="button" ${tile.badge_photo_id ? "" : "disabled"}>Remove</button>
+                </div>
+                <span class="small muted">JPEG, PNG, WebP, or BMP · maximum 5 MB. Photos are automatically center-cropped and converted for e-ink.</span>
+              </div>
+            </div>
             <div class="image-fields" ${isImage ? "" : "hidden"}>
               <div class="field-grid">
                 <label>Image source
@@ -1885,6 +2177,55 @@
         tile.value = event.target.value;
         changed();
       });
+      card.querySelector(".qr-type")?.addEventListener("change", (event) => {
+        tile.value = defaultQrPayload(event.target.value);
+        changed();
+        renderTiles();
+      });
+      card.querySelectorAll(".qr-payload-field").forEach((field) => {
+        field.addEventListener("input", () => {
+          tile.value = buildQrPayload(card);
+          changed();
+        });
+        field.addEventListener("change", () => {
+          tile.value = buildQrPayload(card);
+          changed();
+          if (field.classList.contains("qr-wifi-security")) renderTiles();
+        });
+      });
+      card.querySelector(".badge-theme")?.addEventListener("change", (event) => {
+        tile.badge_theme = event.target.value;
+        changed();
+      });
+      card.querySelector(".badge-photo-upload")?.addEventListener("change", async (event) => {
+        const file = event.target.files?.[0];
+        if (!file) return;
+        try {
+          const response = await api("studio/assets/profile-photo", {
+            method: "POST",
+            headers: {
+              "Content-Type": file.type || "application/octet-stream",
+              "X-FlexDisplay-Filename": file.name,
+            },
+            body: file,
+          });
+          const payload = await response.json();
+          tile.badge_photo_id = payload.asset.id;
+          tile.badge_photo_filename = payload.asset.filename;
+          changed();
+          renderTiles();
+          toast("Profile picture uploaded and optimized for e-ink.");
+        } catch (error) {
+          event.target.value = "";
+          toast(error.message, true);
+        }
+      });
+      card.querySelector(".badge-photo-remove")?.addEventListener("click", () => {
+        tile.badge_photo_id = "";
+        tile.badge_photo_filename = "";
+        changed();
+        renderTiles();
+      });
       card.querySelector(".tile-image-source").addEventListener("change", (event) => {
         if (event.target.value === "url") {
           tile.entity_id = `image_url.page_${state.pageIndex + 1}_tile_${index + 1}`;
@@ -1922,6 +2263,7 @@
             tile.entity_id = `static.page_${state.pageIndex + 1}_tile_${index + 1}`;
             tile.value ||= "Role / title";
             tile.label = tile.label === "New tile" ? "Your Name" : tile.label;
+            tile.badge_theme ||= "classic";
           }
           changed();
           if (field === "style") renderTiles();
@@ -2158,10 +2500,22 @@
             {
               entity_id:"static.id_card", label:"Your Name", unit:"Organisation / ID",
               icon:"home", style:"name_card", minimum:0, maximum:100,
-              source:"static", value:"Role / title",
+              source:"static", value:"Role / title", badge_theme:"bold",
+              badge_photo_id:"", badge_photo_filename:"",
             },
             {
-              entity_id:"static.id_qr", label:"Contact / website", unit:"SCAN ME",
+              entity_id:"static.id_qr", label:"Email · LinkedIn · Website", unit:"SCAN ME",
+              icon:"auto", style:"qr", minimum:0, maximum:100,
+              source:"static", value:"https://example.com",
+            },
+          ],
+        },
+        qr_code: {
+          title: "QR CODE", layout: "single",
+          activation: defaultActivation(),
+          entities: [
+            {
+              entity_id:"static.qr_code", label:"Scan me", unit:"SCAN TO OPEN",
               icon:"auto", style:"qr", minimum:0, maximum:100,
               source:"static", value:"https://example.com",
             },

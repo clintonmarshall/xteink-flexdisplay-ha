@@ -248,6 +248,7 @@ def build_dashboard_pages(
                             current.last_changed,
                             current.image_bytes,
                             configured.image_fit,
+                            configured.badge_theme,
                         )
                         if (current := by_id.get(configured.entity_id))
                         else EntityState(
@@ -264,6 +265,7 @@ def build_dashboard_pages(
                             None,
                             b"",
                             configured.image_fit,
+                            configured.badge_theme,
                         )
                     )
                     for configured in page.entities
