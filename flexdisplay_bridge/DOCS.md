@@ -19,9 +19,10 @@ seeding and advanced non-dashboard configuration.
 Each page supports:
 
 - automatic, single, stacked, side-by-side, or four-tile layout;
-- zero to four Home Assistant or synthetic `device.*` tiles;
+- zero to four Home Assistant, synthetic `device.*`, or fixed-content tiles;
 - automatic or explicit e-ink-safe icons;
-- large value, gauge, progress, 24-hour history, QR, or image visual treatment;
+- large value, gauge, progress, 24-hour history, QR, name-card, or image visual
+  treatment;
 - optional automatic page rotation.
 - normal-playlist, scheduled-page-set, or priority-alert activation.
 
@@ -41,6 +42,14 @@ using equality, numeric thresholds, text containment, on/off semantics, or
 availability. Active alerts are ordered by priority ahead of the current
 scheduled or normal page set. Optional expiry is measured from Home
 Assistant's `last_changed` timestamp and rearms after the entity changes.
+
+For content that does not come from Home Assistant, select **Fixed content (no
+HA entity)**. Fixed values are stored in the dashboard profile and can be used
+for labels, notices, room cards, instructions, QR content, and ID passes.
+Select **QR code** and enter a URL or any text in **Text or URL to encode**.
+The **Name card / ID pass** starter template provides editable full-name,
+role/title, organisation/ID, and QR fields. Fixed-only pages render and preview
+without a Home Assistant token.
 
 Saving a profile queues a refresh for every device currently assigned to it.
 Sleeping devices receive that refresh on their next scheduled or physical

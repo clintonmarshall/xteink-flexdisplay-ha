@@ -439,6 +439,7 @@
               <option value="energy">Daytime energy</option>
               <option value="appliance">Appliance running</option>
               <option value="weather_alert">Weather alert</option>
+              <option value="name_card">Name card / ID pass</option>
             </select>
           </label>
         </div>
@@ -489,7 +490,11 @@
       <div class="section">
         <div class="section-head">
           <div><h2>Tiles</h2><span class="small muted">Up to four per page</span></div>
-          <button id="addTile">Add tile</button>
+          <div class="button-row">
+            <button id="addTile">HA tile</button>
+            <button id="addStaticTile">Text</button>
+            <button id="addQrTile">QR code</button>
+          </div>
         </div>
         <div id="tileList" class="tile-list"></div>
       </div>
@@ -969,7 +974,11 @@
       selected.pages = selected.pages.map((page) => ({
         ...page,
         activation: {...defaultActivation(), ...(page.activation || {})},
-        entities: page.entities || [],
+        entities: (page.entities || []).map((entity) => ({
+          ...entity,
+          source: entity.source || (entity.entity_id?.startsWith("static.") ? "static" : "home_assistant"),
+          value: entity.value || "",
+        })),
       }));
       selected.auto_rotate_seconds ||= 0;
       return selected;
@@ -1746,6 +1755,8 @@
       $("#movePageDown").disabled = state.pageIndex === state.profile.pages.length - 1;
       $("#deletePage").disabled = state.profile.pages.length === 1;
       $("#addTile").disabled = page.entities.length >= 4;
+      $("#addStaticTile").disabled = page.entities.length >= 4;
+      $("#addQrTile").disabled = page.entities.length >= 4;
       renderTiles();
     }
 
@@ -1753,20 +1764,40 @@
       if (!state.profile) return;
       const page = currentPage();
       if (!page.entities.length) {
-        $("#tileList").innerHTML = '<div class="empty">This page is blank. Add a tile and select a Home Assistant entity.</div>';
+        $("#tileList").innerHTML = '<div class="empty">This page is blank. Add a Home Assistant tile, fixed text, or a QR code.</div>';
         return;
       }
       $("#tileList").innerHTML = page.entities.map((tile, index) => {
         const isImage = tile.style === "image";
+        const isStatic = tile.source === "static" || tile.entity_id?.startsWith("static.");
         const imageSource = tile.image_url || tile.entity_id?.startsWith("image_url.")
           ? "url"
           : "entity";
+        const valueLabel = tile.style === "qr"
+          ? "Text or URL to encode"
+          : tile.style === "name_card"
+          ? "Role / title"
+          : "Fixed value";
+        const labelLabel = tile.style === "name_card" ? "Full name" : "Display label";
+        const unitLabel = tile.style === "qr"
+          ? "Caption under code"
+          : tile.style === "name_card"
+          ? "Organisation / ID"
+          : "Unit or secondary text";
         return `
         <article class="tile-card" data-tile="${index}">
           <div class="tile-head"><h3>Tile ${index + 1}</h3><button class="icon danger remove-tile" title="Remove tile">×</button></div>
           <div class="tile-body">
-            <label class="entity-source" ${isImage && imageSource === "url" ? "hidden" : ""}>${isImage ? "Home Assistant image or camera entity" : "Home Assistant entity"}
+            <label class="data-source" ${isImage ? "hidden" : ""}>Data source
+              <select class="tile-data-source">
+                ${options(["home_assistant", "static"], isStatic ? "static" : "home_assistant", (value) => value === "static" ? "Fixed content (no HA entity)" : "Home Assistant entity")}
+              </select>
+            </label>
+            <label class="entity-source" ${(isImage && imageSource === "url") || (!isImage && isStatic) ? "hidden" : ""}>${isImage ? "Home Assistant image or camera entity" : "Home Assistant entity"}
               <input class="tile-entity" value="${escapeHtml(tile.entity_id)}" placeholder="Search entity name or ID…" autocomplete="off">
+            </label>
+            <label class="static-fields" ${!isImage && isStatic ? "" : "hidden"}>${valueLabel}
+              <textarea class="tile-static-value" maxlength="1024" rows="${tile.style === "qr" ? "4" : "2"}" placeholder="${tile.style === "qr" ? "A URL, Wi-Fi details, contact card, or any text" : "Text shown on the display"}">${escapeHtml(tile.value || "")}</textarea>
             </label>
             <div class="image-fields" ${isImage ? "" : "hidden"}>
               <div class="field-grid">
@@ -1786,11 +1817,11 @@
               </label>
               <span class="small muted">The preview shows the same monochrome conversion sent to the X3/X4.</span>
             </div>
-            <label>Display label<input class="tile-label" maxlength="64" value="${escapeHtml(tile.label || tile.entity_id)}"></label>
+            <label>${labelLabel}<input class="tile-label" maxlength="64" value="${escapeHtml(tile.label || tile.entity_id)}"></label>
             <div class="field-grid">
               <label>Visual
                 <select class="tile-style">
-                  ${options(["value", "gauge", "progress", "history", "qr", "image"], tile.style || "value", styleLabel)}
+                  ${options(["value", "gauge", "progress", "history", "qr", "name_card", "image"], tile.style || "value", styleLabel)}
                 </select>
               </label>
               <label class="standard-fields" ${isImage ? "hidden" : ""}>Icon
@@ -1800,7 +1831,7 @@
               </label>
             </div>
             <div class="field-grid standard-fields" ${isImage ? "hidden" : ""}>
-              <label>Unit<input class="tile-unit" maxlength="16" value="${escapeHtml(tile.unit || "")}" placeholder="From entity"></label>
+              <label>${unitLabel}<input class="tile-unit" maxlength="64" value="${escapeHtml(tile.unit || "")}" placeholder="${isStatic ? "Optional" : "From entity"}"></label>
               <span></span>
             </div>
             <div class="field-grid range-fields" ${(tile.style === "gauge" || tile.style === "progress") ? "" : "hidden"}>
@@ -1837,6 +1868,23 @@
         card.querySelector(".tile-entity"),
         tile.style === "image" ? ["camera", "image"] : []
       );
+      card.querySelector(".tile-data-source").addEventListener("change", (event) => {
+        tile.source = event.target.value;
+        if (tile.source === "static") {
+          tile.entity_id = `static.page_${state.pageIndex + 1}_tile_${index + 1}`;
+          tile.value ||= tile.style === "qr" ? "https://example.com" : "Your text";
+        } else {
+          tile.entity_id = "sensor.example";
+          tile.value = "";
+          if (tile.style === "name_card") tile.style = "value";
+        }
+        changed();
+        renderTiles();
+      });
+      card.querySelector(".tile-static-value").addEventListener("input", (event) => {
+        tile.value = event.target.value;
+        changed();
+      });
       card.querySelector(".tile-image-source").addEventListener("change", (event) => {
         if (event.target.value === "url") {
           tile.entity_id = `image_url.page_${state.pageIndex + 1}_tile_${index + 1}`;
@@ -1863,7 +1911,18 @@
       ]) {
         card.querySelector(selector).addEventListener("change", (event) => {
           tile[field] = ["minimum", "maximum"].includes(field) ? Number(event.target.value) : event.target.value;
-          if (field === "style" && tile.style === "image") tile.image_fit ||= "cover";
+          if (field === "style" && tile.style === "image") {
+            tile.image_fit ||= "cover";
+            tile.source = "home_assistant";
+            tile.value = "";
+            if (tile.entity_id.startsWith("static.")) tile.entity_id = "image.example";
+          }
+          if (field === "style" && tile.style === "name_card") {
+            tile.source = "static";
+            tile.entity_id = `static.page_${state.pageIndex + 1}_tile_${index + 1}`;
+            tile.value ||= "Role / title";
+            tile.label = tile.label === "New tile" ? "Your Name" : tile.label;
+          }
           changed();
           if (field === "style") renderTiles();
         });
@@ -2092,6 +2151,22 @@
           activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.weather_alert", operator:"on", priority:90, expires_after_seconds:3600},
           entities: [{entity_id:"binary_sensor.weather_alert", label:"Weather Alert", unit:"", icon:"weather", style:"value", minimum:0, maximum:100}],
         },
+        name_card: {
+          title: "ID PASS", layout: "rows",
+          activation: defaultActivation(),
+          entities: [
+            {
+              entity_id:"static.id_card", label:"Your Name", unit:"Organisation / ID",
+              icon:"home", style:"name_card", minimum:0, maximum:100,
+              source:"static", value:"Role / title",
+            },
+            {
+              entity_id:"static.id_qr", label:"Contact / website", unit:"SCAN ME",
+              icon:"auto", style:"qr", minimum:0, maximum:100,
+              source:"static", value:"https://example.com",
+            },
+          ],
+        },
       };
       state.profile.pages[state.pageIndex] = clone(templates[template]);
       $("#pageTemplate").value = "";
@@ -2107,7 +2182,7 @@
       })[character]);
     }
     const titleCase = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-    const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code", image:"Image"})[value] || titleCase(value);
+    const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code", name_card:"Name card / ID pass", image:"Image"})[value] || titleCase(value);
     const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid"})[value] || "Automatic";
     const options = (values, selected, labeler) => values.map((value) =>
       `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
@@ -2139,21 +2214,28 @@
       state.pageIndex = Math.min(state.pageIndex, state.profile.pages.length - 1);
       changed(); renderPages(); renderInspector();
     });
-    $("#addTile").addEventListener("click", () => {
+    function addTile(source = "home_assistant", style = "value") {
       if (currentPage().entities.length >= 4) return;
+      const index = currentPage().entities.length;
+      const isStatic = source === "static";
       currentPage().entities.push({
-        entity_id: "sensor.example",
-        label: "New tile",
-        unit: "",
+        entity_id: isStatic ? `static.page_${state.pageIndex + 1}_tile_${index + 1}` : "sensor.example",
+        label: style === "qr" ? "Scan me" : "New tile",
+        unit: style === "qr" ? "SCAN ME" : "",
         icon: "auto",
-        style: "value",
+        style,
         minimum: 0,
         maximum: 100,
         image_url: "",
         image_fit: "cover",
+        source,
+        value: isStatic ? (style === "qr" ? "https://example.com" : "Your text") : "",
       });
       changed(); renderInspector(); renderPages();
-    });
+    }
+    $("#addTile").addEventListener("click", () => addTile());
+    $("#addStaticTile").addEventListener("click", () => addTile("static", "value"));
+    $("#addQrTile").addEventListener("click", () => addTile("static", "qr"));
     $("#pageTitle").addEventListener("input", (event) => {
       currentPage().title = event.target.value.toUpperCase();
       $("#inspectorTitle").textContent = currentPage().title;

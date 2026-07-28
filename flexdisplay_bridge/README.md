@@ -59,6 +59,11 @@ file sizes, and SHA-256 checksums before installing, then report pending,
 installed, or failed at their next check-in. This is non-destructive and is
 separate from the USB-only LDCS Factory Kit.
 
+FlexDisplay Bridge `0.22.1` adds standalone Studio content. Create fixed text
+tiles, encode text or URLs directly as QR codes, or apply the Name Card / ID
+Pass template without selecting a Home Assistant entity. This is a Bridge-only
+update; the shared X3/X4 firmware remains `0.22.0`.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 
@@ -76,8 +81,9 @@ normal or scheduled playlist resumes, and the alert rearms when the entity
 changes again.
 
 The Dashboard Studio includes starting templates for doorbells, alarms,
-daytime energy, running appliances, and weather alerts. Replace their example
-entity IDs with entities from your Home Assistant before saving.
+daytime energy, running appliances, weather alerts, and standalone ID passes.
+Replace Home Assistant-based examples with entities from your system before
+saving.
 
 Image tiles can use a Home Assistant `camera.*` or `image.*` entity, or a
 direct HTTP(S) URL reachable from the Bridge App. Choose **Crop to fill** for
@@ -85,3 +91,17 @@ edge-to-edge camera and artwork tiles, or **Fit whole image** when no part of
 the source may be cropped. Studio previews the exact monochrome, dithered
 result. Downloads are limited to 8 MB and 20 megapixels; direct URLs never
 receive the Home Assistant API token.
+
+## Standalone cards and QR codes
+
+Dashboard Studio tiles can use **Fixed content (no HA entity)** as their data
+source. Use **Text** for labels, instructions, room names, prices, notices, or
+other fixed values. Use **QR code** to encode a URL or arbitrary text directly;
+the encoded value is not printed below the code unless it is separately added
+as a caption.
+
+The **Name card / ID pass** page template creates a large name-card tile plus a
+QR tile. Edit the full name, role/title, organisation or ID, QR content, and
+caption in Studio, then preview and assign it like any other dashboard
+profile. A profile containing only fixed content does not require Home
+Assistant entity access and displays `STANDALONE` in its status footer.

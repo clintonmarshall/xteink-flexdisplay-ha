@@ -1,5 +1,18 @@
 # Changelog
 
+## Unreleased
+
+## 0.22.1
+
+- Added fixed-content Dashboard Studio tiles that render without a Home
+  Assistant entity or token.
+- Added a Name Card / ID Pass visual and starter template with large,
+  e-ink-readable name, role, and organisation fields.
+- Extended QR tiles with a built-in text/URL editor so websites, plain text,
+  Wi-Fi details, and contact-card content can be encoded directly.
+- Standalone pages now show a `STANDALONE` status rather than implying a Home
+  Assistant connection.
+
 ## 0.22.0
 
 - Added a Fleet Content workspace to Dashboard Studio for validated ZIP
