@@ -558,6 +558,76 @@ def test_image_tiles_fetch_ha_entity_picture_with_auth_but_external_urls_without
     assert "Authorization" not in external_call[1]["headers"]
 
 
+def test_camera_picture_keeps_supervisor_core_proxy_prefix() -> None:
+    image_output = io.BytesIO()
+    Image.new("RGB", (48, 32), (80, 150, 210)).save(image_output, format="JPEG")
+    image_content = image_output.getvalue()
+
+    class Response:
+        def __init__(self, *, payload: dict | None = None, content: bytes = b"", url: str):
+            self.payload = payload
+            self.content = content
+            self.url = url
+            self.headers = (
+                {
+                    "Content-Type": "image/jpeg",
+                    "Content-Length": str(len(content)),
+                }
+                if content
+                else {}
+            )
+
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict:
+            assert self.payload is not None
+            return self.payload
+
+        def iter_content(self, chunk_size: int):
+            del chunk_size
+            yield self.content
+
+    class Session:
+        def __init__(self) -> None:
+            self.calls: list[tuple[str, dict]] = []
+
+        def get(self, url: str, **kwargs) -> Response:
+            self.calls.append((url, kwargs))
+            if url.endswith("/core/api/states/camera.alfresco"):
+                return Response(
+                    url=url,
+                    payload={
+                        "state": "streaming",
+                        "attributes": {
+                            "entity_picture": (
+                                "/api/camera_proxy/camera.alfresco"
+                                "?token=signed-camera-token"
+                            )
+                        },
+                    },
+                )
+            return Response(url=url, content=image_content)
+
+    client = HomeAssistantClient(
+        HomeAssistantConfig(base_url="http://supervisor/core", token="supervisor-token")
+    )
+    session = Session()
+    client.session = session
+    states, error = client.fetch(
+        (EntityConfig("camera.alfresco", "Alfresco", style="image"),)
+    )
+
+    assert error == ""
+    assert states[0].available
+    camera_call = session.calls[1]
+    assert camera_call[0] == (
+        "http://supervisor/core/api/camera_proxy/camera.alfresco"
+        "?token=signed-camera-token"
+    )
+    assert camera_call[1]["headers"]["Authorization"] == "Bearer supervisor-token"
+
+
 def test_external_image_tile_works_without_a_home_assistant_token() -> None:
     image_output = io.BytesIO()
     Image.new("L", (24, 24), 128).save(image_output, format="PNG")

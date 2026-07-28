@@ -15,6 +15,9 @@
 - Made packaged firmware option migration repair mixed release metadata, such
   as an old advertised version paired with a newer packaged URL and checksum,
   while preserving genuinely custom manifests.
+- Fixed Home Assistant camera and image imports through the Supervisor Core
+  API proxy so signed `/api/camera_proxy` paths retain the required `/core`
+  prefix instead of returning HTTP 403.
 
 ## 0.20.0
 
