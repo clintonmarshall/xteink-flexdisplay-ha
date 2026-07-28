@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.22.0
+
+- Added a Fleet Content workspace to Dashboard Studio for validated ZIP
+  uploads and multi-device rollout assignment.
+- Added per-device desired, installed, pending, and failed content-pack state
+  with durable acknowledgements at the next normal Bridge check-in.
+- Added safe device-side staging, size and SHA-256 validation, managed-path
+  restrictions, atomic file replacement, and rollback on installation errors.
+- Added a private local LDCS Factory Kit builder with a shared X3/X4 full-flash
+  image, one-time SD reset, default module settings, original sample images and
+  eBooks, preseeded private Wi-Fi, checksums, and JSON/CSV flashing reports.
+- Kept factory resets USB-only while allowing subsequent photos, books, logos,
+  and asset revisions to roll out non-destructively through Fleet Manager.
+
 ## 0.21.0
 
 - Added a Branded Fetch Screen designer to Dashboard Studio with fleet-default

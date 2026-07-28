@@ -3,6 +3,7 @@ from __future__ import annotations
 import io
 import hashlib
 import json
+import zipfile
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -30,6 +31,28 @@ from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
+
+
+def _content_pack_zip(version: str = "ldcs-1") -> bytes:
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr("photos/welcome.png", b"fleet-content")
+        archive.writestr(
+            "content-pack.json",
+            json.dumps(
+                {
+                    "version": version,
+                    "name": "LDCS welcome pack",
+                    "files": [
+                        {
+                            "source": "photos/welcome.png",
+                            "target": "/photos/flexdisplay/welcome.png",
+                        }
+                    ],
+                }
+            ),
+        )
+    return output.getvalue()
 
 
 def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
@@ -107,6 +130,56 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         assert record["rssi"] == -54
         assert record["provisioned"] is True
         assert record["assigned_name"] == "Test X4"
+
+
+def test_v022_content_pack_rollout_is_acknowledged_per_device(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        first = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-CONTENT"},
+        )
+        assert first.status_code == 200
+
+        uploaded = client.post(
+            "/api/v1/content-packs",
+            content=_content_pack_zip(),
+            headers={"Content-Type": "application/zip"},
+        )
+        assert uploaded.status_code == 200
+        assert uploaded.json()["pack"]["version"] == "ldcs-1"
+
+        rollout = client.post(
+            "/api/v1/content-packs/ldcs-1/rollout",
+            json={"device_ids": ["X3-CONTENT"]},
+        )
+        assert rollout.status_code == 200
+
+        assigned = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-CONTENT"},
+        )
+        assert assigned.status_code == 200
+        assert assigned.headers["x-flexdisplay-content-version"] == "ldcs-1"
+        manifest_url = assigned.headers["x-flexdisplay-content-manifest-url"]
+        manifest = client.get(manifest_url)
+        assert manifest.status_code == 200
+        assert hashlib.sha256(manifest.content).hexdigest() == assigned.headers[
+            "x-flexdisplay-content-manifest-sha256"
+        ]
+
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-CONTENT",
+                "X-FlexDisplay-Content-Version": "ldcs-1",
+                "X-FlexDisplay-Content-Status": "installed",
+            },
+        )
+        assert acknowledged.status_code == 200
+        assert "x-flexdisplay-content-version" not in acknowledged.headers
+        state = client.get("/api/v1/content-packs").json()
+        assert state["assignments"]["X3-CONTENT"]["status"] == "installed"
 
 
 def test_v021_screen_advertises_cached_branded_fetch_asset(tmp_path: Path) -> None:
