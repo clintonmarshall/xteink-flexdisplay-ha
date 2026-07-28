@@ -96,3 +96,15 @@ Status: queued.
 - Per-device credentials and signed firmware manifests.
 - Stable, beta, and development release channels.
 - Boot health checks and automatic rollback.
+
+## v0.23 — Transfer optimization
+
+Status: implemented, pending release and device deployment.
+Delivery: Bridge/Firmware `0.23.0`.
+
+- Zero-byte unchanged-screen responses only when the device confirms that the
+  matching image is physically cached.
+- PNG Photo Frame transport with automatic BMP conversion on X3/X4.
+- Backwards-compatible full-image delivery for firmware before `0.23.0`.
+- Home Assistant diagnostics for transfer format, delivered bytes, bytes
+  saved, and percentage saved.

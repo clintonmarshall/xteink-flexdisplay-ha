@@ -530,6 +530,14 @@ def _boolean(value: str | None) -> bool | None:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def _capabilities(value: str | None) -> set[str]:
+    return {
+        selected.strip().lower()
+        for selected in str(value or "").split(",")
+        if selected.strip()
+    }
+
+
 def _clock_minutes(value: str, fallback: int) -> int:
     try:
         hour, minute = (int(part) for part in value.split(":", 1))
@@ -769,6 +777,62 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
+
+    def deliver_screen(
+        device_id: str,
+        image: bytes,
+        media_type: str,
+        response: Response,
+        *,
+        image_unchanged: bool,
+        image_cached: bool,
+        capabilities: set[str],
+        uncompressed_bytes: int,
+    ) -> Response:
+        empty_unchanged = (
+            image_unchanged
+            and image_cached
+            and "empty-unchanged" in capabilities
+        )
+        content = b"" if empty_unchanged else image
+        transfer_format = (
+            "empty-unchanged"
+            if empty_unchanged
+            else media_type.rsplit("/", 1)[-1].lower()
+        )
+        baseline = max(len(image), int(uncompressed_bytes))
+        saved = max(0, baseline - len(content))
+        savings_percent = round(saved * 100 / baseline) if baseline else 0
+        response.headers["X-FlexDisplay-Transfer-Encoding"] = transfer_format
+        response.headers["X-FlexDisplay-Transfer-Bytes"] = str(len(content))
+        response.headers["X-FlexDisplay-Uncompressed-Bytes"] = str(baseline)
+        response.headers["X-FlexDisplay-Transfer-Saved-Bytes"] = str(saved)
+        response.headers["X-FlexDisplay-Transfer-Savings"] = str(savings_percent)
+        response.headers["X-FlexDisplay-Transfer-Optimized"] = (
+            "true" if empty_unchanged or media_type == "image/png" else "false"
+        )
+        store.touch(
+            device_id,
+            {
+                "last_transfer_encoding": transfer_format,
+                "last_transfer_bytes": len(content),
+                "last_transfer_uncompressed_bytes": baseline,
+                "last_transfer_saved_bytes": saved,
+                "last_transfer_savings_percent": savings_percent,
+                "last_transfer_optimized": bool(
+                    empty_unchanged or media_type == "image/png"
+                ),
+                "last_transfer_at": datetime.now(UTC).isoformat(
+                    timespec="seconds"
+                ),
+            },
+        )
+        publish_current(device_id)
+        return Response(
+            content=content,
+            media_type=media_type,
+            headers=dict(response.headers),
+        )
 
     def fetch_dashboard_entities(
         configured_entities: tuple[EntityConfig, ...],
@@ -2353,6 +2417,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_button_events: str | None = Header(default=None),
         x_flexdisplay_image_sha256: str | None = Header(default=None),
+        x_flexdisplay_image_cached: str | None = Header(default=None),
+        x_flexdisplay_capabilities: str | None = Header(default=None),
         x_flexdisplay_content_version: str | None = Header(default=None),
         x_flexdisplay_content_status: str | None = Header(default=None),
         x_flexdisplay_content_error: str | None = Header(default=None),
@@ -2361,6 +2427,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
         height = _integer(x_flexdisplay_height, 800, 240, 1600)
         model = x_flexdisplay_model or ("X4" if device_id.startswith("X4-") else "X3")
+        capabilities = _capabilities(x_flexdisplay_capabilities)
+        image_cached = bool(_boolean(x_flexdisplay_image_cached))
+        one_bit_bytes = ((width + 7) // 8) * height
         telemetry = {
             "model": model,
             "width": width,
@@ -2376,6 +2445,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "min_free_heap": _optional_integer(x_flexdisplay_min_free_heap, 0, 1_000_000),
             "sd_ready": _boolean(x_flexdisplay_sd_ready),
             "wake_reason": x_flexdisplay_wake_reason or None,
+            "transfer_capabilities": sorted(capabilities),
+            "image_cached": image_cached,
         }
         record = store.touch(device_id, telemetry)
         content_assignment = content_packs.observe(
@@ -2568,12 +2639,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     height,
                 )
                 apply_content_pack_headers(response, request, device_id)
-                return Response(
-                    content=image,
-                    media_type=str(
-                        override_item.get("media_type") or "image/png"
-                    ),
-                    headers=dict(response.headers),
+                return deliver_screen(
+                    device_id,
+                    image,
+                    str(override_item.get("media_type") or "image/png"),
+                    response,
+                    image_unchanged=image_unchanged,
+                    image_cached=image_cached,
+                    capabilities=capabilities,
+                    uncompressed_bytes=one_bit_bytes,
                 )
         if profile.mode == "photo_frame":
             direction = "auto"
@@ -2590,12 +2664,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     direction = "next"
                 elif event.get("button") in {"left", "up"}:
                     direction = "previous"
+            photo_format = "PNG" if "png-photo" in capabilities else "BMP"
+            photo_media_type = (
+                "image/png" if photo_format == "PNG" else "image/bmp"
+            )
             try:
                 image, photo_headers = photo_frames.next_for_device(
                     device_id,
                     width=width,
                     height=height,
                     direction=direction,
+                    output_format=photo_format,
                 )
             except PhotoFrameValidationError as err:
                 raise HTTPException(status_code=409, detail=str(err)) from err
@@ -2660,7 +2739,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 captured = screen_history.record(
                     device_id,
                     image,
-                    media_type="image/bmp",
+                    media_type=photo_media_type,
                     metadata={
                         "mode": "photo_frame",
                         "profile": profile.profile,
@@ -2677,7 +2756,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         ),
                     },
                 )
-            publish_screen_preview(device_id, image, "image/bmp")
+            publish_screen_preview(device_id, image, photo_media_type)
             publish_current(device_id)
             for name, value in photo_headers.items():
                 response.headers[name] = _header_value(value)
@@ -2731,10 +2810,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 height,
             )
             apply_content_pack_headers(response, request, device_id)
-            return Response(
-                content=image,
-                media_type="image/bmp",
-                headers=dict(response.headers),
+            return deliver_screen(
+                device_id,
+                image,
+                photo_media_type,
+                response,
+                image_unchanged=image_unchanged,
+                image_cached=image_cached,
+                capabilities=capabilities,
+                uncompressed_bytes=one_bit_bytes,
             )
         dashboard_profile = dashboards.resolve(profile.profile)
         profile = replace(
@@ -2928,7 +3012,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             height,
         )
         apply_content_pack_headers(response, request, device_id)
-        return Response(content=image, media_type="image/png", headers=dict(response.headers))
+        return deliver_screen(
+            device_id,
+            image,
+            "image/png",
+            response,
+            image_unchanged=image_unchanged,
+            image_cached=image_cached,
+            capabilities=capabilities,
+            uncompressed_bytes=one_bit_bytes,
+        )
 
     return app
 

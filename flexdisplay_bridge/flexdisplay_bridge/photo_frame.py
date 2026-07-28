@@ -165,7 +165,13 @@ def render_eink(
     return output.getvalue()
 
 
-def render_empty_album(album_name: str, width: int, height: int) -> bytes:
+def render_empty_album(
+    album_name: str,
+    width: int,
+    height: int,
+    *,
+    output_format: str = "BMP",
+) -> bytes:
     """Render a useful device screen instead of returning an HTTP error."""
     canvas = Image.new("1", (width, height), 1)
     draw = ImageDraw.Draw(canvas)
@@ -195,7 +201,7 @@ def render_empty_album(album_name: str, width: int, height: int) -> bytes:
             font=font,
         )
     output = BytesIO()
-    canvas.save(output, format="BMP")
+    canvas.save(output, format=output_format)
     return output.getvalue()
 
 
@@ -406,17 +412,25 @@ class PhotoFrameMediaStore:
         width: int,
         height: int,
         direction: str = "auto",
+        output_format: str = "BMP",
         now: datetime | None = None,
     ) -> tuple[bytes, dict[str, str]]:
         if direction not in {"auto", "current", "next", "previous"}:
             raise PhotoFrameValidationError("Direction must be auto, current, next, or previous")
+        if output_format not in {"BMP", "PNG"}:
+            raise PhotoFrameValidationError("Photo Frame output must be BMP or PNG")
         current_time = now or datetime.now(UTC)
         with self._lock:
             album_id = self._data["assignments"].get(device_id, "default")
             album = self._data["albums"].get(album_id) or self._data["albums"]["default"]
             schedule_active, next_schedule_seconds = self._schedule(album, current_time)
             if not album["items"]:
-                image = render_empty_album(album["name"], width, height)
+                image = render_empty_album(
+                    album["name"],
+                    width,
+                    height,
+                    output_format=output_format,
+                )
                 return image, {
                     "X-FlexDisplay-Photo-Album": album_id,
                     "X-FlexDisplay-Photo-ID": "",
@@ -478,7 +492,7 @@ class PhotoFrameMediaStore:
             fit=item_copy["fit"],
             rotation=item_copy["rotation"],
             caption=item_copy["caption"],
-            output_format="BMP",
+            output_format=output_format,
         )
         return image, {
             "X-FlexDisplay-Photo-Album": album_id,
