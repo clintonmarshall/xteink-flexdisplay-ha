@@ -184,7 +184,14 @@
     }
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
-    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden] { display: none; }
+    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden], .qr-size-field[hidden] { display: none; }
+    .scale-input { display: grid; grid-template-columns: minmax(0, 1fr) 54px; align-items: center; gap: 8px; }
+    .scale-input input[type="range"] { min-height: 38px; padding: 0; accent-color: var(--accent-2); }
+    .scale-input output {
+      display: grid; min-height: 38px; place-items: center;
+      border: 1px solid var(--line); border-radius: 9px;
+      background: #111c25; color: var(--ink); font-size: 12px; font-weight: 800;
+    }
     .rule-fields[hidden] { display: none; }
     .action-fields[hidden] { display: none; }
     .entity-picker { position: relative; min-width: 0; }
@@ -995,6 +1002,8 @@
           badge_photo_id: entity.badge_photo_id || "",
           badge_photo_filename: entity.badge_photo_filename || "",
           badge_theme: entity.badge_theme || "classic",
+          text_scale: Math.max(60, Math.min(180, Number(entity.text_scale) || 100)),
+          qr_scale: Math.max(50, Math.min(150, Number(entity.qr_scale) || 100)),
         })),
       }));
       selected.auto_rotate_seconds ||= 0;
@@ -2126,6 +2135,20 @@
               <label>${unitLabel}<input class="tile-unit" maxlength="64" value="${escapeHtml(tile.unit || "")}" placeholder="${isStatic ? "Optional" : "From entity"}"></label>
               <span></span>
             </div>
+            <div class="field-grid tile-sizing">
+              <label>Text size
+                <div class="scale-input">
+                  <input class="tile-text-scale" type="range" min="60" max="180" step="5" value="${Number(tile.text_scale || 100)}">
+                  <output class="tile-text-scale-value">${Number(tile.text_scale || 100)}%</output>
+                </div>
+              </label>
+              <label class="qr-size-field" ${isQr ? "" : "hidden"}>QR code size
+                <div class="scale-input">
+                  <input class="tile-qr-scale" type="range" min="50" max="150" step="5" value="${Number(tile.qr_scale || 100)}">
+                  <output class="tile-qr-scale-value">${Number(tile.qr_scale || 100)}%</output>
+                </div>
+              </label>
+            </div>
             <div class="field-grid range-fields" ${(tile.style === "gauge" || tile.style === "progress") ? "" : "hidden"}>
               <label>Minimum<input class="tile-min" type="number" step="any" value="${Number(tile.minimum ?? 0)}"></label>
               <label>Maximum<input class="tile-max" type="number" step="any" value="${Number(tile.maximum ?? 100)}"></label>
@@ -2197,6 +2220,16 @@
         tile.badge_theme = event.target.value;
         changed();
       });
+      for (const [selector, outputSelector, field] of [
+        [".tile-text-scale", ".tile-text-scale-value", "text_scale"],
+        [".tile-qr-scale", ".tile-qr-scale-value", "qr_scale"],
+      ]) {
+        card.querySelector(selector)?.addEventListener("input", (event) => {
+          tile[field] = Number(event.target.value);
+          card.querySelector(outputSelector).textContent = `${tile[field]}%`;
+          changed();
+        });
+      }
       card.querySelector(".badge-photo-upload")?.addEventListener("change", async (event) => {
         const file = event.target.files?.[0];
         if (!file) return;
@@ -2502,11 +2535,13 @@
               icon:"home", style:"name_card", minimum:0, maximum:100,
               source:"static", value:"Role / title", badge_theme:"bold",
               badge_photo_id:"", badge_photo_filename:"",
+              text_scale:110, qr_scale:100,
             },
             {
               entity_id:"static.id_qr", label:"Email · LinkedIn · Website", unit:"SCAN ME",
               icon:"auto", style:"qr", minimum:0, maximum:100,
               source:"static", value:"https://example.com",
+              text_scale:100, qr_scale:125,
             },
           ],
         },
@@ -2518,6 +2553,7 @@
               entity_id:"static.qr_code", label:"Scan me", unit:"SCAN TO OPEN",
               icon:"auto", style:"qr", minimum:0, maximum:100,
               source:"static", value:"https://example.com",
+              text_scale:110, qr_scale:140,
             },
           ],
         },
@@ -2584,6 +2620,8 @@
         image_fit: "cover",
         source,
         value: isStatic ? (style === "qr" ? "https://example.com" : "Your text") : "",
+        text_scale: 100,
+        qr_scale: style === "qr" ? 130 : 100,
       });
       changed(); renderInspector(); renderPages();
     }

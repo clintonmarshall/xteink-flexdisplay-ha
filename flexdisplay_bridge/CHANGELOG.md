@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.22.3
+
+- Added per-tile text sizing from 60% to 180% with immediate X3/X4 preview
+  updates.
+- Added independent QR-code sizing from 50% to 150% so codes can fill a
+  single-page layout or remain compact in mixed dashboards.
+- Reworked QR tiles to reserve separate label, code, and caption regions,
+  preventing enlarged codes from colliding with text.
+- Added larger, readable defaults to the QR Page and ID Badge templates while
+  preserving 100% defaults for existing profiles.
+
 ## 0.22.2
 
 - Added a QR Code Page template with a full-page, single-tile layout.

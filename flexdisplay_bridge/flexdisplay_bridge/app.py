@@ -1377,6 +1377,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 ],
                 "image_fits": ["cover", "contain"],
                 "badge_themes": sorted(BADGE_THEMES),
+                "text_scale": {"minimum": 60, "maximum": 180, "default": 100},
+                "qr_scale": {"minimum": 50, "maximum": 150, "default": 100},
                 "activation_types": ["always", "schedule", "condition"],
                 "condition_operators": [
                     "equals",
