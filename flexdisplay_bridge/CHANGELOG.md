@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.30.0
+
+- Published shared X3/X4 firmware `1.4.1-flexdisplay.0.30.0`.
+- Added persistent default applications and optional USB keep-awake behavior.
+- Added FlexShare receiver reservations, saved fleet targeting, retry reports,
+  CRC-based unchanged-screen skipping, and negotiated RLE compression.
+- Moved private FlexDisplay OpenDisplay commands to `0xE0` and `0xE1` to avoid
+  collisions with official OpenDisplay 2.x commands while retaining staged
+  sender fallback for older fleet devices.
+- Defaulted browser-prepared frames to sharp monochrome, with photo dithering
+  remaining available as an explicit option.
+
 ## 0.24.0
 
 - Added per-boot reset telemetry with stable boot identifiers and explicit
