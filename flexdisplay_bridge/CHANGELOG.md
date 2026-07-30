@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.31.0
+
+- Rebased the common X3/X4 firmware on CrossPoint 1.5 and the FreeInk hardware
+  stack while preserving Reader, FlexDisplay modes, fleet identity, orientation,
+  power policy, and factory provisioning.
+- Added OpenDisplay 2.20-compatible direct zlib and ordered PIPE transfers,
+  transfer watchdog recovery, and current protocol capability reporting while
+  retaining FlexDisplay RLE compatibility.
+- Updated the TRMNL/Terminus client to current request headers and display
+  response fields, including charging, USB power, wake time, compatibility,
+  temperature profile, and special-function metadata.
+- Published the coordinated FlexDisplay Platform 0.31 release manifest and
+  shared firmware `1.5.0-flexdisplay.0.31.0`.
+
 ## 0.30.0
 
 - Published shared X3/X4 firmware `1.4.1-flexdisplay.0.30.0`.

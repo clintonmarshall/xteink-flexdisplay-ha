@@ -1739,7 +1739,7 @@ def test_dashboard_studio_offers_qr_page_template_and_common_payload_types(
         "website": "https://example.test/visitor",
         "linkedin": "https://www.linkedin.com/in/alex-morgan",
         "text": "Welcome to the LDCS showroom",
-        "wifi": "WIFI:T:WPA;S:LDCS Showroom;P:ldcsldcs;H:false;;",
+        "wifi": "WIFI:T:WPA;S:Example Network;P:ExampleOnly42!;H:false;;",
         "contact": (
             "BEGIN:VCARD\nVERSION:3.0\nFN:Alex Morgan\nORG:LDCS\n"
             "TITLE:Visitor\nEMAIL:alex@example.test\nEND:VCARD"
