@@ -14,8 +14,17 @@ This repository provides:
   readable e-ink layouts, state-aware alerts and schedules, and direct fleet
   assignment.
 
-It intentionally contains no device firmware, factory backups, credentials,
-device identities, or private network configuration.
+This is the Home Assistant component of the wider FlexDisplay Platform:
+
+- `xteink-flexdisplay` owns the common X3/X4 firmware;
+- `xteink-flexdisplay-ha` owns the Bridge App, Studio, and integration;
+- `xteink-flexhub` owns always-on ESP32/SenseCAP fleet relay firmware;
+- `xteink-flexdisplay-release` owns Factory Kit packaging and coordinated
+  release manifests.
+
+Release binaries may be attached here for Home Assistant delivery, but their
+source remains in `xteink-flexdisplay`. Factory backups, credentials, device
+identities, and private network configuration are never committed here.
 
 ## 1. Install the Bridge App
 

@@ -3,6 +3,21 @@
 This roadmap keeps the platform enhancements in a deliberate order. A release
 may move only after the previous phase is usable on both XTEINK X3 and X4.
 
+## v0.31 — Refined platform and upstream refresh
+
+Status: implemented, pending hardware canary and coordinated publication.
+Delivery: Bridge/HACS/Firmware/FlexHub `0.31.0`.
+
+- Separate device firmware, Home Assistant, always-on Hub, and Factory Kit
+  ownership while retaining one coordinated platform version and manifest.
+- CrossPoint 1.5 Reader and FreeInk hardware-stack refresh for both X3 and X4.
+- OpenDisplay 2.20-compatible zlib and ordered PIPE transfers with bounded
+  recovery for abandoned transfers.
+- Current TRMNL/Terminus request and response metadata without permitting stock
+  TRMNL firmware to replace FlexDisplay firmware.
+- Clean-fleet provisioning and common X3/X4 OTA metadata from one verified
+  firmware binary.
+
 ## v0.15 — Visual Dashboard Studio
 
 Status: released and deployed.
