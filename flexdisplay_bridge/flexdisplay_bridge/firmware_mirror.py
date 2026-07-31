@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import shutil
 import threading
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -22,8 +23,9 @@ class FirmwareMirrorError(RuntimeError):
 class FirmwareMirror:
     """Cache and verify the configured firmware release on the local Bridge."""
 
-    def __init__(self, cache_dir: Path):
+    def __init__(self, cache_dir: Path, packaged_firmware: Path | None = None):
         self.cache_dir = cache_dir
+        self.packaged_firmware = packaged_firmware
         self._lock = threading.RLock()
         self._status: dict[str, Any] = {
             "enabled": True,
@@ -69,7 +71,6 @@ class FirmwareMirror:
             raise FirmwareMirrorError("The local firmware mirror is disabled")
         if (
             not firmware.version
-            or not firmware.url.startswith(("http://", "https://"))
             or len(firmware.sha256) != 64
             or firmware.size <= 0
         ):
@@ -87,6 +88,35 @@ class FirmwareMirror:
                     }
                 )
                 return target
+
+            if self.packaged_firmware and self._verify(
+                self.packaged_firmware, firmware
+            ):
+                self.cache_dir.mkdir(parents=True, exist_ok=True)
+                temporary = target.with_suffix(".part")
+                temporary.unlink(missing_ok=True)
+                shutil.copyfile(self.packaged_firmware, temporary)
+                if not self._verify(temporary, firmware):
+                    temporary.unlink(missing_ok=True)
+                    raise FirmwareMirrorError(
+                        "The packaged firmware failed verification after copying"
+                    )
+                temporary.replace(target)
+                self._next_retry_at = None
+                self._status.update(
+                    {
+                        "ready": True,
+                        "state": "ready",
+                        "source": "packaged",
+                        "last_error": "",
+                        "last_error_at": None,
+                        "last_ready_at": _utc_now(),
+                    }
+                )
+                return target
+
+            if not firmware.url.startswith(("http://", "https://")):
+                raise FirmwareMirrorError("The configured firmware URL is invalid")
 
             now = datetime.now(UTC)
             if not force and self._next_retry_at and now < self._next_retry_at:
@@ -134,6 +164,7 @@ class FirmwareMirror:
                     {
                         "ready": True,
                         "state": "ready",
+                        "source": "download",
                         "last_error": "",
                         "last_error_at": None,
                         "last_ready_at": _utc_now(),

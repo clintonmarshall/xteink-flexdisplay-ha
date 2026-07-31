@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import os
 import re
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
@@ -1098,8 +1099,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.state_path.with_name("flexdisplay-content-packs.json"),
         settings.state_path.with_name("content-packs"),
     )
+    packaged_firmware = os.getenv("FLEXDISPLAY_PACKAGED_FIRMWARE", "").strip()
     firmware_mirror = FirmwareMirror(
-        settings.state_path.with_name("firmware-cache")
+        settings.state_path.with_name("firmware-cache"),
+        Path(packaged_firmware) if packaged_firmware else None,
     )
     screen_history = ScreenHistoryStore(
         settings.state_path.with_name("screen-history"),
