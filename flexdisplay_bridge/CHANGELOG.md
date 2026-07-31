@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.32.1
+
+- Bundled the validated X3/X4 `0.32.0` OTA binary inside the Home Assistant App
+  image so private GitHub repositories do not block firmware mirroring.
+- The Bridge now verifies and seeds its local firmware cache from the packaged
+  binary before attempting an external download. Custom firmware manifests
+  continue to use their configured HTTP(S) source.
+
 ## 0.32.0
 
 - Added revisioned fleet policy profiles for Battery Saver, Balanced, and USB
