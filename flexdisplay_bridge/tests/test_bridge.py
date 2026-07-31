@@ -100,6 +100,46 @@ def test_legacy_commands_are_migrated_to_command_ids(tmp_path: Path) -> None:
     assert persisted["command_sequence"] == 1
 
 
+def test_identityless_checkin_is_rejected_without_creating_unknown_device(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        response = client.get("/api/v1/screen")
+        assert response.status_code == 400
+        assert response.json()["detail"] == "X-FlexDisplay-ID is required"
+        assert client.get("/api/v1/devices").json()["devices"] == []
+
+
+def test_legacy_unknown_device_is_purged_from_registry_and_rollout(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "devices": {
+                    "UNKNOWN": {"device_id": "UNKNOWN", "firmware": "0.4.0"},
+                    "X3-VALID01": {"device_id": "X3-VALID01", "firmware": "1.0"},
+                },
+                "firmware_rollout": {
+                    "status": "fleet_active",
+                    "planned_devices": ["UNKNOWN", "X3-VALID01"],
+                    "updated_devices": ["UNKNOWN"],
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    store = DeviceStore(state_path)
+
+    assert store.get("UNKNOWN") is None
+    assert store.purged_device_ids == ["UNKNOWN"]
+    assert [item["device_id"] for item in store.all()] == ["X3-VALID01"]
+    assert store.firmware_rollout()["planned_devices"] == ["X3-VALID01"]
+    assert store.firmware_rollout()["updated_devices"] == []
+
 def test_checkin_history_counts_unique_boots_and_sd_failures(tmp_path: Path) -> None:
     store = DeviceStore(tmp_path / "state.json")
     base = {
@@ -478,6 +518,12 @@ def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> No
         def publish(self, topic: str, payload: object, retain: bool = False):
             self.messages.append((topic, payload, retain))
 
+        def disconnect(self) -> None:
+            pass
+
+        def loop_stop(self) -> None:
+            pass
+
     state = {
         "device_id": "X4-MQTT01",
         "model": "X4",
@@ -541,6 +587,72 @@ def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> No
     ]
     assert discovery_payloads
     assert set(discovery_payloads) == {""}
+
+    cleanup_client.messages.clear()
+    cleanup.remove_device("X4-MQTT01", DeviceConfig(name="MQTT X4", model="X4"), state)
+    removed_topics = {topic: payload for topic, payload, retain in cleanup_client.messages if retain}
+    assert removed_topics["homeassistant/update/x4_mqtt01/firmware/config"] == ""
+    assert removed_topics["homeassistant/image/x4_mqtt01/current_screen/config"] == ""
+    assert removed_topics["flexdisplay/X4-MQTT01/state"] == ""
+    assert removed_topics["flexdisplay/X4-MQTT01/event"] == ""
+    assert removed_topics["flexdisplay/X4-MQTT01/screen"] == ""
+
+
+def test_device_removal_clears_bridge_registry_and_mqtt_discovery(
+    tmp_path: Path,
+) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False):
+            self.messages.append((topic, payload, retain))
+
+        def disconnect(self) -> None:
+            pass
+
+        def loop_stop(self) -> None:
+            pass
+
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="secret",
+        mqtt=MqttConfig(enabled=False, entity_source="mqtt"),
+    )
+    app = create_app(config)
+    with TestClient(app) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-REMOVE1",
+                "X-FlexDisplay-Model": "XTEINK_X3",
+            },
+        )
+        fake = FakeClient()
+        app.state.mqtt.client = fake
+        app.state.mqtt.connected = True
+
+        unauthorized = client.delete("/api/v1/devices/X3-REMOVE1")
+        assert unauthorized.status_code == 401
+        removed = client.delete(
+            "/api/v1/devices/X3-REMOVE1",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+        )
+        assert removed.status_code == 200
+        assert removed.json()["deleted"] == "X3-REMOVE1"
+        assert client.get("/api/v1/devices").json()["devices"] == []
+        assert any(
+            topic == "homeassistant/sensor/x3_remove1/battery/config"
+            and payload == ""
+            and retain
+            for topic, payload, retain in fake.messages
+        )
+        assert any(
+            topic == "flexdisplay/X3-REMOVE1/state"
+            and payload == ""
+            and retain
+            for topic, payload, retain in fake.messages
+        )
 
 
 def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> None:
@@ -1016,6 +1128,7 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
             "X4-FLEET02": "pending",
         }
 
+
         photo_policy = client.put(
             "/api/v1/fleet/policy",
             headers={"X-FlexDisplay-Bridge-Key": "secret"},
@@ -1035,6 +1148,17 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
             headers={"X-FlexDisplay-Bridge-Key": "secret"},
         ).json()
         assert photo_library["assignments"]["X4-FLEET02"] == "default"
+
+
+def test_fleet_management_ui_exposes_complete_device_controls(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        html = client.get("/studio/").text
+        assert "Waiting for wake" in html
+        assert "% battery" in html
+        assert "data-remove-device" in html
+        assert '$("#fleetPolicyScope").value = "devices";' in html
+        assert "max-height: 390px" not in html
 
 
 def test_fleet_management_saves_and_deploys_custom_policy_profiles(tmp_path: Path) -> None:

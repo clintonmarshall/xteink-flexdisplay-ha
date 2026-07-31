@@ -322,7 +322,7 @@
     .policy-summary { display: grid; grid-template-columns: repeat(4, minmax(90px, 1fr)); gap: 9px; }
     .policy-summary > div { padding: 11px; border-radius: 9px; background: var(--panel-2); }
     .policy-summary strong { display: block; margin-top: 3px; font-size: 18px; }
-    .policy-device-list { display: grid; gap: 8px; max-height: 390px; padding-right: 4px; overflow-y: auto; }
+    .policy-device-list { display: grid; gap: 8px; padding-right: 4px; align-content: start; }
     .policy-device { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0d151d; }
     .policy-device input { width: auto; min-height: auto; }
     .management-shell { grid-template-columns: minmax(340px, 410px) minmax(430px, 1fr); }
@@ -802,7 +802,7 @@
           <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
           <label>Delivery<select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
           <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
-          <p class="small muted" style="margin:0">“Pending” means the Bridge saved the policy but a sleeping device has not acknowledged it yet.</p>
+          <p class="small muted" style="margin:0">A policy is applied after the display wakes, saves the new revision, and confirms it on its following check-in. Studio now distinguishes waiting-for-wake from waiting-for-confirmation.</p>
         </section>
 
         <section class="management-group">
@@ -1210,15 +1210,30 @@
       const selectable = $("#fleetPolicyScope").value === "devices";
       $("#fleetPolicyDevices").innerHTML = devices.length ? devices.map((device) => {
         const updateStatus = device.firmware_update_status || "idle";
+        const updateActive = ["queued", "preflight", "downloading", "validating", "flashing", "rebooting"].includes(updateStatus);
         const updateDetail = device.update_available
           ? device.firmware_install_ready ? "Ready for update" : (device.firmware_install_blockers || []).join(" · ")
           : `Firmware ${device.firmware || "unknown"} is current`;
-        const progress = Math.max(0, Math.min(100, Number(device.firmware_update_percent || 0)));
+        const progress = updateActive ? Math.max(0, Math.min(100, Number(device.firmware_update_percent || 0))) : 0;
+        const battery = Number.isFinite(Number(device.battery_percent))
+          ? `${Math.round(Number(device.battery_percent))}% battery`
+          : "battery unavailable";
+        const syncState = device.policy_sync_state || "not_managed";
+        const policyDelivered = device.last_seen && device.provisioning_updated_at
+          && device.last_seen >= device.provisioning_updated_at;
+        const syncLabel = syncState === "synced" ? "Applied"
+          : syncState === "pending" ? (policyDelivered ? "Confirming" : "Waiting for wake")
+          : syncState === "mismatch" ? "Needs review" : "Unmanaged";
+        const syncDetail = syncState === "synced"
+          ? `Policy revision ${device.policy_revision || 0} confirmed`
+          : syncState === "pending"
+            ? policyDelivered ? "Policy delivered; waiting for the device to confirm it" : "Policy queued until the next device wake"
+            : syncState === "mismatch" ? "Device reported a newer or different revision" : "No fleet policy has been assigned";
         return `
         <div class="policy-device">
           <input type="checkbox" data-policy-device value="${escapeHtml(device.device_id)}" ${selectable ? "" : "disabled"} ${selectedDeviceIds.has(device.device_id) ? "checked" : ""}>
-          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"}<br>${escapeHtml(device.policy_name || "custom")} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div><div class="firmware-progress"><span style="width:${progress}%"></span></div><div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${["queued", "preflight", "downloading", "validating", "flashing", "rebooting"].includes(updateStatus) ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}</div></span>
-          <span class="sync-badge ${escapeHtml(device.policy_sync_state || "pending")}">${escapeHtml(device.policy_sync_state || "pending")}</span>
+          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"} · ${escapeHtml(battery)}<br>${escapeHtml(device.policy_name || "custom")} · ${escapeHtml(syncDetail)} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateActive ? updateStatus : updateStatus === "verified" ? "complete" : updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div>${updateActive ? `<div class="firmware-progress"><span style="width:${progress}%"></span></div>` : ""}<div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${updateActive ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}<button type="button" class="danger" data-remove-device="${escapeHtml(device.device_id)}">Remove</button></div></span>
+          <span class="sync-badge ${escapeHtml(syncState)}" title="${escapeHtml(syncDetail)}">${escapeHtml(syncLabel)}</span>
         </div>`;
       }).join("") : '<div class="empty">No FlexDisplay device has checked in yet.</div>';
     }
@@ -1297,6 +1312,15 @@
         if (action === "retry") await api(`devices/${encodeURIComponent(deviceId)}/firmware/retry`, {method: "POST"});
         else await api(`devices/${encodeURIComponent(deviceId)}/commands`, {method: "DELETE"});
         toast(`${action === "retry" ? "Retry" : "Cancellation"} accepted for ${deviceId}.`);
+        await loadFleetPolicies();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function removeFleetDevice(deviceId) {
+      if (!confirm(`Remove ${deviceId} from FlexDisplay Bridge and Home Assistant? A real display will be discovered again if it checks in later.`)) return;
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}`, {method: "DELETE"});
+        toast(`${deviceId} was removed from the fleet registry and MQTT discovery.`);
         await loadFleetPolicies();
       } catch (error) { toast(error.message, true); }
     }
@@ -3222,8 +3246,16 @@
     $("#deleteFleetPolicyProfile").addEventListener("click", deleteFleetPolicyProfile);
     $("#cancelFleetPolicyEdit").addEventListener("click", renderFleetPolicyProfile);
     $("#fleetPolicyScope").addEventListener("change", renderFleetPolicyDevices);
-    $("#selectAllPolicyDevices").addEventListener("click", () => document.querySelectorAll("[data-policy-device]:not(:disabled)").forEach((node) => { node.checked = true; }));
-    $("#clearPolicyDevices").addEventListener("click", () => document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = false; }));
+    $("#selectAllPolicyDevices").addEventListener("click", () => {
+      $("#fleetPolicyScope").value = "devices";
+      renderFleetPolicyDevices();
+      document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = true; });
+    });
+    $("#clearPolicyDevices").addEventListener("click", () => {
+      $("#fleetPolicyScope").value = "devices";
+      renderFleetPolicyDevices();
+      document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = false; });
+    });
     $("#applyFleetPolicy").addEventListener("click", applyFleetPolicy);
     $("#installFleetFirmware").addEventListener("click", installFleetFirmware);
     $("#resetFleetFirmware").addEventListener("click", resetFleetFirmware);
@@ -3232,6 +3264,8 @@
       if (retry) return fleetFirmwareDeviceAction(retry.dataset.firmwareRetry, "retry");
       const cancel = event.target.closest("[data-firmware-cancel]");
       if (cancel) return fleetFirmwareDeviceAction(cancel.dataset.firmwareCancel, "cancel");
+      const remove = event.target.closest("[data-remove-device]");
+      if (remove) return removeFleetDevice(remove.dataset.removeDevice);
     });
     $("#openFlexHub").addEventListener("click", () => { $("#flexHubDialog").showModal(); loadFlexHub(true); });
     $("#refreshFlexHub").addEventListener("click", () => loadFlexHub(true));

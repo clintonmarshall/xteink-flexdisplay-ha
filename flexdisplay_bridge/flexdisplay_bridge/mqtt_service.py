@@ -28,6 +28,9 @@ class MqttService:
         self.client: mqtt.Client | None = None
         self.connected = False
         self._last_event: dict[str, str] = {}
+        self._pending_device_removals: dict[
+            str, tuple[DeviceConfig, dict[str, Any]]
+        ] = {}
 
     @property
     def discovery_enabled(self) -> bool:
@@ -72,6 +75,10 @@ class MqttService:
             self.config.port,
             self.config.entity_source,
         )
+        for device_id, (profile, state) in list(
+            self._pending_device_removals.items()
+        ):
+            self._clear_device(device_id, profile, state)
 
     def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
         del client, userdata, disconnect_flags, properties
@@ -794,6 +801,44 @@ class MqttService:
                     ),
                     retain=False,
                 )
+
+    def _clear_device(
+        self,
+        device_id: str,
+        profile: DeviceConfig,
+        state: dict[str, Any],
+    ) -> None:
+        if not self.client or not self.connected:
+            return
+        for topic_suffix, _payload in self._configs(device_id, profile, state):
+            self.client.publish(
+                f"{self.config.discovery_prefix}/{topic_suffix}/config",
+                "",
+                retain=True,
+            )
+        for suffix in ("state", "event", "screen"):
+            self.client.publish(
+                f"{self.config.topic_prefix}/{device_id}/{suffix}",
+                "",
+                retain=True,
+            )
+        self._last_event.pop(device_id, None)
+        self._pending_device_removals.pop(device_id, None)
+
+    def remove_device(
+        self,
+        device_id: str,
+        profile: DeviceConfig | None = None,
+        state: dict[str, Any] | None = None,
+    ) -> None:
+        """Clear retained discovery and state for a removed fleet display."""
+        selected_profile = profile or DeviceConfig(name=device_id)
+        selected_state = state or {"device_id": device_id}
+        self._pending_device_removals[device_id] = (
+            selected_profile,
+            selected_state,
+        )
+        self._clear_device(device_id, selected_profile, selected_state)
 
     def publish_screen(self, device_id: str, content: bytes) -> None:
         """Retain the current PNG for the App-only Home Assistant image entity."""
