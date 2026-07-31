@@ -319,6 +319,35 @@
     .loading-preview { display: block; width: min(100%, 390px); max-height: 680px; object-fit: contain; background: white; box-shadow: var(--shadow); }
     .check-row { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 12px; font-weight: 700; }
     .check-row input { width: auto; min-height: auto; }
+    .policy-summary { display: grid; grid-template-columns: repeat(4, minmax(90px, 1fr)); gap: 9px; }
+    .policy-summary > div { padding: 11px; border-radius: 9px; background: var(--panel-2); }
+    .policy-summary strong { display: block; margin-top: 3px; font-size: 18px; }
+    .policy-device-list { display: grid; gap: 8px; max-height: 390px; padding-right: 4px; overflow-y: auto; }
+    .policy-device { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0d151d; }
+    .policy-device input { width: auto; min-height: auto; }
+    .management-shell { grid-template-columns: minmax(340px, 410px) minmax(430px, 1fr); }
+    .management-group { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.015); }
+    .management-group h3 { color: var(--accent-2); }
+    .policy-builder { display: grid; gap: 10px; padding: 12px; border: 1px solid #435463; border-radius: 10px; background: #0d151d; }
+    .policy-builder[hidden] { display: none; }
+    .policy-toggle-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
+    .policy-toggle-grid label { display: flex; align-items: center; gap: 6px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2); }
+    .policy-toggle-grid input { width: auto; min-height: auto; }
+    .firmware-release { padding: 11px; border: 1px solid rgba(103,214,193,.3); border-radius: 9px; background: rgba(103,214,193,.07); }
+    .firmware-release strong { display: block; font-size: 17px; }
+    .firmware-progress { height: 6px; margin-top: 7px; overflow: hidden; border-radius: 999px; background: #263540; }
+    .firmware-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent-2); }
+    .firmware-device-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 7px; }
+    .firmware-device-actions button { min-height: 28px; padding: 3px 8px; font-size: 10px; }
+    .firmware-status { margin-top: 4px; color: var(--muted); font-size: 10px; }
+    .firmware-status.failed { color: var(--danger); }
+    .sync-badge { padding: 3px 7px; border-radius: 999px; background: var(--accent-2); color: #08130f; font-size: 9px; font-weight: 850; text-transform: uppercase; }
+    .sync-badge.pending, .sync-badge.offline { background: var(--danger); color: #24100f; }
+    .hub-cards { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
+    .hub-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #0d151d; }
+    .hub-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .hub-facts div { padding: 7px; border-radius: 7px; background: var(--panel-2); }
+    .hub-facts strong { display: block; margin-top: 2px; font-size: 12px; }
     .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
     @media (max-width: 1120px) {
       .app { grid-template-columns: 230px 1fr; }
@@ -333,9 +362,11 @@
       .canvas-shell { min-height: 520px; padding: 18px; }
       .tile-list { grid-template-columns: 1fr; }
       .library-shell { grid-template-columns: 1fr; }
+      .management-shell { grid-template-columns: 1fr; }
       .loading-shell { grid-template-columns: 1fr; }
       .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
       .fleet-grid { grid-template-columns: 1fr; padding: 14px; }
+      .policy-summary, .hub-cards { grid-template-columns: 1fr 1fr; }
     }
   </style>
 </head>
@@ -381,6 +412,18 @@
         <div class="section-head"><h2>Fleet health</h2><span class="rule-badge">v0.20</span></div>
         <button id="openFleetHealth" style="width:100%">Open fleet health</button>
         <p class="small muted" style="margin:10px 0 0">Check battery, connectivity, update state, and recent screens across every X3/X4.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Fleet Management</h2><span class="rule-badge">v0.33</span></div>
+        <button id="openFleetPolicies" class="primary" style="width:100%">Open Fleet Management</button>
+        <p class="small muted" style="margin:10px 0 0">Build and deploy policies, choose default applications, monitor acknowledgements, and safely update X3/X4 firmware.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>FlexHub</h2><span class="rule-badge">v0.33</span></div>
+        <button id="openFlexHub" style="width:100%">Open FlexHub status</button>
+        <p class="small muted" style="margin:10px 0 0">View hub health, storage, fleet connection, Wi-Fi, and Meshtastic status.</p>
       </div>
 
       <div class="section">
@@ -722,6 +765,76 @@
       <div class="empty">Loading fleet health…</div>
     </div>
   </dialog>
+  <dialog id="fleetPolicyDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Fleet Management v0.33</div><h2 style="font-size:20px">Policies, profiles and safe firmware rollout</h2></div>
+      <div class="button-row"><button id="refreshFleetPolicies">Refresh</button><button id="closeFleetPolicies" class="icon" title="Close">×</button></div>
+    </div>
+    <div class="library-shell management-shell">
+      <div class="library-controls">
+        <div id="fleetPolicySummary" class="policy-summary"></div>
+        <section class="management-group">
+          <div class="section-head"><div><h3>1 · Build a policy profile</h3><span class="small muted">Reusable device behaviour</span></div><button id="newFleetPolicy">New</button></div>
+          <label>Policy profile<select id="fleetPolicyProfile"></select></label>
+          <div id="fleetPolicyDescription" class="small muted"></div>
+          <div id="fleetPolicyBuilder" class="policy-builder" hidden>
+            <div class="field-grid"><label>Profile ID<input id="fleetPolicyId" maxlength="32" placeholder="showroom"></label><label>Name<input id="fleetPolicyLabel" maxlength="48" placeholder="Showroom"></label></div>
+            <label>Description<input id="fleetPolicyProfileDescription" maxlength="160" placeholder="How this policy should be used"></label>
+            <div class="policy-toggle-grid">
+              <label><input id="policyIntelligentSleep" type="checkbox">Smart sleep</label>
+              <label><input id="policyStayAwakeUsb" type="checkbox">Awake on USB</label>
+              <label><input id="policyLiveMode" type="checkbox">Live mode</label>
+            </div>
+            <div class="field-grid"><label>Refresh every<select id="policyRefresh"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="21600">6 hours</option></select></label><label>Manual sleep<select id="policyManualSleep"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option></select></label></div>
+            <div class="field-grid"><label>Low battery at<input id="policyLowBattery" type="number" min="10" max="80" value="30"></label><label>Low-battery slowdown<input id="policyLowMultiplier" type="number" min="1" max="12" value="4"></label></div>
+            <div class="field-grid"><label>Unchanged slowdown<input id="policyUnchangedMultiplier" type="number" min="1" max="12" value="2"></label><label>Wake grace seconds<input id="policyWakeGrace" type="number" min="0" max="600" value="60"></label></div>
+            <div class="field-grid"><label>Active from<input id="policyActiveStart" type="time" value="00:00"></label><label>Active until<input id="policyActiveEnd" type="time" value="00:00"></label></div>
+            <label>Timezone<input id="policyTimezone" maxlength="64" value="Australia/Melbourne"></label>
+            <div class="button-row"><button id="saveFleetPolicyProfile" class="primary">Save profile</button><button id="deleteFleetPolicyProfile" class="danger">Delete</button><button id="cancelFleetPolicyEdit">Cancel</button></div>
+          </div>
+        </section>
+
+        <section class="management-group">
+          <div><h3>2 · Choose scope and application</h3><span class="small muted">The same selection is used for policy and firmware actions</span></div>
+          <label>Apply to<select id="fleetPolicyScope"><option value="all">Every X3 and X4</option><option value="x3">All X3 displays</option><option value="x4">All X4 displays</option><option value="devices">Selected devices</option></select></label>
+          <label>Default application<select id="fleetPolicyMode"><option value="unchanged">Keep current default</option><option value="home_assistant">Home Assistant dashboard</option><option value="photo_frame">Photo Frame</option><option value="reader">CrossPoint Reader</option><option value="trmnl">TRMNL</option><option value="opendisplay">OpenDisplay</option></select></label>
+          <label>Dashboard profile<select id="fleetPolicyDashboard"><option value="">Keep current dashboard</option></select></label>
+          <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
+          <label>Delivery<select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
+          <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
+          <p class="small muted" style="margin:0">“Pending” means the Bridge saved the policy but a sleeping device has not acknowledged it yet.</p>
+        </section>
+
+        <section class="management-group">
+          <div><h3>3 · Firmware rollout</h3><span class="small muted">Canary first, then automatic bounded rollout</span></div>
+          <div id="fleetFirmwareRelease" class="firmware-release">Loading configured release…</div>
+          <div id="fleetFirmwareRollout" class="small muted"></div>
+          <div class="button-row"><button id="installFleetFirmware" class="primary">Update selected scope</button><button id="resetFleetFirmware">Reset rollout</button></div>
+          <p class="small muted" style="margin:0">The first eligible USB-powered display becomes the canary. After it reboots and acknowledges successfully, the Bridge continues within the configured parallel limit.</p>
+        </section>
+      </div>
+      <div>
+        <div class="section-head"><div><h2>Devices and acknowledgements</h2><span class="small muted">Policy and firmware state update automatically</span></div><div class="button-row"><button id="selectAllPolicyDevices">Select all</button><button id="clearPolicyDevices">Clear</button></div></div>
+        <div id="fleetPolicyDevices" class="policy-device-list"><div class="empty">Loading devices…</div></div>
+      </div>
+    </div>
+  </dialog>
+  <dialog id="flexHubDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">SenseCAP FlexHub v0.33</div><h2 style="font-size:20px">Hub configuration and health</h2></div>
+      <div class="button-row"><button id="refreshFlexHub">Refresh</button><button id="closeFlexHub" class="icon" title="Close">×</button></div>
+    </div>
+    <div class="library-shell">
+      <div class="library-controls">
+        <label>FlexHub address<input id="flexHubUrl" type="url" placeholder="http://flexhub.local"></label>
+        <label>Access PIN<input id="flexHubPin" type="password" maxlength="64" placeholder="Leave blank if disabled"></label>
+        <button id="saveFlexHub" class="primary">Save and connect</button>
+        <div id="flexHubConnection" class="empty">FlexHub is not configured.</div>
+        <p class="small muted">The PIN is stored in the Bridge App data directory. Status is also published as a SenseCAP FlexHub device in Home Assistant when MQTT discovery is enabled.</p>
+      </div>
+      <div id="flexHubCards" class="hub-cards"><div class="empty">Configure the FlexHub address to begin.</div></div>
+    </div>
+  </dialog>
   <dialog id="loadingScreenDialog" class="library-dialog">
     <div class="section-head" style="padding:18px 20px 0">
       <div><div class="eyebrow">Branded Fetch Screen v0.21</div><h2 style="font-size:20px">Loading-screen designer</h2></div>
@@ -834,6 +947,9 @@
       loadingPreviewUrl: "",
       loadingPreviewTimer: null,
       contentPacks: {packs: {}, assignments: {}},
+      fleetPolicies: {profiles: [], dashboard_profiles: [], photo_albums: [], devices: [], summary: {}},
+      fleetManagementTimer: null,
+      flexHub: {},
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -971,6 +1087,252 @@
       } catch (error) {
         grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
       }
+    }
+
+    function selectedFleetDeviceIds() {
+      return [...document.querySelectorAll("[data-policy-device]:checked")].map((node) => node.value);
+    }
+
+    function renderFleetPolicyProfile() {
+      const profile = (state.fleetPolicies.profiles || []).find((item) => item.id === $("#fleetPolicyProfile").value);
+      $("#fleetPolicyDescription").textContent = profile?.description || "Select a reusable policy profile.";
+      const builder = $("#fleetPolicyBuilder");
+      if (!profile || profile.built_in) {
+        builder.hidden = true;
+        return;
+      }
+      builder.hidden = false;
+      $("#fleetPolicyId").value = profile.id;
+      $("#fleetPolicyId").disabled = true;
+      $("#fleetPolicyLabel").value = profile.label || profile.id;
+      $("#fleetPolicyProfileDescription").value = profile.description || "";
+      const settings = profile.settings || {};
+      $("#policyIntelligentSleep").checked = Boolean(settings.intelligent_sleep);
+      $("#policyStayAwakeUsb").checked = Boolean(settings.stay_awake_on_usb);
+      $("#policyLiveMode").checked = Boolean(settings.live_mode);
+      $("#policyRefresh").value = String(settings.refresh_interval_seconds || 900);
+      $("#policyManualSleep").value = String(settings.manual_sleep_seconds || 900);
+      $("#policyLowBattery").value = settings.low_battery_percent || 30;
+      $("#policyLowMultiplier").value = settings.low_battery_multiplier || 4;
+      $("#policyUnchangedMultiplier").value = settings.unchanged_image_multiplier || 2;
+      $("#policyWakeGrace").value = settings.manual_wake_grace_seconds ?? 60;
+      $("#policyActiveStart").value = settings.active_start || "00:00";
+      $("#policyActiveEnd").value = settings.active_end || "00:00";
+      $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
+      $("#deleteFleetPolicyProfile").hidden = false;
+    }
+
+    function newFleetPolicyProfile() {
+      const source = (state.fleetPolicies.profiles || []).find((item) => item.id === $("#fleetPolicyProfile").value);
+      const settings = source?.settings || {};
+      $("#fleetPolicyBuilder").hidden = false;
+      $("#fleetPolicyId").disabled = false;
+      $("#fleetPolicyId").value = "";
+      $("#fleetPolicyLabel").value = "";
+      $("#fleetPolicyProfileDescription").value = "";
+      $("#policyIntelligentSleep").checked = settings.intelligent_sleep ?? true;
+      $("#policyStayAwakeUsb").checked = settings.stay_awake_on_usb ?? true;
+      $("#policyLiveMode").checked = settings.live_mode ?? false;
+      $("#policyRefresh").value = String(settings.refresh_interval_seconds || 900);
+      $("#policyManualSleep").value = String(settings.manual_sleep_seconds || 900);
+      $("#policyLowBattery").value = settings.low_battery_percent || 30;
+      $("#policyLowMultiplier").value = settings.low_battery_multiplier || 4;
+      $("#policyUnchangedMultiplier").value = settings.unchanged_image_multiplier || 2;
+      $("#policyWakeGrace").value = settings.manual_wake_grace_seconds ?? 60;
+      $("#policyActiveStart").value = settings.active_start || "00:00";
+      $("#policyActiveEnd").value = settings.active_end || "00:00";
+      $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
+      $("#deleteFleetPolicyProfile").hidden = true;
+      $("#fleetPolicyId").focus();
+    }
+
+    async function saveFleetPolicyProfile() {
+      const profileId = $("#fleetPolicyId").value.trim().toLowerCase();
+      if (!/^[a-z0-9][a-z0-9_-]{1,31}$/.test(profileId)) return toast("Enter a profile ID using letters, numbers, - or _.", true);
+      try {
+        await api(`fleet/policies/${encodeURIComponent(profileId)}`, {method: "PUT", body: {
+          label: $("#fleetPolicyLabel").value,
+          description: $("#fleetPolicyProfileDescription").value,
+          settings: {
+            intelligent_sleep: $("#policyIntelligentSleep").checked,
+            stay_awake_on_usb: $("#policyStayAwakeUsb").checked,
+            live_mode: $("#policyLiveMode").checked,
+            refresh_interval_seconds: Number($("#policyRefresh").value),
+            manual_sleep_seconds: Number($("#policyManualSleep").value),
+            low_battery_percent: Number($("#policyLowBattery").value),
+            low_battery_multiplier: Number($("#policyLowMultiplier").value),
+            unchanged_image_multiplier: Number($("#policyUnchangedMultiplier").value),
+            manual_wake_grace_seconds: Number($("#policyWakeGrace").value),
+            active_start: $("#policyActiveStart").value,
+            active_end: $("#policyActiveEnd").value,
+            timezone: $("#policyTimezone").value,
+          },
+        }});
+        toast(`Policy profile ${profileId} saved.`);
+        await loadFleetPolicies(profileId);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function deleteFleetPolicyProfile() {
+      const profileId = $("#fleetPolicyProfile").value;
+      if (!profileId || !confirm(`Delete policy profile ${profileId}? Devices already using it keep their assigned settings.`)) return;
+      try {
+        await api(`fleet/policies/${encodeURIComponent(profileId)}`, {method: "DELETE"});
+        toast(`Policy profile ${profileId} deleted.`);
+        await loadFleetPolicies("balanced");
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderFleetFirmware() {
+      const firmware = state.fleetPolicies.firmware || {};
+      const rollout = firmware.rollout || {};
+      const mirror = firmware.mirror || {};
+      const maintenance = firmware.maintenance || {};
+      const size = firmware.size ? `${(firmware.size / 1048576).toFixed(1)} MB` : "size unavailable";
+      $("#fleetFirmwareRelease").innerHTML = firmware.version
+        ? `<span class="small muted">Configured X3/X4 release</span><strong>${escapeHtml(firmware.version)}</strong><span class="small muted">${escapeHtml(size)} · mirror ${mirror.ready ? "verified" : "not ready"} · ${firmware.canary_required ? "USB canary required" : "direct rollout"}</span>`
+        : "No firmware release is configured.";
+      const planned = rollout.planned_devices || [], updated = rollout.updated_devices || [];
+      $("#fleetFirmwareRollout").innerHTML = rollout.target_version
+        ? `<strong>Status: ${escapeHtml(rollout.status || "not started")}</strong><br>Target ${escapeHtml(rollout.target_version)} · planned ${planned.length} · verified ${updated.length} · parallel limit ${escapeHtml(firmware.max_parallel || 1)}<br>Maintenance window ${maintenance.open ? "open" : "closed"}${rollout.last_failed_device_id ? `<br><span style="color:var(--danger)">Paused on ${escapeHtml(rollout.last_failed_device_id)}: ${escapeHtml(rollout.last_failure || "failed")}</span>` : ""}`
+        : `No rollout has started. Maintenance window is ${maintenance.open ? "open" : "closed"}.`;
+      const updates = (state.fleetPolicies.devices || []).filter((device) => device.update_available).length;
+      $("#installFleetFirmware").disabled = !firmware.version || updates === 0;
+      $("#installFleetFirmware").textContent = rollout.target_version === firmware.version ? `Continue update · ${updates} remaining` : `Update selected scope · ${updates} available`;
+      $("#resetFleetFirmware").disabled = !rollout.target_version;
+    }
+
+    function renderFleetPolicyDevices() {
+      const selectedDeviceIds = new Set(
+        [...document.querySelectorAll("[data-policy-device]:checked")].map((node) => node.value),
+      );
+      const devices = state.fleetPolicies.devices || [];
+      const selectable = $("#fleetPolicyScope").value === "devices";
+      $("#fleetPolicyDevices").innerHTML = devices.length ? devices.map((device) => {
+        const updateStatus = device.firmware_update_status || "idle";
+        const updateDetail = device.update_available
+          ? device.firmware_install_ready ? "Ready for update" : (device.firmware_install_blockers || []).join(" · ")
+          : `Firmware ${device.firmware || "unknown"} is current`;
+        const progress = Math.max(0, Math.min(100, Number(device.firmware_update_percent || 0)));
+        return `
+        <div class="policy-device">
+          <input type="checkbox" data-policy-device value="${escapeHtml(device.device_id)}" ${selectable ? "" : "disabled"} ${selectedDeviceIds.has(device.device_id) ? "checked" : ""}>
+          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"}<br>${escapeHtml(device.policy_name || "custom")} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div><div class="firmware-progress"><span style="width:${progress}%"></span></div><div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${["queued", "preflight", "downloading", "validating", "flashing", "rebooting"].includes(updateStatus) ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}</div></span>
+          <span class="sync-badge ${escapeHtml(device.policy_sync_state || "pending")}">${escapeHtml(device.policy_sync_state || "pending")}</span>
+        </div>`;
+      }).join("") : '<div class="empty">No FlexDisplay device has checked in yet.</div>';
+    }
+
+    async function loadFleetPolicies(preferredProfile = "") {
+      try {
+        const previousProfile = preferredProfile || $("#fleetPolicyProfile").value;
+        const response = await api("fleet/policies");
+        state.fleetPolicies = await response.json();
+        const summary = state.fleetPolicies.summary || {};
+        $("#fleetPolicySummary").innerHTML = [
+          ["Devices", summary.devices || 0], ["Online", summary.online || 0],
+          ["Acknowledged", Math.max(0, (summary.devices || 0) - (summary.pending_policy || 0))],
+          ["Pending", summary.pending_policy || 0],
+        ].map(([label, value]) => `<div><span class="small muted">${label}</span><strong>${value}</strong></div>`).join("");
+        $("#fleetPolicyProfile").innerHTML = (state.fleetPolicies.profiles || []).map((item) => `<option value="${escapeHtml(item.id)}">${escapeHtml(item.label)}${item.built_in ? "" : " · custom"}</option>`).join("");
+        $("#fleetPolicyProfile").value = (state.fleetPolicies.profiles || []).some((item) => item.id === previousProfile) ? previousProfile : "balanced";
+        $("#fleetPolicyDashboard").innerHTML = '<option value="">Keep current dashboard</option>' + (state.fleetPolicies.dashboard_profiles || []).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
+        $("#fleetPolicyAlbum").innerHTML = '<option value="">Do not change album</option>' + (state.fleetPolicies.photo_albums || []).map((album) => `<option value="${escapeHtml(album.id)}">${escapeHtml(album.name)} · ${escapeHtml(album.item_count)} images</option>`).join("");
+        renderFleetPolicyProfile();
+        renderFleetFirmware();
+        renderFleetPolicyDevices();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function applyFleetPolicy() {
+      const scope = $("#fleetPolicyScope").value;
+      const deviceIds = [...document.querySelectorAll("[data-policy-device]:checked")].map((node) => node.value);
+      if (scope === "devices" && !deviceIds.length) return toast("Select at least one device.", true);
+      try {
+        const response = await api("fleet/policy", {method: "PUT", body: {
+          profile: $("#fleetPolicyProfile").value,
+          scope,
+          device_ids: deviceIds,
+          mode: $("#fleetPolicyMode").value,
+          dashboard_profile: $("#fleetPolicyDashboard").value,
+          photo_album: $("#fleetPolicyAlbum").value,
+          delivery: $("#fleetPolicyDelivery").value,
+        }});
+        const result = await response.json();
+        toast(`Policy revision ${result.revision} assigned to ${result.targets.length} device${result.targets.length === 1 ? "" : "s"}.`);
+        await loadFleetPolicies();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function installFleetFirmware() {
+      const firmware = state.fleetPolicies.firmware || {};
+      const scope = $("#fleetPolicyScope").value;
+      const deviceIds = selectedFleetDeviceIds();
+      if (scope === "devices" && !deviceIds.length) return toast("Select at least one device.", true);
+      if (!firmware.version) return toast("No firmware release is configured.", true);
+      if (!confirm(`Start or continue the safe OTA rollout of ${firmware.version} to the selected scope? The Bridge will use a canary and stop automatically on failure.`)) return;
+      try {
+        const response = await api("fleet/firmware/install", {method: "POST", body: {
+          scope,
+          device_ids: deviceIds,
+          confirm_version: firmware.version,
+        }});
+        const result = await response.json();
+        toast(`Firmware plan accepted for ${result.targets.length} device${result.targets.length === 1 ? "" : "s"}; ${result.queued.length} currently queued.`);
+        await loadFleetPolicies();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function resetFleetFirmware() {
+      if (!confirm("Reset this firmware rollout? Active install commands will be cancelled and the canary gate will start again.")) return;
+      try {
+        await api("firmware/rollout/reset", {method: "POST"});
+        toast("Firmware rollout reset. Select the scope and start it again when ready.");
+        await loadFleetPolicies();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function fleetFirmwareDeviceAction(deviceId, action) {
+      try {
+        if (action === "retry") await api(`devices/${encodeURIComponent(deviceId)}/firmware/retry`, {method: "POST"});
+        else await api(`devices/${encodeURIComponent(deviceId)}/commands`, {method: "DELETE"});
+        toast(`${action === "retry" ? "Retry" : "Cancellation"} accepted for ${deviceId}.`);
+        await loadFleetPolicies();
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function renderFlexHub(summary) {
+      state.flexHub = summary || {};
+      $("#flexHubUrl").value = summary.url || "";
+      const connected = Boolean(summary.connected);
+      $("#flexHubConnection").innerHTML = connected
+        ? `<strong>Connected</strong><br><span class="small muted">Last seen ${escapeHtml(summary.last_seen || "now")}</span>`
+        : `<strong>${summary.configured ? "Connection unavailable" : "Not configured"}</strong><br><span class="small muted">${escapeHtml(summary.error || "Enter the FlexHub address above.")}</span>`;
+      const status = summary.status || {};
+      const fleet = status.fleet || {}, storage = status.storage || {}, network = status.network || {}, mesh = status.meshtastic || {}, slideshow = status.slideshow || {}, boot = status.boot_health || {};
+      const devices = Array.isArray(fleet.devices) ? fleet.devices : [];
+      const cards = [
+        ["FlexHub", [["State", status.state || "offline"], ["Task", status.detail || "—"], ["Platform", status.platform_version || "—"], ["Receivers", status.target_count ?? "—"], ["Active job", status.active_job || "None"], ["Remote commands", status.remote_commands_enabled ? "Enabled" : "Disabled"], ["Access PIN", status.access_control_enabled ? "Enabled" : "Disabled"], ["Healthy boots", boot.count ?? "—"]]],
+        ["Fleet Bridge", [["Connected", fleet.connected ? "Yes" : "No"], ["Displays", devices.length], ["Online", devices.filter((d) => d.online).length], ["Policy", fleet.selected_policy || "—"]]],
+        ["Network and storage", [["IP address", network.ip || "—"], ["Wi-Fi", network.rssi == null ? "—" : `${network.rssi} dBm`], ["SD card", storage.ready ? "Ready" : "Unavailable"], ["SD free", storage.free_bytes == null ? "—" : `${Math.round(storage.free_bytes / 1048576)} MB`]]],
+        ["Meshtastic", [["Firmware", mesh.firmware || status.firmware || "—"], ["Node ID", mesh.node_id || "—"], ["Mesh nodes", mesh.node_count ?? "—"], ["MQTT", mesh.mqtt_connected ? "Connected" : mesh.mqtt_enabled ? "Enabled" : "Disabled"]]],
+        ["Slideshow", [["Running", slideshow.enabled ? "Yes" : "No"], ["Selected", slideshow.active || "None"], ["Interval", slideshow.interval_seconds == null ? "—" : `${slideshow.interval_seconds} seconds`], ["Next update", slideshow.next_in_seconds == null ? "—" : `${slideshow.next_in_seconds} seconds`]]],
+      ];
+      $("#flexHubCards").innerHTML = cards.map(([title, facts]) => `<section class="hub-card"><h2>${title}</h2><div class="hub-facts">${facts.map(([label, value]) => `<div><span class="small muted">${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div></section>`).join("");
+    }
+
+    async function loadFlexHub(refresh = false) {
+      try { const response = await api(`flexhub${refresh ? "?refresh=true" : ""}`); renderFlexHub(await response.json()); }
+      catch (error) { toast(error.message, true); }
+    }
+
+    async function saveFlexHub() {
+      try {
+        const response = await api("flexhub/settings", {method: "PUT", body: {url: $("#flexHubUrl").value, access_pin: $("#flexHubPin").value}});
+        $("#flexHubPin").value = "";
+        renderFlexHub(await response.json());
+        toast("FlexHub connection saved.");
+      } catch (error) { toast(error.message, true); }
     }
 
     async function loadContentPacks() {
@@ -2836,6 +3198,45 @@
     });
     $("#refreshFleetHealth").addEventListener("click", loadFleetHealth);
     $("#closeFleetHealth").addEventListener("click", () => $("#fleetHealthDialog").close());
+    $("#openFleetPolicies").addEventListener("click", () => {
+      $("#fleetPolicyDialog").showModal();
+      loadFleetPolicies();
+      clearInterval(state.fleetManagementTimer);
+      state.fleetManagementTimer = setInterval(() => {
+        if ($("#fleetPolicyDialog").open && $("#fleetPolicyBuilder").hidden) loadFleetPolicies();
+      }, 10000);
+    });
+    $("#refreshFleetPolicies").addEventListener("click", () => loadFleetPolicies());
+    $("#closeFleetPolicies").addEventListener("click", () => {
+      clearInterval(state.fleetManagementTimer);
+      state.fleetManagementTimer = null;
+      $("#fleetPolicyDialog").close();
+    });
+    $("#fleetPolicyDialog").addEventListener("close", () => {
+      clearInterval(state.fleetManagementTimer);
+      state.fleetManagementTimer = null;
+    });
+    $("#fleetPolicyProfile").addEventListener("change", renderFleetPolicyProfile);
+    $("#newFleetPolicy").addEventListener("click", newFleetPolicyProfile);
+    $("#saveFleetPolicyProfile").addEventListener("click", saveFleetPolicyProfile);
+    $("#deleteFleetPolicyProfile").addEventListener("click", deleteFleetPolicyProfile);
+    $("#cancelFleetPolicyEdit").addEventListener("click", renderFleetPolicyProfile);
+    $("#fleetPolicyScope").addEventListener("change", renderFleetPolicyDevices);
+    $("#selectAllPolicyDevices").addEventListener("click", () => document.querySelectorAll("[data-policy-device]:not(:disabled)").forEach((node) => { node.checked = true; }));
+    $("#clearPolicyDevices").addEventListener("click", () => document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = false; }));
+    $("#applyFleetPolicy").addEventListener("click", applyFleetPolicy);
+    $("#installFleetFirmware").addEventListener("click", installFleetFirmware);
+    $("#resetFleetFirmware").addEventListener("click", resetFleetFirmware);
+    $("#fleetPolicyDevices").addEventListener("click", (event) => {
+      const retry = event.target.closest("[data-firmware-retry]");
+      if (retry) return fleetFirmwareDeviceAction(retry.dataset.firmwareRetry, "retry");
+      const cancel = event.target.closest("[data-firmware-cancel]");
+      if (cancel) return fleetFirmwareDeviceAction(cancel.dataset.firmwareCancel, "cancel");
+    });
+    $("#openFlexHub").addEventListener("click", () => { $("#flexHubDialog").showModal(); loadFlexHub(true); });
+    $("#refreshFlexHub").addEventListener("click", () => loadFlexHub(true));
+    $("#saveFlexHub").addEventListener("click", saveFlexHub);
+    $("#closeFlexHub").addEventListener("click", () => $("#flexHubDialog").close());
     $("#openContentPacks").addEventListener("click", () => {
       $("#contentPackDialog").showModal();
       loadContentPacks();

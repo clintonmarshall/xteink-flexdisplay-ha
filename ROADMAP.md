@@ -150,3 +150,24 @@ Delivery: Bridge/Firmware `0.24.0`.
 - Optional timezone-aware overnight OTA maintenance windows with a
   configurable USB-powered override.
 - Automatic repair of stale OTA acknowledgement evidence.
+
+## v0.33 — Fleet Management and FlexHub control
+
+Status: implemented, pending release deployment.
+Delivery: Bridge App and FlexHub `0.33.0`; X3/X4 firmware `0.32.0` remains compatible.
+
+- Dedicated Fleet Management workspace alongside Dashboard Studio.
+- Reusable custom power and wake policy builder, plus built-in Battery Saver,
+  Balanced, and USB Kiosk profiles.
+- Policy, scope, default application, dashboard, album, and delivery controls.
+- Selected-device policy targeting with desired/reported revision and
+  acknowledgement status for every X3/X4.
+- Confirmed, canary-first OTA plans for all devices, X3, X4, or a selected set.
+- Automatic bounded continuation after successful canary and device reboot
+  acknowledgement, with progress, blocker, retry, cancellation, and reset UI.
+- Persistent FlexHub connection and a Studio health workspace for network,
+  storage, receiver fleet, and Meshtastic/MQTT status.
+- Home Assistant MQTT discovery for the SenseCAP FlexHub.
+- Scrollable 24-device managed-display list on the SenseCAP touchscreen.
+- FlexHub status schema 4 with Wi-Fi, memory, uptime, Meshtastic node, and
+  Meshtastic MQTT diagnostics.

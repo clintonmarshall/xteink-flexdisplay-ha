@@ -135,6 +135,14 @@ class MqttConfig:
 
 
 @dataclass(frozen=True)
+class FlexHubConfig:
+    url: str = ""
+    access_pin: str = ""
+    poll_seconds: int = 15
+    timeout_seconds: float = 5.0
+
+
+@dataclass(frozen=True)
 class ScreenHistoryConfig:
     enabled: bool = True
     limit: int = 5
@@ -169,6 +177,7 @@ class BridgeConfig:
     api_key: str = ""
     home_assistant: HomeAssistantConfig = HomeAssistantConfig()
     mqtt: MqttConfig = MqttConfig()
+    flexhub: FlexHubConfig = FlexHubConfig()
     screen_history: ScreenHistoryConfig = ScreenHistoryConfig()
     firmware: FirmwareConfig = FirmwareConfig()
     provisioning: ProvisioningConfig = ProvisioningConfig()
@@ -383,6 +392,27 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         ),
     )
 
+    flexhub_raw = raw.get("flexhub") or {}
+    flexhub_pin_env = str(flexhub_raw.get("access_pin_env") or "FLEXDISPLAY_FLEXHUB_ACCESS_PIN")
+    flexhub = FlexHubConfig(
+        url=os.getenv("FLEXDISPLAY_FLEXHUB_URL", str(flexhub_raw.get("url") or "")).rstrip("/"),
+        access_pin=os.getenv(flexhub_pin_env, str(flexhub_raw.get("access_pin") or "")),
+        poll_seconds=max(
+            5,
+            min(
+                300,
+                int(os.getenv("FLEXDISPLAY_FLEXHUB_POLL_SECONDS", flexhub_raw.get("poll_seconds", 15))),
+            ),
+        ),
+        timeout_seconds=max(
+            1.0,
+            min(
+                15.0,
+                float(os.getenv("FLEXDISPLAY_FLEXHUB_TIMEOUT_SECONDS", flexhub_raw.get("timeout_seconds", 5))),
+            ),
+        ),
+    )
+
     screen_history_raw = raw.get("screen_history") or {}
     screen_history = ScreenHistoryConfig(
         enabled=_env_bool(
@@ -588,6 +618,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         api_key=os.getenv(api_key_env, str(raw.get("server", {}).get("api_key") or "")),
         home_assistant=ha,
         mqtt=mqtt,
+        flexhub=flexhub,
         screen_history=screen_history,
         firmware=firmware,
         provisioning=provisioning,

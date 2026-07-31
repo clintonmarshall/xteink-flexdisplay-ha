@@ -215,6 +215,37 @@ class DeviceStore:
             self._save()
             return revision
 
+    def custom_policy_profiles(self) -> dict[str, dict[str, Any]]:
+        """Return operator-created fleet policy profiles."""
+        with self._lock:
+            return deepcopy(self._state.get("custom_policy_profiles") or {})
+
+    def put_custom_policy_profile(
+        self,
+        profile_id: str,
+        profile: dict[str, Any],
+    ) -> dict[str, Any]:
+        with self._lock:
+            profiles = self._state.setdefault("custom_policy_profiles", {})
+            stored = deepcopy(profile)
+            stored["id"] = profile_id
+            stored["updated_at"] = utc_now()
+            stored["created_at"] = str(
+                (profiles.get(profile_id) or {}).get("created_at") or stored["updated_at"]
+            )
+            profiles[profile_id] = stored
+            self._save()
+            return deepcopy(stored)
+
+    def delete_custom_policy_profile(self, profile_id: str) -> bool:
+        with self._lock:
+            profiles = self._state.get("custom_policy_profiles") or {}
+            if profile_id not in profiles:
+                return False
+            del profiles[profile_id]
+            self._save()
+            return True
+
     def queue_command(self, device_id: str, command: str) -> dict[str, Any]:
         with self._lock:
             record = self._state["devices"].setdefault(
@@ -526,6 +557,38 @@ class DeviceStore:
     def firmware_rollout(self) -> dict[str, Any]:
         with self._lock:
             return deepcopy(self._state.get("firmware_rollout") or {})
+
+    def plan_firmware_rollout(
+        self,
+        target_version: str,
+        device_ids: list[str],
+        *,
+        scope: str,
+        canary_required: bool,
+    ) -> dict[str, Any]:
+        """Persist the selected rollout scope so it can advance after acknowledgements."""
+        if not target_version:
+            raise ValueError("A target firmware version is required")
+        planned = list(dict.fromkeys(device_ids))
+        if not planned:
+            raise ValueError("At least one rollout device is required")
+        with self._lock:
+            rollout = self._state.get("firmware_rollout") or {}
+            if rollout.get("target_version") != target_version:
+                rollout = {
+                    "target_version": target_version,
+                    "status": "awaiting_canary" if canary_required else "fleet_active",
+                    "started_at": utc_now(),
+                    "updated_devices": [],
+                }
+                self._state["firmware_rollout"] = rollout
+            rollout["planned_devices"] = planned
+            rollout["scope"] = scope
+            rollout["auto_continue"] = True
+            rollout["plan_updated_at"] = utc_now()
+            rollout.setdefault("plan_started_at", rollout["plan_updated_at"])
+            self._save()
+            return deepcopy(rollout)
 
     def reset_firmware_rollout(
         self,

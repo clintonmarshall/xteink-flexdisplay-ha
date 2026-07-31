@@ -63,6 +63,23 @@ entity access is unavailable.
 The App uses Home Assistant's internal API token. No long-lived Home Assistant
 token is required in the App options.
 
+### Fleet Policies and FlexHub
+
+Studio `0.33.0` adds two workspaces in its left sidebar:
+
+- **Fleet Policies** assigns a power/wake profile, default application,
+  dashboard, or Photo Frame album to every display, an X3/X4 model group, or
+  selected devices. Each row shows the desired and reported policy revisions
+  so sleeping-device acknowledgements are explicit.
+- **FlexHub** stores the SenseCAP hub address and optional access PIN, then
+  shows its network, SD storage, receiver fleet, Meshtastic node, and
+  Meshtastic MQTT status. With MQTT Discovery enabled, the hub also appears as
+  a Home Assistant device.
+
+The same Fleet Policy controls remain available in the FlexHub browser page.
+On its touchscreen, open **Policies** and swipe vertically inside **Managed
+Displays** to inspect larger fleets.
+
 ## 2. Install the HACS integration
 
 1. Open **HACS → Integrations**.
@@ -235,6 +252,16 @@ reset, battery, Wi-Fi, SD, memory, and uptime history. Fleet Health shows
 trend sparklines, battery-runtime estimates, missed check-ins, reset/watchdog
 diagnostics, SD failure counts, and optional timezone-aware OTA maintenance
 windows. MQTT Discovery publishes the same diagnostics and problem sensors.
+
+Bridge App and FlexHub `0.33.0` separate screen design from fleet operations.
+The new Fleet Management workspace creates reusable power and wake profiles,
+deploys a policy, default application, dashboard, or Photo Frame album to all
+devices, one model, or a selected set, and tracks each acknowledgement. It also
+starts a confirmed, canary-first OTA plan from Dashboard Studio, automatically
+advances after successful reboot acknowledgement, observes per-device progress,
+and exposes retry, cancellation, and rollout reset. FlexHub status, storage,
+network, receiver, and Meshtastic/MQTT diagnostics are visible in the same Home
+Assistant App. Existing X3/X4 firmware `0.32.0` remains compatible.
 
 ## Security
 

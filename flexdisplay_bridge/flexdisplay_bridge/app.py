@@ -42,6 +42,7 @@ from .dashboard_store import (
 )
 from .dashboards import build_dashboard_pages, select_active_pages
 from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
+from .flexhub_client import FlexHubClient, FlexHubClientError
 from .home_assistant import HomeAssistantClient
 from .loading_screen import (
     MAX_LOGO_BYTES,
@@ -517,6 +518,7 @@ def _decorate_device(
     settings: BridgeConfig,
     store: DeviceStore | None = None,
     available_profiles: list[str] | None = None,
+    available_policy_profiles: list[str] | None = None,
 ) -> dict[str, Any]:
     result = dict(record)
     last_seen = result.get("last_seen")
@@ -599,7 +601,9 @@ def _decorate_device(
         if desired_revision == 0
         else "mismatch"
     )
-    result["available_policy_profiles"] = list(FLEET_POLICY_PRESETS)
+    result["available_policy_profiles"] = (
+        available_policy_profiles or list(FLEET_POLICY_PRESETS)
+    )
     result.update(_advanced_health_metrics(result, profile))
     maintenance = _firmware_maintenance_status(settings)
     result["firmware_maintenance_enabled"] = maintenance["enabled"]
@@ -1104,12 +1108,98 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.state_path.with_name("firmware-cache"),
         Path(packaged_firmware) if packaged_firmware else None,
     )
+    flexhub = FlexHubClient(
+        settings.state_path.with_name("flexdisplay-flexhub.json"),
+        default_url=settings.flexhub.url,
+        default_access_pin=settings.flexhub.access_pin,
+        timeout_seconds=settings.flexhub.timeout_seconds,
+    )
     screen_history = ScreenHistoryStore(
         settings.state_path.with_name("screen-history"),
         settings.screen_history.limit,
     )
     ha = HomeAssistantClient(settings.home_assistant)
     renderer = DashboardRenderer()
+
+    def fleet_policy_profiles() -> dict[str, dict[str, Any]]:
+        profiles = {
+            profile_id: {**preset, "id": profile_id, "built_in": True}
+            for profile_id, preset in FLEET_POLICY_PRESETS.items()
+        }
+        for profile_id, profile in store.custom_policy_profiles().items():
+            profiles[profile_id] = {**profile, "id": profile_id, "built_in": False}
+        return profiles
+
+    def fleet_scope_records(
+        scope: str,
+        requested_ids: set[str],
+    ) -> list[dict[str, Any]]:
+        if scope not in {"all", "x3", "x4", "devices"}:
+            raise HTTPException(status_code=400, detail="Unsupported fleet scope")
+        if scope == "devices" and not requested_ids:
+            raise HTTPException(status_code=400, detail="Select at least one device")
+        records: list[dict[str, Any]] = []
+        for record in store.all():
+            device_id = str(record.get("device_id") or "")
+            model = str(record.get("model") or device_id[:2]).upper()
+            if (
+                scope == "all"
+                or (scope == "x3" and "X3" in model)
+                or (scope == "x4" and "X4" in model)
+                or (scope == "devices" and device_id in requested_ids)
+            ):
+                records.append(record)
+        return records
+
+    def advance_firmware_rollout() -> dict[str, Any]:
+        rollout = store.firmware_rollout()
+        target = settings.firmware.version
+        planned = [str(item) for item in (rollout.get("planned_devices") or [])]
+        result: dict[str, Any] = {
+            "queued": [],
+            "blocked": {},
+            "complete": [],
+            "rollout": rollout,
+        }
+        if (
+            not planned
+            or rollout.get("target_version") != target
+            or not rollout.get("auto_continue")
+        ):
+            return result
+        if rollout.get("status") == "failed":
+            result["blocked"]["rollout"] = "Rollout is paused after a failure"
+            return result
+
+        for device_id in planned:
+            record = store.get(device_id)
+            if not record:
+                result["blocked"][device_id] = "Device has not checked in"
+                continue
+            if _firmware_version(str(record.get("firmware") or "")) >= _firmware_version(target):
+                result["complete"].append(device_id)
+                continue
+            if "install" in (record.get("pending_commands") or []) or "install" in (
+                record.get("dispatched_commands") or []
+            ):
+                result["queued"].append(device_id)
+                continue
+            blockers = _firmware_install_blockers(record, settings, store)
+            if blockers:
+                result["blocked"][device_id] = "; ".join(blockers)
+                continue
+            try:
+                store.queue_firmware_install(
+                    device_id,
+                    target,
+                    canary_required=settings.firmware.canary_required,
+                    max_parallel=settings.firmware.max_parallel,
+                )
+                result["queued"].append(device_id)
+            except ValueError as err:
+                result["blocked"][device_id] = str(err)
+        result["rollout"] = store.firmware_rollout()
+        return result
 
     def deliver_screen(
         device_id: str,
@@ -1205,6 +1295,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             settings,
             store,
             dashboards.names(),
+            list(fleet_policy_profiles()),
         )
         decorated["screen_history_count"] = len(screen_history.list(device_id))
         mqtt.publish_device(device_id, profile, decorated)
@@ -1349,7 +1440,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 store.provision(device_id, {"assigned_profile": payload})
                 store.queue_command(device_id, "refresh")
             elif command == "set-policy":
-                preset = FLEET_POLICY_PRESETS.get(payload)
+                preset = fleet_policy_profiles().get(payload)
                 if not preset:
                     raise ValueError("Unknown fleet policy profile")
                 assignment = _provisioning_assignment(
@@ -1412,12 +1503,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     async def monitor_fleet_health() -> None:
         while True:
-            await asyncio.sleep(60)
+            await asyncio.sleep(15)
             store.expire_stale_firmware_installs(
                 settings.firmware.stale_install_seconds
             )
+            advance_firmware_rollout()
             for current in store.all():
                 publish_current(str(current.get("device_id") or ""))
+
+    async def monitor_flexhub() -> None:
+        while True:
+            if flexhub.configured:
+                summary = await asyncio.to_thread(flexhub.poll)
+                mqtt.publish_flexhub(summary)
+            await asyncio.sleep(settings.flexhub.poll_seconds)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
@@ -1427,6 +1526,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
         mqtt.start()
         health_task = asyncio.create_task(monitor_fleet_health())
+        flexhub_task = asyncio.create_task(monitor_flexhub())
         mirror_task = None
         if settings.firmware.mirror_enabled:
             mirror_task = asyncio.create_task(warm_firmware_mirror())
@@ -1434,8 +1534,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if mirror_task and not mirror_task.done():
             mirror_task.cancel()
         health_task.cancel()
+        flexhub_task.cancel()
         with suppress(asyncio.CancelledError):
             await health_task
+        with suppress(asyncio.CancelledError):
+            await flexhub_task
         mqtt.stop()
 
     app = FastAPI(title="FlexDisplay Home Assistant Bridge", version=__version__, lifespan=lifespan)
@@ -1446,6 +1549,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.loading_screens = loading_screens
     app.state.content_packs = content_packs
     app.state.firmware_mirror = firmware_mirror
+    app.state.flexhub = flexhub
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
 
@@ -1534,7 +1638,35 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "screen_history_limit": settings.screen_history.limit,
             "firmware_mirror": firmware_mirror.status(settings.firmware),
             "firmware_maintenance": _firmware_maintenance_status(settings),
+            "flexhub": flexhub.summary(),
         }
+
+    @app.get("/api/v1/flexhub")
+    def flexhub_status(refresh: bool = False) -> dict[str, Any]:
+        summary = flexhub.poll() if refresh and flexhub.configured else flexhub.summary()
+        mqtt.publish_flexhub(summary)
+        return summary
+
+    @app.put("/api/v1/flexhub/settings")
+    def configure_flexhub(payload: dict[str, Any], request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            flexhub.configure(
+                str(payload.get("url") or ""),
+                str(payload.get("access_pin") or ""),
+            )
+        except FlexHubClientError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        summary = flexhub.poll() if flexhub.configured else flexhub.summary()
+        mqtt.publish_flexhub(summary)
+        return summary
+
+    @app.post("/api/v1/flexhub/refresh")
+    def refresh_flexhub(request: Request) -> dict[str, Any]:
+        authorize(request)
+        summary = flexhub.poll()
+        mqtt.publish_flexhub(summary)
+        return summary
 
     @app.get("/api/v1/firmware/current.bin", name="firmware_binary")
     def firmware_binary() -> FileResponse:
@@ -2620,6 +2752,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             for record in store.all()
         ]
         photo_library = photo_frames.payload()
+        policy_profiles = fleet_policy_profiles()
+        rollout = store.firmware_rollout()
+        maintenance = _firmware_maintenance_status(settings)
         return {
             "profiles": [
                 {
@@ -2627,9 +2762,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "label": preset["label"],
                     "description": preset["description"],
                     "settings": preset["settings"],
+                    "built_in": bool(preset.get("built_in")),
+                    "updated_at": preset.get("updated_at"),
                 }
-                for policy_id, preset in FLEET_POLICY_PRESETS.items()
+                for policy_id, preset in policy_profiles.items()
             ],
+            "firmware": {
+                "version": settings.firmware.version,
+                "size": settings.firmware.size,
+                "sha256": settings.firmware.sha256,
+                "minimum_battery_percent": settings.firmware.minimum_battery_percent,
+                "canary_required": settings.firmware.canary_required,
+                "require_usb_for_canary": settings.firmware.require_usb_for_canary,
+                "max_parallel": settings.firmware.max_parallel,
+                "maintenance": maintenance,
+                "mirror": firmware_mirror.status(settings.firmware),
+                "rollout": rollout,
+            },
             "dashboard_profiles": dashboards.names(),
             "photo_albums": [
                 {
@@ -2673,10 +2822,79 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         "reported_policy_revision"
                     ),
                     "policy_sync_state": record.get("policy_sync_state"),
+                    "update_available": record.get("update_available"),
+                    "firmware_install_ready": record.get("firmware_install_ready"),
+                    "firmware_install_blockers": record.get("firmware_install_blockers") or [],
+                    "firmware_update_status": record.get("firmware_update_status") or "idle",
+                    "firmware_update_stage": record.get("firmware_update_stage") or "idle",
+                    "firmware_update_percent": record.get("firmware_update_percent") or 0,
+                    "firmware_update_error": record.get("firmware_update_error"),
+                    "firmware_retry_ready": record.get("firmware_retry_ready"),
+                    "firmware_retry_blockers": record.get("firmware_retry_blockers") or [],
+                    "usb_connected": record.get("usb_connected"),
+                    "sd_ready": record.get("sd_ready"),
                 }
                 for record in records
             ],
         }
+
+    @app.put("/api/v1/fleet/policies/{profile_id}")
+    def save_fleet_policy_profile(
+        profile_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = profile_id.strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,31}", selected):
+            raise HTTPException(status_code=400, detail="Invalid policy profile ID")
+        if selected in FLEET_POLICY_PRESETS:
+            raise HTTPException(status_code=409, detail="Built-in profiles cannot be replaced")
+        raw_settings = payload.get("settings")
+        if not isinstance(raw_settings, dict):
+            raise HTTPException(status_code=400, detail="Policy settings are required")
+        allowed = {
+            "live_mode", "intelligent_sleep", "stay_awake_on_usb",
+            "refresh_interval_seconds", "manual_sleep_seconds",
+            "manual_wake_grace_seconds", "critical_battery_percent",
+            "low_battery_percent", "low_battery_multiplier",
+            "unchanged_image_multiplier", "active_start", "active_end", "timezone",
+        }
+        unknown = set(raw_settings) - allowed
+        if unknown:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported policy setting: {sorted(unknown)[0]}",
+            )
+        for field in ("live_mode", "intelligent_sleep", "stay_awake_on_usb"):
+            if field in raw_settings and not isinstance(raw_settings[field], bool):
+                raise HTTPException(status_code=400, detail=f"{field} must be true or false")
+        assignment = _provisioning_assignment(
+            raw_settings,
+            "POLICY-VALIDATION",
+            dashboards.names(),
+        )
+        normalised = {
+            key.removeprefix("assigned_"): value
+            for key, value in assignment.items()
+        }
+        label = _header_value(payload.get("label"))[:48] or selected.replace("_", " ").title()
+        description = _header_value(payload.get("description"))[:160]
+        profile = store.put_custom_policy_profile(
+            selected,
+            {"label": label, "description": description, "settings": normalised},
+        )
+        return {"saved": True, "profile": {**profile, "built_in": False}}
+
+    @app.delete("/api/v1/fleet/policies/{profile_id}")
+    def delete_fleet_policy_profile(profile_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = profile_id.strip().lower()
+        if selected in FLEET_POLICY_PRESETS:
+            raise HTTPException(status_code=409, detail="Built-in profiles cannot be deleted")
+        if not store.delete_custom_policy_profile(selected):
+            raise HTTPException(status_code=404, detail="Policy profile not found")
+        return {"deleted": selected}
 
     @app.put("/api/v1/fleet/policy")
     def apply_fleet_policy(
@@ -2684,7 +2902,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         authorize(request)
         policy_id = str(payload.get("profile") or "")
-        preset = FLEET_POLICY_PRESETS.get(policy_id)
+        preset = fleet_policy_profiles().get(policy_id)
         if not preset:
             raise HTTPException(status_code=400, detail="Unknown fleet policy profile")
 
@@ -2693,10 +2911,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             _device_id(str(device_id))
             for device_id in (payload.get("device_ids") or [])
         }
-        if scope not in {"all", "x3", "x4", "devices"}:
-            raise HTTPException(status_code=400, detail="Unsupported fleet scope")
-        if scope == "devices" and not requested_ids:
-            raise HTTPException(status_code=400, detail="Select at least one device")
+        scoped_records = fleet_scope_records(scope, requested_ids)
 
         overrides = payload.get("overrides") or {}
         if not isinstance(overrides, dict):
@@ -2719,17 +2934,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             merged["mode"] = "photo_frame"
         revision = store.next_policy_revision()
         targets: list[str] = []
-        for record in store.all():
+        for record in scoped_records:
             device_id = str(record.get("device_id") or "")
-            model = str(record.get("model") or "").upper()
-            included = (
-                scope == "all"
-                or (scope == "x3" and "X3" in model)
-                or (scope == "x4" and "X4" in model)
-                or (scope == "devices" and device_id in requested_ids)
-            )
-            if not included:
-                continue
             assignment = _provisioning_assignment(
                 merged, device_id, dashboards.names()
             )
@@ -2755,6 +2961,56 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "photo_album": photo_album,
             "targets": targets,
             "pending_acknowledgements": len(targets),
+        }
+
+    @app.post("/api/v1/fleet/firmware/install")
+    def install_fleet_firmware(
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        target = settings.firmware.version
+        if str(payload.get("confirm_version") or "") != target:
+            raise HTTPException(
+                status_code=400,
+                detail="Confirm the exact configured firmware version before starting",
+            )
+        error = _firmware_metadata_error(settings)
+        if error:
+            raise HTTPException(status_code=409, detail=error)
+        scope = str(payload.get("scope") or "all").lower()
+        requested_ids = {
+            _device_id(str(device_id))
+            for device_id in (payload.get("device_ids") or [])
+        }
+        records = fleet_scope_records(scope, requested_ids)
+        targets = [
+            str(record.get("device_id") or "")
+            for record in records
+            if _firmware_version(target)
+            > _firmware_version(str(record.get("firmware") or ""))
+        ]
+        if not targets:
+            raise HTTPException(
+                status_code=409,
+                detail="No selected device requires this firmware release",
+            )
+        try:
+            store.plan_firmware_rollout(
+                target,
+                targets,
+                scope=scope,
+                canary_required=settings.firmware.canary_required,
+            )
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        advanced = advance_firmware_rollout()
+        return {
+            "accepted": True,
+            "target_version": target,
+            "scope": scope,
+            "targets": targets,
+            **advanced,
         }
 
     @app.get("/api/v1/content-packs")
@@ -2956,6 +3212,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             or record
         )
+        if command_acknowledged or x_flexdisplay_command_result:
+            advance_firmware_rollout()
         profile: DeviceConfig = _effective_device(configured, record)
         commands = store.consume_commands(device_id)
         if commands:
