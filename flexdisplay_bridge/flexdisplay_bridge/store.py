@@ -207,6 +207,14 @@ class DeviceStore:
             self._save()
             return deepcopy(record)
 
+    def next_policy_revision(self) -> int:
+        """Allocate one monotonic revision for an atomic fleet policy change."""
+        with self._lock:
+            revision = int(self._state.get("policy_revision_sequence") or 0) + 1
+            self._state["policy_revision_sequence"] = revision
+            self._save()
+            return revision
+
     def queue_command(self, device_id: str, command: str) -> dict[str, Any]:
         with self._lock:
             record = self._state["devices"].setdefault(

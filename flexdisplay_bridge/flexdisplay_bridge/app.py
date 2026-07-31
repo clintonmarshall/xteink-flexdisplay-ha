@@ -72,6 +72,50 @@ SUPPORTED_COMMANDS = {
 }
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
+FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
+    "battery_saver": {
+        "label": "Battery Saver",
+        "description": "Long refresh intervals and aggressive scheduled sleep.",
+        "settings": {
+            "live_mode": False,
+            "intelligent_sleep": True,
+            "stay_awake_on_usb": False,
+            "refresh_interval_seconds": 3600,
+            "manual_sleep_seconds": 1800,
+            "manual_wake_grace_seconds": 30,
+            "low_battery_multiplier": 6,
+            "unchanged_image_multiplier": 4,
+        },
+    },
+    "balanced": {
+        "label": "Balanced",
+        "description": "Responsive dashboards with battery-aware scheduled sleep.",
+        "settings": {
+            "live_mode": False,
+            "intelligent_sleep": True,
+            "stay_awake_on_usb": True,
+            "refresh_interval_seconds": 900,
+            "manual_sleep_seconds": 900,
+            "manual_wake_grace_seconds": 60,
+            "low_battery_multiplier": 4,
+            "unchanged_image_multiplier": 2,
+        },
+    },
+    "usb_kiosk": {
+        "label": "USB Kiosk",
+        "description": "Always awake on USB with frequent dashboard refreshes.",
+        "settings": {
+            "live_mode": True,
+            "intelligent_sleep": False,
+            "stay_awake_on_usb": True,
+            "refresh_interval_seconds": 300,
+            "manual_sleep_seconds": 900,
+            "manual_wake_grace_seconds": 120,
+            "low_battery_multiplier": 2,
+            "unchanged_image_multiplier": 1,
+        },
+    },
+}
 OTA_PARTITION_SIZE = 0x640000
 MINIMUM_FIRMWARE_SIZE = 64 * 1024
 USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS = 600
@@ -538,6 +582,23 @@ def _decorate_device(
     result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
     result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
+    desired_revision = int(result.get("assigned_policy_revision") or 0)
+    reported_revision = int(result.get("reported_policy_revision") or 0)
+    result["assigned_policy_name"] = str(
+        result.get("assigned_policy_name") or "custom"
+    )
+    result["policy_revision"] = desired_revision
+    result["reported_policy_revision"] = reported_revision
+    result["policy_sync_state"] = (
+        "synced"
+        if desired_revision > 0 and desired_revision == reported_revision
+        else "pending"
+        if desired_revision > reported_revision
+        else "not_managed"
+        if desired_revision == 0
+        else "mismatch"
+    )
+    result["available_policy_profiles"] = list(FLEET_POLICY_PRESETS)
     result.update(_advanced_health_metrics(result, profile))
     maintenance = _firmware_maintenance_status(settings)
     result["firmware_maintenance_enabled"] = maintenance["enabled"]
@@ -746,6 +807,73 @@ def _clock_minutes(value: str, fallback: int) -> int:
     except (TypeError, ValueError):
         return fallback
     return hour * 60 + minute if 0 <= hour <= 23 and 0 <= minute <= 59 else fallback
+
+
+def _provisioning_assignment(
+    payload: dict[str, Any],
+    selected: str,
+    available_profiles: list[str],
+) -> dict[str, Any]:
+    assignment: dict[str, Any] = {}
+    if "name" in payload:
+        assignment["assigned_name"] = _header_value(payload["name"]) or selected
+    if "area" in payload:
+        assignment["assigned_area"] = _header_value(payload["area"])
+    if "profile" in payload:
+        profile = str(payload["profile"])
+        if profile not in available_profiles:
+            raise HTTPException(status_code=400, detail="Unknown dashboard profile")
+        assignment["assigned_profile"] = profile
+    if "mode" in payload:
+        mode = str(payload["mode"])
+        if mode not in SUPPORTED_MODES:
+            raise HTTPException(status_code=400, detail="Unsupported device mode")
+        assignment["assigned_mode"] = mode
+    if "auto_start" in payload:
+        assignment["assigned_auto_start"] = bool(payload["auto_start"])
+    if "live_mode" in payload:
+        assignment["assigned_live_mode"] = bool(payload["live_mode"])
+    if "refresh_interval_seconds" in payload:
+        assignment["assigned_refresh_interval_seconds"] = _integer(
+            str(payload["refresh_interval_seconds"]), 900, 60, 86400
+        )
+    if "manual_sleep_seconds" in payload:
+        assignment["assigned_manual_sleep_seconds"] = _integer(
+            str(payload["manual_sleep_seconds"]), 900, 60, 86400
+        )
+    if "intelligent_sleep" in payload:
+        assignment["assigned_intelligent_sleep"] = bool(payload["intelligent_sleep"])
+    if "active_start" in payload:
+        minutes = _clock_minutes(str(payload["active_start"]), -1)
+        if minutes < 0:
+            raise HTTPException(status_code=400, detail="active_start must be HH:MM")
+        assignment["assigned_active_start"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
+    if "active_end" in payload:
+        minutes = _clock_minutes(str(payload["active_end"]), -1)
+        if minutes < 0:
+            raise HTTPException(status_code=400, detail="active_end must be HH:MM")
+        assignment["assigned_active_end"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
+    if "timezone" in payload:
+        timezone = str(payload["timezone"])
+        try:
+            ZoneInfo(timezone)
+        except ZoneInfoNotFoundError as err:
+            raise HTTPException(status_code=400, detail="Unknown timezone") from err
+        assignment["assigned_timezone"] = timezone
+    for field, minimum, maximum in (
+        ("critical_battery_percent", 5, 50),
+        ("low_battery_percent", 10, 80),
+        ("low_battery_multiplier", 1, 12),
+        ("unchanged_image_multiplier", 1, 12),
+        ("manual_wake_grace_seconds", 0, 600),
+    ):
+        if field in payload:
+            assignment[f"assigned_{field}"] = _integer(
+                str(payload[field]), 0, minimum, maximum
+            )
+    if "stay_awake_on_usb" in payload:
+        assignment["assigned_stay_awake_on_usb"] = bool(payload["stay_awake_on_usb"])
+    return assignment
 
 
 def _sleep_plan(
@@ -1216,6 +1344,19 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 if payload not in dashboards.names():
                     raise ValueError("Unknown dashboard profile")
                 store.provision(device_id, {"assigned_profile": payload})
+                store.queue_command(device_id, "refresh")
+            elif command == "set-policy":
+                preset = FLEET_POLICY_PRESETS.get(payload)
+                if not preset:
+                    raise ValueError("Unknown fleet policy profile")
+                assignment = _provisioning_assignment(
+                    preset["settings"], device_id, dashboards.names()
+                )
+                assignment["assigned_policy_name"] = payload
+                assignment["assigned_policy_revision"] = (
+                    store.next_policy_revision()
+                )
+                store.provision(device_id, assignment)
                 store.queue_command(device_id, "refresh")
             elif command in {"set-name", "set-area"}:
                 field = (
@@ -2456,77 +2597,161 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
-        assignment: dict[str, Any] = {}
-        if "name" in payload:
-            assignment["assigned_name"] = _header_value(payload["name"]) or selected
-        if "area" in payload:
-            assignment["assigned_area"] = _header_value(payload["area"])
-        if "profile" in payload:
-            profile = str(payload["profile"])
-            if profile not in dashboards.names():
-                raise HTTPException(status_code=400, detail="Unknown dashboard profile")
-            assignment["assigned_profile"] = profile
-        if "mode" in payload:
-            mode = str(payload["mode"])
-            if mode not in SUPPORTED_MODES:
-                raise HTTPException(status_code=400, detail="Unsupported device mode")
-            assignment["assigned_mode"] = mode
-        if "auto_start" in payload:
-            assignment["assigned_auto_start"] = bool(payload["auto_start"])
-        if "live_mode" in payload:
-            assignment["assigned_live_mode"] = bool(payload["live_mode"])
-        if "refresh_interval_seconds" in payload:
-            assignment["assigned_refresh_interval_seconds"] = _integer(
-                str(payload["refresh_interval_seconds"]),
-                900,
-                60,
-                86400,
-            )
-        if "manual_sleep_seconds" in payload:
-            assignment["assigned_manual_sleep_seconds"] = _integer(
-                str(payload["manual_sleep_seconds"]),
-                900,
-                60,
-                86400,
-            )
-        if "intelligent_sleep" in payload:
-            assignment["assigned_intelligent_sleep"] = bool(payload["intelligent_sleep"])
-        if "active_start" in payload:
-            minutes = _clock_minutes(str(payload["active_start"]), -1)
-            if minutes < 0:
-                raise HTTPException(status_code=400, detail="active_start must be HH:MM")
-            assignment["assigned_active_start"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
-        if "active_end" in payload:
-            minutes = _clock_minutes(str(payload["active_end"]), -1)
-            if minutes < 0:
-                raise HTTPException(status_code=400, detail="active_end must be HH:MM")
-            assignment["assigned_active_end"] = f"{minutes // 60:02d}:{minutes % 60:02d}"
-        if "timezone" in payload:
-            timezone = str(payload["timezone"])
-            try:
-                ZoneInfo(timezone)
-            except ZoneInfoNotFoundError as err:
-                raise HTTPException(status_code=400, detail="Unknown timezone") from err
-            assignment["assigned_timezone"] = timezone
-        for field, minimum, maximum in (
-            ("critical_battery_percent", 5, 50),
-            ("low_battery_percent", 10, 80),
-            ("low_battery_multiplier", 1, 12),
-            ("unchanged_image_multiplier", 1, 12),
-            ("manual_wake_grace_seconds", 0, 600),
-        ):
-            if field in payload:
-                assignment[f"assigned_{field}"] = _integer(
-                    str(payload[field]), 0, minimum, maximum
-                )
-        if "stay_awake_on_usb" in payload:
-            assignment["assigned_stay_awake_on_usb"] = bool(payload["stay_awake_on_usb"])
+        assignment = _provisioning_assignment(
+            payload, selected, dashboards.names()
+        )
         if not assignment:
             raise HTTPException(status_code=400, detail="No provisioning fields supplied")
+        assignment["assigned_policy_name"] = "custom"
+        assignment["assigned_policy_revision"] = store.next_policy_revision()
         record = store.provision(selected, assignment)
         store.queue_command(selected, "refresh")
         return {
             "device": _decorate_device(record, settings, store, dashboards.names()),
+        }
+
+    @app.get("/api/v1/fleet/policies")
+    def fleet_policies() -> dict[str, Any]:
+        records = [
+            _decorate_device(record, settings, store, dashboards.names())
+            for record in store.all()
+        ]
+        photo_library = photo_frames.payload()
+        return {
+            "profiles": [
+                {
+                    "id": policy_id,
+                    "label": preset["label"],
+                    "description": preset["description"],
+                    "settings": preset["settings"],
+                }
+                for policy_id, preset in FLEET_POLICY_PRESETS.items()
+            ],
+            "dashboard_profiles": dashboards.names(),
+            "photo_albums": [
+                {
+                    "id": album_id,
+                    "name": str(album.get("name") or album_id),
+                    "item_count": len(album.get("items") or []),
+                }
+                for album_id, album in photo_library.get("albums", {}).items()
+            ],
+            "summary": {
+                "devices": len(records),
+                "online": sum(bool(record.get("online")) for record in records),
+                "healthy": sum(
+                    record.get("health_state") == "healthy" for record in records
+                ),
+                "pending_policy": sum(
+                    record.get("policy_sync_state") == "pending" for record in records
+                ),
+                "x3": sum(
+                    "X3" in str(record.get("model") or "").upper()
+                    for record in records
+                ),
+                "x4": sum(
+                    "X4" in str(record.get("model") or "").upper()
+                    for record in records
+                ),
+            },
+            "devices": [
+                {
+                    "device_id": record.get("device_id"),
+                    "name": record.get("name"),
+                    "model": record.get("model"),
+                    "online": record.get("online"),
+                    "power_state": record.get("power_state"),
+                    "battery_percent": record.get("battery_percent"),
+                    "firmware": record.get("firmware"),
+                    "health_state": record.get("health_state"),
+                    "policy_name": record.get("assigned_policy_name"),
+                    "policy_revision": record.get("policy_revision"),
+                    "reported_policy_revision": record.get(
+                        "reported_policy_revision"
+                    ),
+                    "policy_sync_state": record.get("policy_sync_state"),
+                }
+                for record in records
+            ],
+        }
+
+    @app.put("/api/v1/fleet/policy")
+    def apply_fleet_policy(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        policy_id = str(payload.get("profile") or "")
+        preset = FLEET_POLICY_PRESETS.get(policy_id)
+        if not preset:
+            raise HTTPException(status_code=400, detail="Unknown fleet policy profile")
+
+        scope = str(payload.get("scope") or "all").lower()
+        requested_ids = {
+            _device_id(str(device_id))
+            for device_id in (payload.get("device_ids") or [])
+        }
+        if scope not in {"all", "x3", "x4", "devices"}:
+            raise HTTPException(status_code=400, detail="Unsupported fleet scope")
+        if scope == "devices" and not requested_ids:
+            raise HTTPException(status_code=400, detail="Select at least one device")
+
+        overrides = payload.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            raise HTTPException(status_code=400, detail="Policy overrides must be an object")
+        merged = {**preset["settings"], **overrides}
+        selected_mode = str(payload.get("mode") or "").strip().lower()
+        if selected_mode and selected_mode != "unchanged":
+            if selected_mode not in SUPPORTED_MODES:
+                raise HTTPException(status_code=400, detail="Unsupported default application")
+            merged["mode"] = selected_mode
+        dashboard_profile = str(payload.get("dashboard_profile") or "").strip()
+        if dashboard_profile:
+            if dashboard_profile not in dashboards.names():
+                raise HTTPException(status_code=400, detail="Unknown dashboard profile")
+            merged["profile"] = dashboard_profile
+        photo_album = str(payload.get("photo_album") or "").strip()
+        if photo_album:
+            if photo_album not in photo_frames.payload().get("albums", {}):
+                raise HTTPException(status_code=400, detail="Unknown photo-frame album")
+            merged["mode"] = "photo_frame"
+        revision = store.next_policy_revision()
+        targets: list[str] = []
+        for record in store.all():
+            device_id = str(record.get("device_id") or "")
+            model = str(record.get("model") or "").upper()
+            included = (
+                scope == "all"
+                or (scope == "x3" and "X3" in model)
+                or (scope == "x4" and "X4" in model)
+                or (scope == "devices" and device_id in requested_ids)
+            )
+            if not included:
+                continue
+            assignment = _provisioning_assignment(
+                merged, device_id, dashboards.names()
+            )
+            assignment["assigned_policy_name"] = policy_id
+            assignment["assigned_policy_revision"] = revision
+            store.provision(device_id, assignment)
+            if photo_album:
+                photo_frames.assign(device_id, photo_album)
+            if str(payload.get("delivery") or "when_awake") == "apply_now":
+                store.queue_command(device_id, "refresh")
+            targets.append(device_id)
+
+        if not targets:
+            raise HTTPException(status_code=404, detail="No devices matched the fleet scope")
+        return {
+            "accepted": True,
+            "profile": policy_id,
+            "scope": scope,
+            "revision": revision,
+            "delivery": str(payload.get("delivery") or "when_awake"),
+            "mode": selected_mode or "unchanged",
+            "dashboard_profile": dashboard_profile,
+            "photo_album": photo_album,
+            "targets": targets,
+            "pending_acknowledgements": len(targets),
         }
 
     @app.get("/api/v1/content-packs")
@@ -2627,6 +2852,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_content_version: str | None = Header(default=None),
         x_flexdisplay_content_status: str | None = Header(default=None),
         x_flexdisplay_content_error: str | None = Header(default=None),
+        x_flexdisplay_policy_revision: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -2654,6 +2880,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "boot_id": x_flexdisplay_boot_id or None,
             "transfer_capabilities": sorted(capabilities),
             "image_cached": image_cached,
+            "reported_policy_revision": _optional_integer(
+                x_flexdisplay_policy_revision, 0, 2_147_483_647
+            ),
         }
         record = store.touch(device_id, telemetry)
         content_assignment = content_packs.observe(
@@ -2819,6 +3048,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     )
                     response.headers["X-FlexDisplay-Live-Mode"] = (
                         "true" if profile.live_mode else "false"
+                    )
+                    response.headers["X-FlexDisplay-Policy-Revision"] = str(
+                        int(record.get("assigned_policy_revision") or 0)
                     )
                 if settings.firmware.version:
                     response.headers["X-FlexDisplay-Latest-Firmware"] = (
@@ -2989,6 +3221,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
                 response.headers["X-FlexDisplay-Live-Mode"] = (
                     "true" if profile.live_mode else "false"
+                )
+                response.headers["X-FlexDisplay-Policy-Revision"] = str(
+                    int(record.get("assigned_policy_revision") or 0)
                 )
             response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
             if command_id:
@@ -3188,6 +3423,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(profile.mode)
             response.headers["X-FlexDisplay-Auto-Start"] = "true" if profile.auto_start else "false"
             response.headers["X-FlexDisplay-Live-Mode"] = "true" if profile.live_mode else "false"
+            response.headers["X-FlexDisplay-Policy-Revision"] = str(
+                int(record.get("assigned_policy_revision") or 0)
+            )
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
         if command_id:
             response.headers["X-FlexDisplay-Command-ID"] = command_id

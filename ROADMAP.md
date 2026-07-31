@@ -3,9 +3,20 @@
 This roadmap keeps the platform enhancements in a deliberate order. A release
 may move only after the previous phase is usable on both XTEINK X3 and X4.
 
+## v0.32 — Edge fleet policy control
+
+Status: implemented and publishing.
+Delivery: Bridge/HACS/Firmware/FlexHub `0.32.0`.
+
+- Revisioned fleet policy profiles with durable device acknowledgement.
+- Native FlexHub fleet health, policy, scope, default-app, dashboard, and
+  Photo Frame controls.
+- Matching App-only MQTT and optional custom-integration entities.
+- Shared X3/X4 acknowledgement support without splitting the firmware image.
+
 ## v0.31 — Refined platform and upstream refresh
 
-Status: implemented, pending hardware canary and coordinated publication.
+Status: released.
 Delivery: Bridge/HACS/Firmware/FlexHub `0.31.0`.
 
 - Separate device firmware, Home Assistant, always-on Hub, and Factory Kit

@@ -504,6 +504,7 @@ def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> No
     assert "homeassistant/update/x4_mqtt01/firmware/config" in topics
     assert "homeassistant/event/x4_mqtt01/physical_button/config" in topics
     assert "homeassistant/select/x4_mqtt01/profile/config" in topics
+    assert "homeassistant/select/x4_mqtt01/policy/config" in topics
     assert "homeassistant/number/x4_mqtt01/refresh_interval/config" in topics
     assert "homeassistant/switch/x4_mqtt01/intelligent_sleep/config" in topics
     assert "homeassistant/text/x4_mqtt01/timezone/config" in topics
@@ -511,6 +512,8 @@ def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> No
     assert "homeassistant/image/x4_mqtt01/current_screen/config" in topics
     assert "homeassistant/sensor/x4_mqtt01/transfer_bytes/config" in topics
     assert "homeassistant/sensor/x4_mqtt01/transfer_savings/config" in topics
+    assert "homeassistant/sensor/x4_mqtt01/policy_sync/config" in topics
+    assert "homeassistant/sensor/x4_mqtt01/policy_revision/config" in topics
     assert topics["flexdisplay/X4-MQTT01/screen"] == b"png-screen"
     assert json.loads(
         topics["homeassistant/select/x4_mqtt01/profile/config"]
@@ -562,11 +565,15 @@ def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> 
         client.get("/api/v1/screen", headers=headers)
         app.state.mqtt.on_command("X3-APPMQTT", "set-refresh-interval", "1800")
         app.state.mqtt.on_command("X3-APPMQTT", "set-mode", "photo_frame")
+        app.state.mqtt.on_command("X3-APPMQTT", "set-policy", "battery_saver")
         app.state.mqtt.on_command("X3-APPMQTT", "set-active-start", "07:30")
 
         device = client.get("/api/v1/devices/X3-APPMQTT").json()
-        assert device["assigned_refresh_interval_seconds"] == 1800
+        assert device["assigned_refresh_interval_seconds"] == 3600
         assert device["assigned_mode"] == "photo_frame"
+        assert device["assigned_policy_name"] == "battery_saver"
+        assert device["policy_revision"] > 0
+        assert device["policy_sync_state"] == "pending"
         assert device["assigned_active_start"] == "07:30"
         assert device["last_management_action"] == "set-active-start"
         assert device["last_management_action_success"] is True
@@ -934,6 +941,100 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
         assert screen.headers["x-flexdisplay-live-mode"] == "true"
         assert screen.headers["x-flexdisplay-sleep-reason"] == "live_mode"
+
+
+def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="secret",
+    )
+    with TestClient(create_app(config)) as client:
+        for device_id, model in (
+            ("X3-FLEET01", "XTEINK_X3"),
+            ("X4-FLEET02", "XTEINK_X4"),
+        ):
+            response = client.get(
+                "/api/v1/screen",
+                headers={
+                    "X-FlexDisplay-ID": device_id,
+                    "X-FlexDisplay-Model": model,
+                },
+            )
+            assert response.status_code == 200
+
+        unauthorized = client.put(
+            "/api/v1/fleet/policy",
+            json={"profile": "balanced", "scope": "all"},
+        )
+        assert unauthorized.status_code == 401
+
+        applied = client.put(
+            "/api/v1/fleet/policy",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+            json={
+                "profile": "balanced",
+                "scope": "all",
+                "delivery": "apply_now",
+            },
+        )
+        assert applied.status_code == 200
+        result = applied.json()
+        assert result["targets"] == ["X3-FLEET01", "X4-FLEET02"]
+        assert result["pending_acknowledgements"] == 2
+        revision = result["revision"]
+        assert revision > 0
+
+        pending = client.get("/api/v1/fleet/policies").json()
+        assert pending["summary"]["pending_policy"] == 2
+        assert pending["dashboard_profiles"] == ["default"]
+        assert pending["photo_albums"][0]["id"] == "default"
+        assert {
+            item["policy_sync_state"] for item in pending["devices"]
+        } == {"pending"}
+
+        delivered = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-FLEET01"},
+        )
+        assert delivered.headers["x-flexdisplay-policy-revision"] == str(revision)
+
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-FLEET01",
+                "X-FlexDisplay-Policy-Revision": str(revision),
+            },
+        )
+        assert acknowledged.status_code == 200
+        fleet = client.get("/api/v1/fleet/policies").json()
+        states = {
+            item["device_id"]: item["policy_sync_state"]
+            for item in fleet["devices"]
+        }
+        assert states == {
+            "X3-FLEET01": "synced",
+            "X4-FLEET02": "pending",
+        }
+
+        photo_policy = client.put(
+            "/api/v1/fleet/policy",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+            json={
+                "profile": "battery_saver",
+                "scope": "devices",
+                "device_ids": ["X4-FLEET02"],
+                "photo_album": "default",
+            },
+        )
+        assert photo_policy.status_code == 200
+        assert photo_policy.json()["photo_album"] == "default"
+        x4 = client.get("/api/v1/devices/X4-FLEET02").json()
+        assert x4["assigned_mode"] == "photo_frame"
+        photo_library = client.get(
+            "/api/v1/photo-frame",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+        ).json()
+        assert photo_library["assignments"]["X4-FLEET02"] == "default"
 
 
 def test_sleep_plan_respects_usb_active_hours_battery_and_unchanged_images() -> None:
