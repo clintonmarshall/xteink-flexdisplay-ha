@@ -1060,7 +1060,9 @@ def _number(value: str | None) -> float | None:
 
 
 def _device_id(value: str | None) -> str:
-    selected = value or "UNKNOWN"
+    selected = str(value or "").strip()
+    if not selected:
+        raise HTTPException(status_code=400, detail="X-FlexDisplay-ID is required")
     if not DEVICE_ID_PATTERN.fullmatch(selected):
         raise HTTPException(status_code=400, detail="Invalid X-FlexDisplay-ID")
     return selected
@@ -1524,6 +1526,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         store.expire_stale_firmware_installs(
             settings.firmware.stale_install_seconds
         )
+        for purged_device_id in store.purged_device_ids:
+            mqtt.remove_device(purged_device_id)
         mqtt.start()
         health_task = asyncio.create_task(monitor_fleet_health())
         flexhub_task = asyncio.create_task(monitor_flexhub())
@@ -1730,6 +1734,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             **_decorate_device(record, settings, store, dashboards.names()),
             "screen_history_count": len(screen_history.list(selected)),
         }
+
+    @app.delete("/api/v1/devices/{device_id}")
+    def delete_device(device_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device not found")
+        configured = settings.device(
+            selected,
+            int(current.get("width") or 480),
+            int(current.get("height") or 800),
+            str(current.get("model") or ""),
+        )
+        profile = _effective_device(configured, current)
+        removed = store.remove_device(selected)
+        mqtt.remove_device(selected, profile, current)
+        return {"deleted": selected, "device": removed}
 
     @app.get("/api/v1/devices/{device_id}/events")
     def device_events(device_id: str) -> dict[str, Any]:
@@ -2822,6 +2844,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         "reported_policy_revision"
                     ),
                     "policy_sync_state": record.get("policy_sync_state"),
+                    "last_seen": record.get("last_seen"),
+                    "provisioning_updated_at": record.get(
+                        "provisioning_updated_at"
+                    ),
                     "update_available": record.get("update_available"),
                     "firmware_install_ready": record.get("firmware_install_ready"),
                     "firmware_install_blockers": record.get("firmware_install_blockers") or [],

@@ -28,6 +28,7 @@ class DeviceStore:
         self.path = path
         self._lock = threading.RLock()
         self._state: dict[str, Any] = {"devices": {}}
+        self._purged_device_ids: list[str] = []
         self._load()
 
     def _load(self) -> None:
@@ -38,8 +39,62 @@ class DeviceStore:
             if isinstance(loaded, dict) and isinstance(loaded.get("devices"), dict):
                 self._state = loaded
                 self._migrate_legacy_commands()
+                self._purge_legacy_invalid_devices()
         except (OSError, json.JSONDecodeError):
             self._state = {"devices": {}}
+
+    def _purge_legacy_invalid_devices(self) -> None:
+        """Remove identity-less records created by older Bridge releases."""
+        devices = self._state["devices"]
+        invalid = [
+            device_id
+            for device_id in devices
+            if not device_id or device_id.upper() == "UNKNOWN"
+        ]
+        for device_id in invalid:
+            devices.pop(device_id, None)
+            self._remove_device_from_rollout(device_id)
+        if invalid:
+            self._purged_device_ids.extend(invalid)
+            self._save()
+
+    def _remove_device_from_rollout(self, device_id: str) -> None:
+        rollout = self._state.get("firmware_rollout")
+        if not isinstance(rollout, dict):
+            return
+        for field in ("planned_devices", "updated_devices"):
+            values = rollout.get(field)
+            if isinstance(values, list):
+                rollout[field] = [value for value in values if value != device_id]
+        if rollout.get("canary_device_id") == device_id:
+            for field in (
+                "canary_device_id",
+                "canary_started_at",
+                "canary_verified_at",
+            ):
+                rollout.pop(field, None)
+            rollout["status"] = "awaiting_canary"
+        if rollout.get("last_failed_device_id") == device_id:
+            for field in (
+                "last_failed_device_id",
+                "last_failure",
+                "last_failed_at",
+            ):
+                rollout.pop(field, None)
+
+    @property
+    def purged_device_ids(self) -> list[str]:
+        return list(self._purged_device_ids)
+
+    def remove_device(self, device_id: str) -> dict[str, Any] | None:
+        """Permanently remove a fleet record and its active rollout references."""
+        with self._lock:
+            record = self._state["devices"].pop(device_id, None)
+            if record is None:
+                return None
+            self._remove_device_from_rollout(device_id)
+            self._save()
+            return deepcopy(record)
 
     def _migrate_legacy_commands(self) -> None:
         """Make pre-command-ID state safe after upgrading the Bridge."""

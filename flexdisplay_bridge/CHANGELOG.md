@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.33.1
+
+- Reject identity-less display check-ins and automatically purge the legacy
+  `UNKNOWN` fleet record, including retained MQTT Discovery data and active
+  rollout references.
+- Added a permanent device removal action that clears both the Bridge registry
+  and Home Assistant MQTT entities. A genuine display is discovered again if it
+  later checks in with its stable identity.
+- Expanded the Fleet Management device list, added battery percentage, and
+  replaced ambiguous policy states with Applied, Waiting for wake, Confirming,
+  Needs review, and Unmanaged labels.
+- Fixed Select all and Clear by switching directly to selected-device scope.
+- Hide completed firmware progress bars while preserving the completion audit
+  and status details.
+
+## 0.33.0
+
+- Added the Fleet Management workspace for reusable policy profiles, scoped
+  assignments, acknowledgement status, and safe canary-first OTA rollout.
+- Added FlexHub configuration and health visibility, including network,
+  storage, fleet, and Meshtastic status.
+
 ## 0.32.1
 
 - Bundled the validated X3/X4 `0.32.0` OTA binary inside the Home Assistant App
