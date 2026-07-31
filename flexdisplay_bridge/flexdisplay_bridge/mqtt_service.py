@@ -243,6 +243,23 @@ class MqttService:
                 "name": "Dashboard profile",
                 "value_template": "{{ value_json.assigned_profile }}",
             },
+            "policy_sync": {
+                "name": "Fleet policy sync",
+                "value_template": "{{ value_json.policy_sync_state }}",
+                "entity_category": "diagnostic",
+            },
+            "policy_revision": {
+                "name": "Fleet policy revision",
+                "state_class": "measurement",
+                "value_template": "{{ value_json.policy_revision }}",
+                "entity_category": "diagnostic",
+            },
+            "reported_policy_revision": {
+                "name": "Reported fleet policy revision",
+                "state_class": "measurement",
+                "value_template": "{{ value_json.reported_policy_revision }}",
+                "entity_category": "diagnostic",
+            },
             "sleep_reason": {
                 "name": "Sleep reason",
                 "value_template": "{{ value_json.sleep_reason }}",
@@ -630,6 +647,13 @@ class MqttService:
                 "assigned_profile",
                 "set-profile",
                 state.get("available_profiles") or [profile.profile],
+            ),
+            "policy": (
+                "Fleet policy",
+                "assigned_policy_name",
+                "set-policy",
+                state.get("available_policy_profiles")
+                or ["battery_saver", "balanced", "usb_kiosk"],
             ),
         }
         for key, (name, field, command, options) in selects.items():

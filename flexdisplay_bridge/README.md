@@ -99,6 +99,22 @@ battery and Wi-Fi trends, and MQTT Discovery publishes matching diagnostic and
 problem entities. Optional overnight firmware maintenance windows can gate
 battery-powered rollouts while still allowing an explicit USB override.
 
+The current fleet-controller development slice adds revisioned policy delivery
+for the SenseCAP FlexHub and Home Assistant. Battery Saver, Balanced, and USB
+Kiosk policies can target all displays, X3, X4, or an explicit device list.
+The same request can preserve or change the default application, select a
+Dashboard Studio profile, or assign a Photo Frame album. Each device reports
+the last policy revision it has persisted, so the Bridge distinguishes
+pending, synced, unmanaged, and mismatched state instead of treating a queued
+refresh as proof that the change was applied.
+
+The controller endpoints are:
+
+- `GET /api/v1/fleet/policies` for profiles, available dashboards/albums, fleet
+  health, and desired-versus-reported revision state.
+- `PUT /api/v1/fleet/policy` for scoped policy, application, dashboard, and
+  album assignment. This endpoint requires the configured Bridge API key.
+
 For custom dashboard entity lists, edit `config.yaml` in the app's
 `addon_configs` directory and restart the app.
 

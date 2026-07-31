@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.32.0
+
+- Added revisioned fleet policy profiles for Battery Saver, Balanced, and USB
+  Kiosk operation, with atomic X3/X4 scope selection and durable device
+  acknowledgement.
+- Added fleet-wide default application, dashboard profile, and Photo Frame
+  album assignment through the Bridge API and SenseCAP FlexHub.
+- Added per-device fleet policy selection plus desired/reported revision and
+  synchronization diagnostics to both the optional custom integration and the
+  App-only MQTT Discovery path.
+- Added a native FlexHub Policies page and responsive web controls for fleet
+  health, policy scope, content assignment, refresh, and immediate rollout.
+- Added shared X3/X4 firmware `1.5.0-flexdisplay.0.32.0` with policy revision
+  persistence and acknowledgement on successful check-in.
+
 ## 0.31.0
 
 - Rebased the common X3/X4 firmware on CrossPoint 1.5 and the FreeInk hardware

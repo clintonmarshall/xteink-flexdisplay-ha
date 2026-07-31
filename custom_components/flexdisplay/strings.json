@@ -138,6 +138,12 @@
       },
       "firmware_install_blockers": {
         "name": "Firmware install blockers"
+      },
+      "policy_sync_state": {
+        "name": "Fleet policy status"
+      },
+      "policy_revision": {
+        "name": "Fleet policy revision"
       }
     },
     "binary_sensor": {
@@ -223,6 +229,9 @@
       },
       "assigned_mode": {
         "name": "Assigned mode"
+      },
+      "fleet_policy": {
+        "name": "Fleet policy"
       }
     },
     "number": {

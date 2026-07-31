@@ -112,6 +112,28 @@ class FlexDisplayApiClient:
         """Update the server-side assignment for a device."""
         await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)
 
+    async def apply_policy(
+        self,
+        profile: str,
+        *,
+        scope: str = "all",
+        device_ids: list[str] | None = None,
+        delivery: str = "when_awake",
+        overrides: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Apply one named policy to a fleet scope."""
+        return await self._request(
+            "PUT",
+            "/api/v1/fleet/policy",
+            json={
+                "profile": profile,
+                "scope": scope,
+                "device_ids": device_ids or [],
+                "delivery": delivery,
+                "overrides": overrides or {},
+            },
+        )
+
     async def button_actions(self, device_id: str) -> dict[str, Any]:
         """Return physical-button action mappings for one device."""
         return await self._request("GET", f"/api/v1/devices/{device_id}/button-actions")

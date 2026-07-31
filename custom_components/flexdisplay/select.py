@@ -92,6 +92,39 @@ class FlexDisplayModeSelect(FlexDisplayEntity, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayPolicySelect(FlexDisplayEntity, SelectEntity):
+    """Apply a named operating policy to this display."""
+
+    _attr_translation_key = "fleet_policy"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_fleet_policy_select"
+
+    @property
+    def options(self) -> list[str]:
+        return list(
+            self.record.get("available_policy_profiles")
+            or ["battery_saver", "balanced", "usb_kiosk"]
+        )
+
+    @property
+    def current_option(self) -> str | None:
+        current = str(self.record.get("assigned_policy_name") or "")
+        return current if current in self.options else None
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unknown FlexDisplay fleet policy: {option}")
+        await self.coordinator.client.apply_policy(
+            option,
+            scope="devices",
+            device_ids=[self.device_id],
+            delivery="apply_now",
+        )
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -106,5 +139,6 @@ async def async_setup_entry(
             FlexDisplayPageSelect(coordinator, device_id),
             FlexDisplayProfileSelect(coordinator, device_id),
             FlexDisplayModeSelect(coordinator, device_id),
+            FlexDisplayPolicySelect(coordinator, device_id),
         ),
     )
