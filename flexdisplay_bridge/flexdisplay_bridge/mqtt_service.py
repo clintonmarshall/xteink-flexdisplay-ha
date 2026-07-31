@@ -809,3 +809,142 @@ class MqttService:
             content,
             retain=True,
         )
+
+    def publish_flexhub(self, summary: dict[str, Any]) -> None:
+        """Publish the SenseCAP FlexHub as a Home Assistant MQTT device."""
+        if not self.client or not self.connected:
+            return
+        status = summary.get("status") if isinstance(summary.get("status"), dict) else {}
+        fleet = status.get("fleet") if isinstance(status.get("fleet"), dict) else {}
+        storage = status.get("storage") if isinstance(status.get("storage"), dict) else {}
+        network = status.get("network") if isinstance(status.get("network"), dict) else {}
+        meshtastic = status.get("meshtastic") if isinstance(status.get("meshtastic"), dict) else {}
+        devices = fleet.get("devices") if isinstance(fleet.get("devices"), list) else []
+        state = {
+            "connected": bool(summary.get("connected")),
+            "url": summary.get("url") or "",
+            "last_seen": summary.get("last_seen") or "",
+            "error": summary.get("error") or "",
+            "state": status.get("state") or "offline",
+            "detail": status.get("detail") or summary.get("error") or "Waiting for FlexHub",
+            "firmware": status.get("firmware") or "unknown",
+            "platform_version": status.get("platform_version") or "unknown",
+            "target_count": status.get("target_count") or 0,
+            "delivered": status.get("delivered") or 0,
+            "failed": status.get("failed") or 0,
+            "active_job": status.get("active_job") or "",
+            "remote_commands_enabled": bool(status.get("remote_commands_enabled")),
+            "access_control_enabled": bool(status.get("access_control_enabled")),
+            "slideshow_enabled": bool((status.get("slideshow") or {}).get("enabled")),
+            "slideshow_interval_seconds": (status.get("slideshow") or {}).get("interval_seconds"),
+            "healthy_boots": (status.get("boot_health") or {}).get("count"),
+            "fleet_bridge_connected": bool(fleet.get("connected")),
+            "fleet_devices": len(devices),
+            "fleet_online": sum(bool(item.get("online")) for item in devices if isinstance(item, dict)),
+            "fleet_policy_pending": sum(
+                item.get("policy_sync_state") == "pending" for item in devices if isinstance(item, dict)
+            ),
+            "selected_policy": fleet.get("selected_policy") or "unknown",
+            "selected_scope": fleet.get("selected_scope") or "unknown",
+            "storage_ready": bool(storage.get("ready")),
+            "storage_free_bytes": storage.get("free_bytes") or 0,
+            "ip_address": network.get("ip") or "",
+            "wifi_rssi": network.get("rssi"),
+            "free_heap": network.get("free_heap"),
+            "uptime_seconds": network.get("uptime_seconds"),
+            "meshtastic_node_id": meshtastic.get("node_id") or "",
+            "meshtastic_firmware": meshtastic.get("firmware") or status.get("firmware") or "unknown",
+            "meshtastic_nodes": meshtastic.get("node_count"),
+            "meshtastic_online_nodes": meshtastic.get("online_node_count"),
+            "meshtastic_mqtt_enabled": bool(meshtastic.get("mqtt_enabled")),
+            "meshtastic_mqtt_connected": bool(meshtastic.get("mqtt_connected")),
+        }
+        state_topic = f"{self.config.topic_prefix}/flexhub/state"
+        availability_topic = f"{self.config.topic_prefix}/flexhub/availability"
+        device = {
+            "identifiers": ["flexdisplay_flexhub"],
+            "name": "SenseCAP FlexHub",
+            "manufacturer": "Seeed Studio / FlexDisplay",
+            "model": "SenseCAP Indicator FlexHub",
+            "sw_version": state["firmware"],
+        }
+        if summary.get("url"):
+            device["configuration_url"] = summary["url"]
+        sensor_fields = {
+            "state": ("State", None, None),
+            "detail": ("Current task", None, None),
+            "firmware": ("Meshtastic firmware", None, "diagnostic"),
+            "platform_version": ("FlexDisplay platform", None, "diagnostic"),
+            "target_count": ("Known receivers", None, None),
+            "delivered": ("Last delivered", None, None),
+            "failed": ("Last failed", None, None),
+            "active_job": ("Active saved job", None, None),
+            "slideshow_interval_seconds": ("Slideshow interval", "s", "config"),
+            "healthy_boots": ("Healthy boots", None, "diagnostic"),
+            "fleet_devices": ("Managed displays", None, None),
+            "fleet_online": ("Online displays", None, None),
+            "fleet_policy_pending": ("Policy acknowledgements pending", None, None),
+            "selected_policy": ("Selected fleet policy", None, "config"),
+            "selected_scope": ("Selected fleet scope", None, "config"),
+            "storage_free_bytes": ("SD free space", "B", "diagnostic"),
+            "ip_address": ("IP address", None, "diagnostic"),
+            "wifi_rssi": ("Wi-Fi signal", "dBm", "diagnostic"),
+            "free_heap": ("Free memory", "B", "diagnostic"),
+            "uptime_seconds": ("Uptime", "s", "diagnostic"),
+            "meshtastic_node_id": ("Meshtastic node ID", None, "diagnostic"),
+            "meshtastic_nodes": ("Meshtastic nodes", None, "diagnostic"),
+            "meshtastic_online_nodes": ("Meshtastic online nodes", None, "diagnostic"),
+        }
+        for field, (name, unit, category) in sensor_fields.items():
+            payload = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_flexhub_{field}",
+                    state_topic=state_topic,
+                ),
+                "name": name,
+                "value_template": f"{{{{ value_json.{field} }}}}",
+                "availability_topic": availability_topic,
+            }
+            if unit:
+                payload["unit_of_measurement"] = unit
+            if category:
+                payload["entity_category"] = category
+            self.client.publish(
+                f"{self.config.discovery_prefix}/sensor/flexhub/{field}/config",
+                json.dumps(payload) if self.discovery_enabled else "",
+                retain=True,
+            )
+        for field, name in {
+            "fleet_bridge_connected": "FlexDisplay Bridge connected",
+            "storage_ready": "SD storage ready",
+            "remote_commands_enabled": "Remote commands enabled",
+            "access_control_enabled": "Access control enabled",
+            "slideshow_enabled": "Slideshow active",
+            "meshtastic_mqtt_enabled": "Meshtastic MQTT enabled",
+            "meshtastic_mqtt_connected": "Meshtastic MQTT connected",
+        }.items():
+            payload = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_flexhub_{field}",
+                    state_topic=state_topic,
+                ),
+                "name": name,
+                "value_template": f"{{{{ 'ON' if value_json.{field} else 'OFF' }}}}",
+                "payload_on": "ON",
+                "payload_off": "OFF",
+                "entity_category": "diagnostic",
+                "availability_topic": availability_topic,
+            }
+            self.client.publish(
+                f"{self.config.discovery_prefix}/binary_sensor/flexhub/{field}/config",
+                json.dumps(payload) if self.discovery_enabled else "",
+                retain=True,
+            )
+        self.client.publish(
+            availability_topic,
+            "online" if summary.get("connected") else "offline",
+            retain=True,
+        )
+        self.client.publish(state_topic, json.dumps(state), retain=True)

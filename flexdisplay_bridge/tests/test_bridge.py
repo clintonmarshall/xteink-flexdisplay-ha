@@ -1037,6 +1037,68 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
         assert photo_library["assignments"]["X4-FLEET02"] == "default"
 
 
+def test_fleet_management_saves_and_deploys_custom_policy_profiles(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json", api_key="secret")
+    headers = {"X-FlexDisplay-Bridge-Key": "secret"}
+    with TestClient(create_app(config)) as client:
+        client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-MANAGE1", "X-FlexDisplay-Model": "XTEINK_X3"},
+        )
+        saved = client.put(
+            "/api/v1/fleet/policies/showroom",
+            headers=headers,
+            json={
+                "label": "Showroom",
+                "description": "Always awake while powered",
+                "settings": {
+                    "live_mode": True,
+                    "intelligent_sleep": False,
+                    "stay_awake_on_usb": True,
+                    "refresh_interval_seconds": 300,
+                    "manual_sleep_seconds": 900,
+                    "manual_wake_grace_seconds": 120,
+                    "low_battery_percent": 25,
+                    "low_battery_multiplier": 2,
+                    "unchanged_image_multiplier": 1,
+                    "active_start": "00:00",
+                    "active_end": "00:00",
+                    "timezone": "Australia/Melbourne",
+                },
+            },
+        )
+        assert saved.status_code == 200
+        assert saved.json()["profile"]["built_in"] is False
+
+        profiles = client.get("/api/v1/fleet/policies").json()["profiles"]
+        assert next(item for item in profiles if item["id"] == "showroom")["settings"][
+            "stay_awake_on_usb"
+        ] is True
+
+        deployed = client.put(
+            "/api/v1/fleet/policy",
+            headers=headers,
+            json={
+                "profile": "showroom",
+                "scope": "devices",
+                "device_ids": ["X3-MANAGE1"],
+                "mode": "reader",
+            },
+        )
+        assert deployed.status_code == 200
+        device = client.get("/api/v1/devices/X3-MANAGE1").json()
+        assert device["assigned_policy_name"] == "showroom"
+        assert device["assigned_mode"] == "reader"
+        assert device["assigned_stay_awake_on_usb"] is True
+        assert device["assigned_refresh_interval_seconds"] == 300
+
+        deleted = client.delete("/api/v1/fleet/policies/showroom", headers=headers)
+        assert deleted.status_code == 200
+        assert "showroom" not in {
+            item["id"] for item in client.get("/api/v1/fleet/policies").json()["profiles"]
+        }
+
+
 def test_sleep_plan_respects_usb_active_hours_battery_and_unchanged_images() -> None:
     profile = DeviceConfig(
         name="Test",
@@ -2724,6 +2786,94 @@ def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
         paused = client.post("/api/v1/devices/X3-FLEET02/commands/install")
         assert paused.status_code == 409
         assert "Rollout paused after failure on X4-FLEET01" in paused.json()["detail"]
+
+
+def test_fleet_management_plans_and_advances_safe_ota_rollout(tmp_path: Path) -> None:
+    firmware = FirmwareConfig(
+        version="1.4.1-flexdisplay.0.33.0",
+        url="https://example.test/firmware.bin",
+        sha256="ab" * 32,
+        size=5_500_000,
+        minimum_battery_percent=45,
+        canary_required=True,
+        require_usb_for_canary=True,
+        max_parallel=1,
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="secret",
+        firmware=firmware,
+    )
+    auth = {"X-FlexDisplay-Bridge-Key": "secret"}
+    with TestClient(create_app(config)) as client:
+        for device_id, model in (
+            ("X3-MANAGE1", "XTEINK_X3"),
+            ("X4-MANAGE2", "XTEINK_X4"),
+            ("X3-MANAGE3", "XTEINK_X3"),
+        ):
+            client.get(
+                "/api/v1/screen",
+                headers={
+                    "X-FlexDisplay-ID": device_id,
+                    "X-FlexDisplay-Model": model,
+                    "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.32.0",
+                    "X-FlexDisplay-SD-Ready": "true",
+                    "X-FlexDisplay-USB-Connected": "true",
+                    "X-FlexDisplay-Battery-Percent": "90",
+                },
+            )
+
+        unconfirmed = client.post(
+            "/api/v1/fleet/firmware/install",
+            headers=auth,
+            json={"scope": "all", "confirm_version": "wrong"},
+        )
+        assert unconfirmed.status_code == 400
+
+        started = client.post(
+            "/api/v1/fleet/firmware/install",
+            headers=auth,
+            json={"scope": "all", "confirm_version": firmware.version},
+        )
+        assert started.status_code == 200
+        result = started.json()
+        assert result["targets"] == ["X3-MANAGE1", "X4-MANAGE2", "X3-MANAGE3"]
+        assert result["queued"] == ["X3-MANAGE1"]
+        assert result["rollout"]["planned_devices"] == result["targets"]
+
+        canary_delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-MANAGE1",
+                "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.32.0",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+            },
+        )
+        command_id = canary_delivery.headers["x-flexdisplay-command-id"]
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-MANAGE1",
+                "X-FlexDisplay-Firmware": firmware.version,
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-USB-Connected": "true",
+                "X-FlexDisplay-Command-ID": command_id,
+                "X-FlexDisplay-Command-Result": "install:complete",
+            },
+        )
+        assert acknowledged.headers["x-flexdisplay-command-acknowledged"] == "true"
+        next_device = client.get("/api/v1/devices/X4-MANAGE2").json()
+        assert next_device["firmware_update_status"] == "queued"
+        assert next_device["firmware_update_role"] == "fleet"
+
+        management = client.get("/api/v1/fleet/policies").json()
+        assert management["firmware"]["rollout"]["status"] == "fleet_active"
+        assert management["firmware"]["max_parallel"] == 1
+        device = next(
+            item for item in management["devices"] if item["device_id"] == "X4-MANAGE2"
+        )
+        assert device["firmware_update_status"] == "queued"
 
 
 def test_rollout_reset_does_not_bypass_usb_canary_gate(tmp_path: Path) -> None:

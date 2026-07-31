@@ -167,6 +167,11 @@ def main() -> None:
     os.environ["FLEXDISPLAY_HA_ENTITY_SOURCE"] = option(
         options, "home_assistant_entity_source", "hacs"
     )
+    os.environ["FLEXDISPLAY_FLEXHUB_URL"] = option(options, "flexhub_url")
+    os.environ["FLEXDISPLAY_FLEXHUB_ACCESS_PIN"] = option(options, "flexhub_access_pin")
+    os.environ["FLEXDISPLAY_FLEXHUB_POLL_SECONDS"] = option(
+        options, "flexhub_poll_seconds", 15
+    )
     os.environ["FLEXDISPLAY_SCREEN_HISTORY_ENABLED"] = option(
         options, "screen_history_enabled", True
     )
