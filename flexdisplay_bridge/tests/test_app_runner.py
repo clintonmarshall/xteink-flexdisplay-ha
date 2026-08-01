@@ -1,9 +1,20 @@
+import hashlib
+from pathlib import Path
+
 from app_runner import (
     DEFAULT_FIRMWARE,
     LEGACY_PACKAGED_FIRMWARE,
     firmware_option,
     firmware_options,
 )
+
+
+def test_bundled_firmware_matches_default_manifest() -> None:
+    firmware_path = Path(__file__).resolve().parents[1] / "firmware" / "firmware.bin"
+    payload = firmware_path.read_bytes()
+
+    assert len(payload) == DEFAULT_FIRMWARE["firmware_size"]
+    assert hashlib.sha256(payload).hexdigest() == DEFAULT_FIRMWARE["firmware_sha256"]
 
 
 def test_firmware_option_uses_packaged_release_for_missing_values() -> None:

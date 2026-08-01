@@ -22,6 +22,8 @@
 - Carry Quick Menu destinations across the intentional Wi-Fi cleanup reboot,
   so TRMNL, OpenDisplay, Photo Frame, and All Applications open directly; the
   Sleep action now preserves the current frame and enters real deep sleep.
+- Send the numeric `WiFi-Band: 2.4` value expected by Terminus, preventing its
+  display endpoint from rejecting otherwise valid device requests with HTTP 404.
 - Automatically migrate saved official firmware options, including older
   v0.24.0 and v0.34.0 manifests, to the bundled v0.34.1 release while
   preserving genuinely custom firmware URLs.
