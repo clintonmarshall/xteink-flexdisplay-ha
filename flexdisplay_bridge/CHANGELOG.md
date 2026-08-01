@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.34.1
+
+- Deliver server-rendered dashboards, mixed content, photo frames, and restored
+  screens as native 1-bit BMP files to X3 devices, avoiding unreliable PNG
+  inflate allocations while retaining compressed PNG delivery on X4 devices.
+- Calculate cache hashes, ETags, unchanged responses, and transfer metrics from
+  the exact payload delivered to each hardware model.
+- Record bounded image-conversion diagnostics reported by firmware, expose the
+  latest detail through the fleet API and MQTT, and clear the active fault once
+  the device confirms a valid cached image.
+- Bundle shared X3/X4 firmware `1.5.0-flexdisplay.0.34.1`, which lends display
+  scratch memory only during PNG/JPEG conversion and reports precise decoder
+  failures such as `png:inflate_init_failed`.
+- Install dashboard files atomically, retain the previous valid screen when a
+  transfer or conversion fails, and recover an interrupted cache swap after a
+  reboot.
+- Serialize branded loading-screen rendering with dashboard decoding so the
+  render task cannot access framebuffer storage while it is loaned as PNG
+  scratch memory.
+- Carry Quick Menu destinations across the intentional Wi-Fi cleanup reboot,
+  so TRMNL, OpenDisplay, Photo Frame, and All Applications open directly; the
+  Sleep action now preserves the current frame and enters real deep sleep.
+- Send the numeric `WiFi-Band: 2.4` value expected by Terminus, preventing its
+  display endpoint from rejecting otherwise valid device requests with HTTP 404.
+- Automatically migrate saved official firmware options, including older
+  v0.24.0 and v0.34.0 manifests, to the bundled v0.34.1 release while
+  preserving genuinely custom firmware URLs.
+
 ## 0.34.0
 
 - Added persistent Mixed Content channels that combine a device's assigned Home

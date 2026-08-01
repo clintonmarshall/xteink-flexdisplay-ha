@@ -362,6 +362,11 @@ class MqttService:
                 "value_template": "{{ value_json.last_transfer_savings_percent }}",
                 "entity_category": "diagnostic",
             },
+            "last_image_error": {
+                "name": "Last image conversion error",
+                "value_template": "{{ value_json.last_image_error | default('') }}",
+                "entity_category": "diagnostic",
+            },
             "screen_history_count": {
                 "name": "Saved screens",
                 "value_template": "{{ value_json.screen_history_count }}",
@@ -472,6 +477,14 @@ class MqttService:
                 "name": "Home Assistant error",
                 "device_class": "problem",
                 "value_template": "{{ 'ON' if value_json.ha_error else 'OFF' }}",
+            },
+            "image_conversion_error": {
+                "name": "Image conversion error",
+                "device_class": "problem",
+                "value_template": (
+                    "{{ 'ON' if value_json.image_conversion_error else 'OFF' }}"
+                ),
+                "entity_category": "diagnostic",
             },
             "firmware_update_available": {
                 "name": "Firmware update available",

@@ -1,9 +1,20 @@
+import hashlib
+from pathlib import Path
+
 from app_runner import (
     DEFAULT_FIRMWARE,
     LEGACY_PACKAGED_FIRMWARE,
     firmware_option,
     firmware_options,
 )
+
+
+def test_bundled_firmware_matches_default_manifest() -> None:
+    firmware_path = Path(__file__).resolve().parents[1] / "firmware" / "firmware.bin"
+    payload = firmware_path.read_bytes()
+
+    assert len(payload) == DEFAULT_FIRMWARE["firmware_size"]
+    assert hashlib.sha256(payload).hexdigest() == DEFAULT_FIRMWARE["firmware_sha256"]
 
 
 def test_firmware_option_uses_packaged_release_for_missing_values() -> None:
@@ -34,6 +45,18 @@ def test_firmware_option_preserves_explicit_override() -> None:
 
 def test_firmware_options_migrates_exact_packaged_release() -> None:
     options = dict(LEGACY_PACKAGED_FIRMWARE[0])
+
+    assert firmware_options(options) == {
+        name: str(value) for name, value in DEFAULT_FIRMWARE.items()
+    }
+
+
+def test_firmware_options_migrates_older_saved_app_options() -> None:
+    options = next(
+        dict(release)
+        for release in LEGACY_PACKAGED_FIRMWARE
+        if release["firmware_version"] == "1.4.1-flexdisplay.0.24.0"
+    )
 
     assert firmware_options(options) == {
         name: str(value) for name, value in DEFAULT_FIRMWARE.items()
