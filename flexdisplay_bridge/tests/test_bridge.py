@@ -624,6 +624,53 @@ def test_v020_screen_history_can_preview_and_resend_exact_image(tmp_path: Path) 
         assert restored.headers["x-flexdisplay-screen-restored"] == older["id"]
 
 
+def test_x3_screen_history_resend_uses_bmp_delivery_digest(tmp_path: Path) -> None:
+    profile = DashboardProfileConfig(
+        name="x3-history",
+        pages=(
+            DashboardPageConfig(title="FIRST"),
+            DashboardPageConfig(title="SECOND"),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+        profiles={"x3-history": profile},
+        default_profile="x3-history",
+    )
+    headers = {
+        "X-FlexDisplay-ID": "X3-HISTORY",
+        "X-FlexDisplay-Model": "XTEINK_X3",
+        "X-FlexDisplay-Width": "528",
+        "X-FlexDisplay-Height": "792",
+        "X-FlexDisplay-Image-Cached": "false",
+    }
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers=headers)
+        assert first.status_code == 200
+        assert first.headers["content-type"] == "image/bmp"
+        first_digest = hashlib.sha256(first.content).hexdigest()
+        assert first.headers["x-flexdisplay-image-sha256"] == first_digest
+
+        client.post("/api/v1/devices/X3-HISTORY/commands/next")
+        second = client.get("/api/v1/screen", headers=headers)
+        assert second.status_code == 200
+        assert second.content != first.content
+
+        older = client.get("/api/v1/devices/X3-HISTORY/screens").json()["screens"][1]
+        queued = client.post(
+            f"/api/v1/devices/X3-HISTORY/screens/{older['id']}/resend"
+        )
+        assert queued.status_code == 200
+        restored = client.get("/api/v1/screen", headers=headers)
+        assert restored.status_code == 200
+        assert restored.headers["content-type"] == "image/bmp"
+        assert restored.content == first.content
+        assert restored.headers["x-flexdisplay-screen-restored"] == older["id"]
+        assert restored.headers["x-flexdisplay-image-sha256"] == first_digest
+        assert restored.headers["etag"] == f'"{first_digest}"'
+
+
 def test_v020_mqtt_discovery_has_full_app_only_entities_and_hacs_cleanup() -> None:
     class FakeClient:
         def __init__(self) -> None:
@@ -1390,7 +1437,12 @@ def test_screen_marks_matching_image_as_unchanged(tmp_path: Path) -> None:
         )
         assert second.headers["x-flexdisplay-image-unchanged"] == "true"
         assert second.content
-        assert second.headers["x-flexdisplay-transfer-encoding"] == "png"
+        assert second.headers["content-type"] == "image/bmp"
+        assert second.headers["x-flexdisplay-transfer-encoding"] == "bmp"
+        assert hashlib.sha256(second.content).hexdigest() == digest
+        with Image.open(io.BytesIO(second.content)) as rendered:
+            assert rendered.size == (480, 800)
+            assert rendered.mode == "1"
         assert second.headers["x-flexdisplay-sleep-reason"] in {
             "unchanged_image",
             "low_battery_unchanged",
@@ -1416,7 +1468,11 @@ def test_capable_device_skips_unchanged_screen_body_safely(
         )
         assert first.status_code == 200
         assert first.content
+        assert first.headers["content-type"] == "image/bmp"
+        assert first.headers["x-flexdisplay-transfer-encoding"] == "bmp"
         digest = first.headers["x-flexdisplay-image-sha256"]
+        assert hashlib.sha256(first.content).hexdigest() == digest
+        assert first.headers["etag"] == f'"{digest}"'
 
         unchanged = client.get(
             "/api/v1/screen",
@@ -1456,8 +1512,89 @@ def test_capable_device_skips_unchanged_screen_body_safely(
         assert missing_cache.content
         assert (
             missing_cache.headers["x-flexdisplay-transfer-encoding"]
-            == "png"
+            == "bmp"
         )
+
+
+def test_x4_keeps_compressed_png_delivery_with_matching_cache_digest(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    with TestClient(create_app(config)) as client:
+        first = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-TRANSFER1",
+                "X-FlexDisplay-Model": "XTEINK_X4",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "false",
+            },
+        )
+        assert first.status_code == 200
+        assert first.headers["content-type"] == "image/png"
+        assert first.headers["x-flexdisplay-transfer-encoding"] == "png"
+        digest = hashlib.sha256(first.content).hexdigest()
+        assert first.headers["x-flexdisplay-image-sha256"] == digest
+        assert first.headers["etag"] == f'"{digest}"'
+
+        unchanged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-TRANSFER1",
+                "X-FlexDisplay-Model": "XTEINK_X4",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "true",
+                "X-FlexDisplay-Image-SHA256": digest,
+            },
+        )
+        assert unchanged.status_code == 200
+        assert unchanged.content == b""
+        assert unchanged.headers["x-flexdisplay-image-unchanged"] == "true"
+        assert unchanged.headers["x-flexdisplay-transfer-encoding"] == "empty-unchanged"
+
+
+def test_device_image_conversion_diagnostic_is_bounded_and_clears_active_fault(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        home_assistant=HomeAssistantConfig(token=""),
+    )
+    detail = "png:inflate_init_failed free=59200 max=36800 " + ("x" * 200)
+    with TestClient(create_app(config)) as client:
+        failed = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-IMAGEERR",
+                "X-FlexDisplay-Last-Image-Error": detail,
+                "X-FlexDisplay-Image-Cached": "false",
+            },
+        )
+        assert failed.status_code == 200
+        device = client.get("/api/v1/devices/X3-IMAGEERR").json()
+        assert device["image_conversion_error"] is True
+        assert device["last_image_error"] == detail[:160]
+        assert device["last_image_error_at"]
+        assert "image_conversion" in device["health_issues"]
+
+        recovered = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-IMAGEERR",
+                "X-FlexDisplay-Image-Cached": "true",
+                "X-FlexDisplay-Image-SHA256": failed.headers[
+                    "x-flexdisplay-image-sha256"
+                ],
+            },
+        )
+        assert recovered.status_code == 200
+        device = client.get("/api/v1/devices/X3-IMAGEERR").json()
+        assert device["image_conversion_error"] is False
+        assert device["last_image_error"] == detail[:160]
+        assert "image_conversion" not in device["health_issues"]
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
@@ -2369,6 +2506,31 @@ def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
         with Image.open(io.BytesIO(optimized_frame.content)) as rendered:
             assert rendered.size == (480, 800)
             assert rendered.mode == "1"
+
+        x3_assigned = client.put(
+            "/api/v1/photo-frame/devices/X3-PHOTO1",
+            json={"album_id": "family"},
+        )
+        assert x3_assigned.status_code == 200
+        x3_frame = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-PHOTO1",
+                "X-FlexDisplay-Model": "XTEINK_X3",
+                "X-FlexDisplay-Width": "528",
+                "X-FlexDisplay-Height": "792",
+                "X-FlexDisplay-Mode": "photo_frame",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-Capabilities": "empty-unchanged,png-photo",
+                "X-FlexDisplay-Image-Cached": "false",
+            },
+        )
+        assert x3_frame.status_code == 200
+        assert x3_frame.headers["content-type"] == "image/bmp"
+        assert x3_frame.headers["x-flexdisplay-transfer-encoding"] == "bmp"
+        assert hashlib.sha256(x3_frame.content).hexdigest() == x3_frame.headers[
+            "x-flexdisplay-image-sha256"
+        ]
 
         too_large = client.post(
             "/api/v1/photo-frame/albums/family/images",
