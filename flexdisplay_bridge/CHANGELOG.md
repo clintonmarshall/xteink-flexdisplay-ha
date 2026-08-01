@@ -16,6 +16,9 @@
 - Install dashboard files atomically, retain the previous valid screen when a
   transfer or conversion fails, and recover an interrupted cache swap after a
   reboot.
+- Serialize branded loading-screen rendering with dashboard decoding so the
+  render task cannot access framebuffer storage while it is loaned as PNG
+  scratch memory.
 
 ## 0.34.0
 

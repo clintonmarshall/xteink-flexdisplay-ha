@@ -38,8 +38,8 @@ options:
   bridge_api_key: ""
   firmware_version: 1.5.0-flexdisplay.0.34.1
   firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay/releases/download/v0.34.1/firmware.bin
-  firmware_sha256: c8a17747e462e86c47b9113dbb3fd9b99afd98a17e040525f48871ea02f8c0d8
-  firmware_size: 5881120
+  firmware_sha256: 166ca33484bc8bc634be0c7b0e7b5a28997f502a1af0e4be3e88183e7930be2a
+  firmware_size: 5881136
   firmware_minimum_battery: 40
   firmware_canary_required: true
   firmware_require_usb_for_canary: true
