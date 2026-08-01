@@ -46,6 +46,8 @@ def resolve_action(
     gesture: str,
     mode: str,
 ) -> dict[str, Any]:
+    if mode == MODE and button == "confirm" and gesture == "long":
+        return {"type": "none", "source": "reserved_quick_menu"}
     configured = mappings.get(mapping_key(button, gesture, mode))
     return {**configured, "source": "configured"} if configured else default_action(button, gesture, mode)
 
@@ -108,6 +110,10 @@ def normalize_mappings(payload: Any) -> dict[str, dict[str, Any]]:
             raise ButtonActionValidationError("Back and Power are reserved; choose Confirm or a direction button")
         if gesture not in GESTURES:
             raise ButtonActionValidationError("Gesture must be short, double, or long")
+        if button == "confirm" and gesture == "long":
+            raise ButtonActionValidationError(
+                "Long Confirm is reserved for the FlexDisplay Quick Menu"
+            )
         if mode != MODE:
             raise ButtonActionValidationError("Remote actions are currently limited to Home Assistant mode")
         key = mapping_key(button, gesture, mode)

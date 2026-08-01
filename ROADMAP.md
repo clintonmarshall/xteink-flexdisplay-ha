@@ -171,3 +171,25 @@ Delivery: Bridge App and FlexHub `0.33.0`; X3/X4 firmware `0.32.0` remains compa
 - Scrollable 24-device managed-display list on the SenseCAP touchscreen.
 - FlexHub status schema 4 with Wi-Fi, memory, uptime, Meshtastic node, and
   Meshtastic MQTT diagnostics.
+
+## v0.34 — Mixed Content and on-device Quick Menu
+
+Status: implemented and locally validated, pending canary deployment.
+Delivery: Bridge App and shared X3/X4 firmware `0.34.0`; existing dashboards,
+Reader, OpenDisplay, Photo Frame, TRMNL, fleet policy, and OTA paths are retained.
+
+- Reusable Mixed Content channels combine the dashboard profile already
+  assigned to each device with Message, Quote, and RSS/Atom pages.
+- Message screens support large text, normal/important/critical emphasis,
+  footers, and optional QR links.
+- Quote screens support built-in offline quotes or a custom collection, with a
+  stable quote for each day or explicit random selection.
+- News screens support digest, headline, and summary layouts, bounded downloads,
+  caching, stale-on-error delivery, attribution, and Australian source presets.
+- Dashboard Studio can create, reorder, preview, assign, unassign, and refresh
+  content channels without requiring YAML or SD-card files.
+- Holding Confirm in Home Assistant mode opens the device Quick Menu; short
+  Confirm refreshes, directional buttons retain page navigation, and long
+  Confirm is reserved in the Studio action mapper.
+- The device and Bridge negotiate mixed-content support and exchange page title,
+  type, position, and selection metadata for later fleet diagnostics.

@@ -25,6 +25,12 @@ from flexdisplay_bridge.config import (
     MqttConfig,
     PageActivationConfig,
 )
+from flexdisplay_bridge.content_channels import (
+    ContentChannelStore,
+    ContentChannelValidationError,
+    parse_channel,
+)
+from flexdisplay_bridge.content_renderer import render_content_page
 from flexdisplay_bridge.dashboards import (
     DashboardPage,
     build_dashboard_pages,
@@ -36,6 +42,114 @@ from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
+
+
+def test_v034_content_channel_validates_and_renders_daily_quote(tmp_path: Path) -> None:
+    channel = parse_channel(
+        "morning",
+        {
+            "name": "Morning briefing",
+            "items": [
+                {"type": "dashboard", "title": "Dashboard"},
+                {
+                    "type": "quote",
+                    "title": "Quote of the day",
+                    "quotes": [{"text": "Make it useful.", "author": "FlexDisplay"}],
+                },
+            ],
+        },
+    )
+    store = ContentChannelStore(tmp_path / "channels.json")
+    store.put("morning", channel)
+    store.assign("X4-QUOTE", "morning")
+    pages = store.pages("X4-QUOTE", ["HOME", "ENERGY"])
+
+    assert [page.kind for page in pages] == ["dashboard", "dashboard", "quote"]
+    assert pages[-1].body == "Make it useful."
+    content = render_content_page(
+        pages[-1],
+        device_name="Office",
+        width=480,
+        height=800,
+        page_index=2,
+        page_count=3,
+    )
+    with Image.open(io.BytesIO(content)) as image:
+        assert image.size == (480, 800)
+        assert image.mode == "1"
+
+
+def test_v034_content_channel_rejects_credentialed_feed_url() -> None:
+    try:
+        parse_channel(
+            "news",
+            {
+                "name": "News",
+                "items": [
+                    {
+                        "type": "rss",
+                        "title": "Headlines",
+                        "url": "https://user:secret@example.com/feed.xml",
+                    }
+                ],
+            },
+        )
+    except ContentChannelValidationError as err:
+        assert "credentials" in str(err)
+    else:
+        raise AssertionError("Credentialed feed URL was accepted")
+
+
+def test_v034_mixed_channel_interleaves_dashboard_and_message(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        first = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-MIXED"},
+        )
+        assert first.status_code == 200
+        saved = client.put(
+            "/api/v1/content-channels/briefing",
+            json={
+                "name": "Daily briefing",
+                "items": [
+                    {"type": "dashboard", "title": "Dashboard"},
+                    {
+                        "type": "message",
+                        "title": "Welcome",
+                        "body": "Welcome to the LDCS showroom.",
+                        "footer": "Message Center",
+                    },
+                    {"type": "quote", "title": "Quote of the day"},
+                ],
+            },
+        )
+        assert saved.status_code == 200
+        assigned = client.put(
+            "/api/v1/content-channels/devices/X3-MIXED",
+            json={"channel_id": "briefing"},
+        )
+        assert assigned.status_code == 200
+
+        dashboard = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X3-MIXED"},
+        )
+        assert dashboard.status_code == 200
+        assert dashboard.headers["x-flexdisplay-content-type"] == "dashboard"
+
+        message = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X3-MIXED",
+                "X-FlexDisplay-Quick-Action": "category-message",
+            },
+        )
+        assert message.status_code == 200
+        assert message.headers["x-flexdisplay-content-type"] == "message"
+        assert message.headers["x-flexdisplay-page-title"] == "Welcome"
+        with Image.open(io.BytesIO(message.content)) as image:
+            assert image.size == (480, 800)
 
 
 def _content_pack_zip(version: str = "ldcs-1") -> bytes:
@@ -1727,7 +1841,7 @@ def test_reader_mode_events_never_execute_home_assistant_mapping(
             json={
                 "mappings": [
                     {
-                        "button": "confirm",
+                        "button": "left",
                         "gesture": "long",
                         "action": {
                             "type": "home_assistant",
@@ -1743,7 +1857,7 @@ def test_reader_mode_events_never_execute_home_assistant_mapping(
             headers={
                 "X-FlexDisplay-ID": "X4-DEMO01",
                 "X-FlexDisplay-Mode": "home_assistant",
-                "X-FlexDisplay-Button-Events": "9,confirm,pressed,555,long,reader",
+                "X-FlexDisplay-Button-Events": "9,left,pressed,555,long,reader",
             },
         )
         assert response.status_code == 200
@@ -1770,6 +1884,21 @@ def test_button_action_validation_reserves_recovery_and_admin_services(tmp_path:
             },
         )
         assert reserved.status_code == 400
+
+        quick_menu = client.put(
+            "/api/v1/devices/X4-DEMO01/button-actions",
+            json={
+                "mappings": [
+                    {
+                        "button": "confirm",
+                        "gesture": "long",
+                        "action": {"type": "none"},
+                    }
+                ]
+            },
+        )
+        assert quick_menu.status_code == 400
+        assert "Quick Menu" in quick_menu.json()["detail"]
 
         administrative = client.put(
             "/api/v1/devices/X4-DEMO01/button-actions",

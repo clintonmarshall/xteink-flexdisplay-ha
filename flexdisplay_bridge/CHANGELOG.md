@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.34.0
+
+- Added persistent Mixed Content channels that combine a device's assigned Home
+  Assistant dashboard pages with large-format Message, Quote of the Day, and
+  RSS/Atom news screens.
+- Added offline deterministic daily quotes, optional custom quote collections,
+  Australian feed presets, bounded feed downloads, caching, stale-on-error
+  behavior, and high-contrast X3/X4 rendering with optional QR links.
+- Added the Content Channels workspace to Dashboard Studio for ordering,
+  previewing, assigning, and refreshing mixed-content playlists.
+- Added the on-device Quick Menu. Hold Confirm in Home Assistant mode to jump
+  between dashboards, messages, news, quotes, OpenDisplay, Photo Frame, TRMNL,
+  Reader, the full app menu, or sleep; short Confirm continues to refresh.
+- Added page title, content type, selection, and position response metadata plus
+  the `quick-menu` and `mixed-content` capability negotiation.
+- Bundled shared X3/X4 firmware `1.5.0-flexdisplay.0.34.0` and reserved long
+  Confirm in the physical-button editor so fleet mappings cannot hide the menu.
+
 ## 0.33.1
 
 - Reject identity-less display check-ins and automatically purge the legacy
