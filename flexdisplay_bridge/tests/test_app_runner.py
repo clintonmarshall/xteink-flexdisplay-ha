@@ -40,6 +40,18 @@ def test_firmware_options_migrates_exact_packaged_release() -> None:
     }
 
 
+def test_firmware_options_migrates_older_saved_app_options() -> None:
+    options = next(
+        dict(release)
+        for release in LEGACY_PACKAGED_FIRMWARE
+        if release["firmware_version"] == "1.4.1-flexdisplay.0.24.0"
+    )
+
+    assert firmware_options(options) == {
+        name: str(value) for name, value in DEFAULT_FIRMWARE.items()
+    }
+
+
 def test_firmware_options_repairs_mixed_packaged_release_metadata() -> None:
     options = dict(LEGACY_PACKAGED_FIRMWARE[0])
     options["firmware_version"] = LEGACY_PACKAGED_FIRMWARE[1]["firmware_version"]
