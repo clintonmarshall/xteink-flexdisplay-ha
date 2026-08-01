@@ -349,6 +349,11 @@
     .hub-facts div { padding: 7px; border-radius: 7px; background: var(--panel-2); }
     .hub-facts strong { display: block; margin-top: 2px; font-size: 12px; }
     .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
+    .content-item-list { display: grid; gap: 10px; align-content: start; }
+    .content-item-card { border: 1px solid var(--line); border-radius: 11px; background: #0d151d; overflow: hidden; }
+    .content-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .content-item-body { display: grid; gap: 10px; padding: 12px; }
+    .content-preview { display: block; width: min(100%, 390px); max-height: 680px; object-fit: contain; background: white; box-shadow: var(--shadow); }
     @media (max-width: 1120px) {
       .app { grid-template-columns: 230px 1fr; }
       .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
@@ -424,6 +429,12 @@
         <div class="section-head"><h2>FlexHub</h2><span class="rule-badge">v0.33</span></div>
         <button id="openFlexHub" style="width:100%">Open FlexHub status</button>
         <p class="small muted" style="margin:10px 0 0">View hub health, storage, fleet connection, Wi-Fi, and Meshtastic status.</p>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Mixed content</h2><span class="rule-badge">v0.34</span></div>
+        <button id="openContentChannels" class="primary" style="width:100%">Create messages &amp; news</button>
+        <p class="small muted" style="margin:10px 0 0">Mix dashboards, messages, quotes and Australian news into one button-navigable channel.</p>
       </div>
 
       <div class="section">
@@ -624,6 +635,7 @@
             </select>
           </label>
         </div>
+        <p class="small muted" style="margin:8px 0 0">On v0.34 firmware, hold Confirm to open the device Quick Menu. That gesture is reserved and cannot be reassigned.</p>
         <label style="margin-top:10px">Action
           <select id="buttonActionType">
             <option value="default">Default behaviour</option>
@@ -663,7 +675,7 @@
           </span>
         </label>
         <div id="buttonActionSummary" class="action-summary"></div>
-        <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge; no firmware sync is required. They execute after the device sends the gesture during a Home Assistant-mode check-in. Back and Power stay reserved. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
+        <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge. Back and Power stay reserved, and v0.34 reserves long Confirm for the on-device Quick Menu. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
       </div>
     </aside>
   </div>
@@ -684,6 +696,54 @@
         <button id="createProfile" class="primary" value="default">Create profile</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="contentChannelDialog" class="library-dialog">
+    <div class="section-head" style="padding:18px 20px 0">
+      <div><div class="eyebrow">Content Channels v0.34</div><h2 style="font-size:20px">Messages, quotes and news</h2></div>
+      <button id="closeContentChannels" class="icon" title="Close">×</button>
+    </div>
+    <div class="library-shell management-shell">
+      <div class="library-controls">
+        <label>Content channel<select id="contentChannelSelect"></select></label>
+        <div class="field-grid">
+          <button id="newContentChannel">New channel</button>
+          <button id="deleteContentChannel" class="danger">Delete</button>
+        </div>
+        <div class="field-grid">
+          <label>Channel ID<input id="contentChannelId" maxlength="32" placeholder="morning_briefing"></label>
+          <label>Name<input id="contentChannelName" maxlength="64" placeholder="Morning briefing"></label>
+        </div>
+        <section class="management-group">
+          <h3>Add content</h3>
+          <label>Page type
+            <select id="contentItemType">
+              <option value="dashboard">Home Assistant dashboards</option>
+              <option value="message">Message screen</option>
+              <option value="quote">Quote of the day</option>
+              <option value="rss">Australian news / RSS</option>
+            </select>
+          </label>
+          <button id="addContentItem">Add page type</button>
+        </section>
+        <div class="button-row">
+          <button id="saveContentChannel" class="primary">Save channel</button>
+          <button id="previewContentChannel">Preview</button>
+        </div>
+        <section class="management-group">
+          <h3>Assign to a display</h3>
+          <label>Device<select id="contentChannelDevice"></select></label>
+          <button id="assignContentChannel">Assign and refresh</button>
+          <span class="small muted">Left/right navigate the complete mixed channel. Long Confirm opens the device Quick Menu on v0.34 firmware.</span>
+        </section>
+      </div>
+      <div>
+        <div class="section-head"><div><h2>Channel pages</h2><span class="small muted">Drag-free ordered list · use arrows to reorder</span></div></div>
+        <div id="contentItemList" class="content-item-list"></div>
+        <div class="loading-preview-shell" style="min-height:420px;margin-top:16px">
+          <img id="contentChannelPreview" class="content-preview" alt="Mixed content preview">
+        </div>
+      </div>
+    </div>
   </dialog>
   <dialog id="photoLibraryDialog" class="library-dialog">
     <div class="section-head" style="padding:18px 20px 0">
@@ -950,6 +1010,9 @@
       fleetPolicies: {profiles: [], dashboard_profiles: [], photo_albums: [], devices: [], summary: {}},
       fleetManagementTimer: null,
       flexHub: {},
+      contentChannels: {channels: {}, assignments: {}, capabilities: {}},
+      contentChannelDraft: null,
+      contentChannelPreviewUrl: "",
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1638,6 +1701,146 @@
       }
     }
 
+    function defaultContentItem(type) {
+      const id = `item-${Date.now().toString(36)}`;
+      if (type === "dashboard") return {id, type, enabled:true, title:"Home Assistant"};
+      if (type === "quote") return {id, type, enabled:true, title:"Quote of the day", selection:"daily", footer:"Quote of the day", quotes:[]};
+      if (type === "rss") return {id, type, enabled:true, title:"Australian news", preset:"sbs_australia", url:"https://www.sbs.com.au/news/topic/australia/feed", source:"SBS News", layout:"digest", limit:4, cache_seconds:900};
+      return {id, type:"message", enabled:true, title:"Message", body:"Enter your message here.", footer:"FlexDisplay Message Center", priority:"normal", link:""};
+    }
+
+    function starterContentChannel() {
+      return {
+        id:"",
+        name:"",
+        items:[
+          defaultContentItem("dashboard"),
+          defaultContentItem("message"),
+          defaultContentItem("quote"),
+          defaultContentItem("rss"),
+        ],
+      };
+    }
+
+    async function openContentChannels() {
+      $("#contentChannelDialog").showModal();
+      await loadContentChannels();
+    }
+
+    async function loadContentChannels(preferred = "") {
+      try {
+        const response = await api("content-channels");
+        state.contentChannels = await response.json();
+        const select = $("#contentChannelSelect");
+        const names = Object.keys(state.contentChannels.channels || {});
+        select.innerHTML = names.length
+          ? names.map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(state.contentChannels.channels[name].name || name)}</option>`).join("")
+          : '<option value="">No channels yet</option>';
+        const chosen = preferred && names.includes(preferred) ? preferred : names[0] || "";
+        select.value = chosen;
+        chooseContentChannel(chosen);
+        populateDevices();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function chooseContentChannel(channelId) {
+      const selected = state.contentChannels.channels?.[channelId];
+      state.contentChannelDraft = selected ? clone(selected) : starterContentChannel();
+      $("#contentChannelId").value = state.contentChannelDraft.id || channelId || "";
+      $("#contentChannelId").disabled = Boolean(selected);
+      $("#contentChannelName").value = state.contentChannelDraft.name || "";
+      renderContentItems();
+    }
+
+    function quoteText(item) {
+      return (item.quotes || []).map((quote) => `${quote.text || ""}${quote.author ? ` — ${quote.author}` : ""}`).join("\n");
+    }
+
+    function renderContentItems() {
+      const list = $("#contentItemList");
+      const items = state.contentChannelDraft?.items || [];
+      if (!items.length) {
+        list.innerHTML = '<div class="empty">Add at least one page type.</div>';
+        return;
+      }
+      const presets = state.contentChannels.capabilities?.feed_presets || {};
+      const presetOptions = ['<option value="">Custom RSS/Atom URL</option>', ...Object.entries(presets).map(([id, value]) => `<option value="${escapeHtml(id)}">${escapeHtml(value.name || id)}</option>`)].join("");
+      list.innerHTML = items.map((item, index) => {
+        let fields = "";
+        if (item.type === "dashboard") {
+          fields = `<p class="small muted" style="margin:0">Inserts every active page from the dashboard profile already assigned to each device. Change that profile from the main Studio or Fleet Management.</p>`;
+        } else if (item.type === "message") {
+          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>Message<textarea data-content-field="body" maxlength="1400">${escapeHtml(item.body || "")}</textarea></label><div class="field-grid"><label>Priority<select data-content-field="priority"><option value="normal">Normal</option><option value="important">Important</option><option value="critical">Critical</option></select></label><label>Footer<input data-content-field="footer" maxlength="160" value="${escapeHtml(item.footer || "")}"></label></div><label>Optional QR/link<input data-content-field="link" type="url" value="${escapeHtml(item.link || "")}" placeholder="https://example.com"></label>`;
+        } else if (item.type === "quote") {
+          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>Quote collection<textarea data-content-field="quotes_text" placeholder="One quote per line — optional author">${escapeHtml(quoteText(item))}</textarea></label><div class="field-grid"><label>Selection<select data-content-field="selection"><option value="daily">Same quote for the day</option><option value="random">Random on refresh</option></select></label><label>Footer<input data-content-field="footer" maxlength="120" value="${escapeHtml(item.footer || "")}"></label></div><p class="small muted" style="margin:0">Leave the collection empty to use the built-in offline quote pack.</p>`;
+        } else {
+          fields = `<label>Feed preset<select data-content-field="preset">${presetOptions}</select></label><label>Page heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>RSS/Atom URL<input data-content-field="url" type="url" value="${escapeHtml(item.url || "")}"></label><div class="field-grid"><label>Source/attribution<input data-content-field="source" maxlength="100" value="${escapeHtml(item.source || "")}"></label><label>Layout<select data-content-field="layout"><option value="digest">Headline digest</option><option value="headline">One large headline</option><option value="summary">Article summary pages</option></select></label></div><label>Maximum stories<input data-content-field="limit" type="number" min="1" max="8" value="${Number(item.limit || 4)}"></label>`;
+        }
+        return `<article class="content-item-card" data-content-index="${index}"><div class="content-item-head"><div><strong>${index + 1}. ${escapeHtml(item.type === "rss" ? "News / RSS" : titleCase(item.type))}</strong><div class="small muted">${escapeHtml(item.title || "Untitled")}</div></div><div class="button-row"><button class="icon" data-content-move="-1" title="Move up">↑</button><button class="icon" data-content-move="1" title="Move down">↓</button><button class="icon danger" data-content-remove title="Remove">×</button></div></div><div class="content-item-body">${fields}</div></article>`;
+      }).join("");
+      list.querySelectorAll("[data-content-index]").forEach((card) => {
+        const item = items[Number(card.dataset.contentIndex)];
+        for (const field of ["priority", "selection", "preset", "layout"]) {
+          const node = card.querySelector(`[data-content-field="${field}"]`);
+          if (node) node.value = item[field] || "";
+        }
+      });
+    }
+
+    function parseQuoteLines(value) {
+      return String(value || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+        const split = line.lastIndexOf(" — ");
+        return split > 0 ? {text:line.slice(0, split), author:line.slice(split + 3)} : {text:line, author:""};
+      });
+    }
+
+    async function saveContentChannel() {
+      const channelId = $("#contentChannelId").value.trim();
+      if (!channelId) return toast("Enter a channel ID.", true);
+      state.contentChannelDraft.id = channelId;
+      state.contentChannelDraft.name = $("#contentChannelName").value.trim() || channelId;
+      try {
+        await api(`content-channels/${encodeURIComponent(channelId)}`, {method:"PUT", body:state.contentChannelDraft});
+        toast("Content channel saved. Assigned displays will refresh when awake.");
+        await loadContentChannels(channelId);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function previewContentChannel() {
+      if (!state.contentChannelDraft?.items?.some((item) => item.type !== "dashboard")) return toast("Add a Message, Quote, or News page to preview.", true);
+      state.contentChannelDraft.name = $("#contentChannelName").value.trim() || "Preview";
+      try {
+        const response = await api("content-channels/preview", {method:"POST", body:{model:state.model, channel:state.contentChannelDraft}});
+        if (state.contentChannelPreviewUrl) URL.revokeObjectURL(state.contentChannelPreviewUrl);
+        state.contentChannelPreviewUrl = URL.createObjectURL(await response.blob());
+        $("#contentChannelPreview").src = state.contentChannelPreviewUrl;
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function assignContentChannel() {
+      const deviceId = $("#contentChannelDevice").value;
+      const channelId = $("#contentChannelId").value.trim();
+      if (!deviceId || !channelId) return toast("Choose a saved channel and device.", true);
+      try {
+        await api(`content-channels/devices/${encodeURIComponent(deviceId)}`, {method:"PUT", body:{channel_id:channelId}});
+        state.contentChannels.assignments[deviceId] = channelId;
+        toast("Channel assigned. A refresh has been queued.");
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function deleteContentChannel() {
+      const channelId = $("#contentChannelId").value.trim();
+      if (!channelId || !state.contentChannels.channels?.[channelId]) return;
+      if (!confirm(`Delete ${channelId}? Device assignments will be cleared.`)) return;
+      try {
+        await api(`content-channels/${encodeURIComponent(channelId)}`, {method:"DELETE"});
+        toast("Content channel deleted.");
+        await loadContentChannels();
+      } catch (error) { toast(error.message, true); }
+    }
+
     function selectedPhotoAlbumId() {
       return $("#photoAlbum").value || "default";
     }
@@ -2022,7 +2225,7 @@
     }
 
     function populateDevices() {
-      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice", "photoDevice"]) {
+      for (const id of ["deviceSelect", "assignDevice", "buttonActionDevice", "photoDevice", "contentChannelDevice"]) {
         const select = $(`#${id}`);
         const previous = select.value;
         select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
@@ -2131,6 +2334,7 @@
     }
 
     function renderButtonAction() {
+      updateReservedButtonGestures();
       const mapping = selectedButtonMapping();
       const action = mapping?.action;
       $("#buttonActionType").value = actionPreset(action);
@@ -2148,6 +2352,13 @@
             </div>
           `).join("")
         : '<div class="empty">No overrides. Short arrows use normal page navigation.</div>';
+    }
+
+    function updateReservedButtonGestures() {
+      const longOption = [...$("#buttonActionGesture").options].find((option) => option.value === "long");
+      const reserved = $("#buttonActionButton").value === "confirm";
+      if (longOption) longOption.disabled = reserved;
+      if (reserved && $("#buttonActionGesture").value === "long") $("#buttonActionGesture").value = "short";
     }
 
     function toggleButtonActionFields() {
@@ -3192,7 +3403,7 @@
     });
     $("#assignProfile").addEventListener("click", assignProfile);
     $("#buttonActionDevice").addEventListener("change", (event) => loadButtonActions(event.target.value));
-    $("#buttonActionButton").addEventListener("change", renderButtonAction);
+    $("#buttonActionButton").addEventListener("change", () => { updateReservedButtonGestures(); renderButtonAction(); });
     $("#buttonActionGesture").addEventListener("change", renderButtonAction);
     $("#buttonActionType").addEventListener("change", toggleButtonActionFields);
     $("#saveButtonAction").addEventListener("click", () => saveButtonAction(false));
@@ -3271,6 +3482,63 @@
     $("#refreshFlexHub").addEventListener("click", () => loadFlexHub(true));
     $("#saveFlexHub").addEventListener("click", saveFlexHub);
     $("#closeFlexHub").addEventListener("click", () => $("#flexHubDialog").close());
+    $("#openContentChannels").addEventListener("click", openContentChannels);
+    $("#closeContentChannels").addEventListener("click", () => $("#contentChannelDialog").close());
+    $("#contentChannelSelect").addEventListener("change", (event) => chooseContentChannel(event.target.value));
+    $("#newContentChannel").addEventListener("click", () => {
+      state.contentChannelDraft = starterContentChannel();
+      $("#contentChannelId").value = "";
+      $("#contentChannelId").disabled = false;
+      $("#contentChannelName").value = "";
+      $("#contentChannelPreview").removeAttribute("src");
+      renderContentItems();
+      $("#contentChannelId").focus();
+    });
+    $("#deleteContentChannel").addEventListener("click", deleteContentChannel);
+    $("#addContentItem").addEventListener("click", () => {
+      state.contentChannelDraft.items.push(defaultContentItem($("#contentItemType").value));
+      renderContentItems();
+    });
+    $("#saveContentChannel").addEventListener("click", saveContentChannel);
+    $("#previewContentChannel").addEventListener("click", previewContentChannel);
+    $("#assignContentChannel").addEventListener("click", assignContentChannel);
+    $("#contentChannelName").addEventListener("input", (event) => { if (state.contentChannelDraft) state.contentChannelDraft.name = event.target.value; });
+    $("#contentItemList").addEventListener("click", (event) => {
+      const card = event.target.closest("[data-content-index]");
+      if (!card) return;
+      const index = Number(card.dataset.contentIndex);
+      if (event.target.closest("[data-content-remove]")) {
+        state.contentChannelDraft.items.splice(index, 1);
+        return renderContentItems();
+      }
+      const move = event.target.closest("[data-content-move]");
+      if (move) {
+        const target = index + Number(move.dataset.contentMove);
+        if (target < 0 || target >= state.contentChannelDraft.items.length) return;
+        [state.contentChannelDraft.items[index], state.contentChannelDraft.items[target]] = [state.contentChannelDraft.items[target], state.contentChannelDraft.items[index]];
+        renderContentItems();
+      }
+    });
+    const updateContentField = (event) => {
+      const fieldNode = event.target.closest("[data-content-field]");
+      const card = event.target.closest("[data-content-index]");
+      if (!fieldNode || !card) return;
+      const item = state.contentChannelDraft.items[Number(card.dataset.contentIndex)];
+      const field = fieldNode.dataset.contentField;
+      if (field === "quotes_text") item.quotes = parseQuoteLines(fieldNode.value);
+      else item[field] = field === "limit" ? Number(fieldNode.value) : fieldNode.value;
+      if (field === "preset" && item.type === "rss" && item.preset) {
+        const preset = state.contentChannels.capabilities?.feed_presets?.[item.preset];
+        if (preset) {
+          item.url = preset.url;
+          item.source = preset.attribution;
+          item.title = preset.name;
+          renderContentItems();
+        }
+      }
+    };
+    $("#contentItemList").addEventListener("input", updateContentField);
+    $("#contentItemList").addEventListener("change", updateContentField);
     $("#openContentPacks").addEventListener("click", () => {
       $("#contentPackDialog").showModal();
       loadContentPacks();

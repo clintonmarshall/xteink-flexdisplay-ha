@@ -28,6 +28,12 @@ from .button_actions import (
 )
 from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
 from .content_pack import ContentPackError, ContentPackStore, MAX_PACK_BYTES
+from .content_channels import (
+    ContentChannelStore,
+    ContentChannelValidationError,
+    parse_channel,
+)
+from .content_renderer import render_content_page
 from .dashboard_assets import (
     MAX_BADGE_PHOTO_BYTES,
     DashboardAssetStore,
@@ -1105,6 +1111,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.state_path.with_name("flexdisplay-content-packs.json"),
         settings.state_path.with_name("content-packs"),
     )
+    content_channels = ContentChannelStore(
+        settings.state_path.with_name("flexdisplay-content-channels.json")
+    )
     packaged_firmware = os.getenv("FLEXDISPLAY_PACKAGED_FIRMWARE", "").strip()
     firmware_mirror = FirmwareMirror(
         settings.state_path.with_name("firmware-cache"),
@@ -1552,6 +1561,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.photo_frames = photo_frames
     app.state.loading_screens = loading_screens
     app.state.content_packs = content_packs
+    app.state.content_channels = content_channels
     app.state.firmware_mirror = firmware_mirror
     app.state.flexhub = flexhub
     app.state.screen_history = screen_history
@@ -3039,6 +3049,88 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             **advanced,
         }
 
+    @app.get("/api/v1/content-channels")
+    def list_content_channels(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return content_channels.payload()
+
+    @app.put("/api/v1/content-channels/{channel_id}")
+    def save_content_channel(
+        channel_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            channel = content_channels.put(channel_id, payload)
+        except ContentChannelValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        refreshed: list[str] = []
+        for device_id, assigned in content_channels.payload()["assignments"].items():
+            if assigned == channel_id and store.get(device_id):
+                store.queue_command(device_id, "refresh")
+                refreshed.append(device_id)
+        return {"channel": channel, "refresh_queued": refreshed}
+
+    @app.delete("/api/v1/content-channels/{channel_id}")
+    def delete_content_channel(channel_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            content_channels.delete(channel_id)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Content channel not found") from err
+        return {"deleted": channel_id}
+
+    @app.put("/api/v1/content-channels/devices/{device_id}")
+    def assign_content_channel(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        if not store.get(selected):
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        channel_id = str(payload.get("channel_id") or "")
+        try:
+            content_channels.assign(selected, channel_id)
+        except ContentChannelValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        store.set_dashboard_page(selected, 0, 1, "", [], "", "content_channel")
+        store.queue_command(selected, "refresh")
+        return {"device_id": selected, "channel_id": channel_id, "refresh_queued": True}
+
+    @app.post("/api/v1/content-channels/preview")
+    def preview_content_channel(
+        payload: dict[str, Any],
+        request: Request,
+    ) -> Response:
+        authorize(request)
+        model = str(payload.get("model") or "X4").upper()
+        width = _integer(payload.get("width"), 480 if "4" in model else 528, 240, 1200)
+        height = _integer(payload.get("height"), 800 if "4" in model else 792, 240, 1600)
+        try:
+            draft = parse_channel("preview", payload.get("channel") or {})
+            pages = content_channels.pages_for_channel(
+                draft, "X4-PREVIEW", ["HOME ASSISTANT"]
+            )
+        except ContentChannelValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        selected = next((page for page in pages if page.kind != "dashboard"), None)
+        if selected is None:
+            raise HTTPException(status_code=400, detail="Add a Message, Quote, or News item to preview")
+        return Response(
+            content=render_content_page(
+                selected,
+                device_name="Preview display",
+                width=width,
+                height=height,
+                page_index=0,
+                page_count=max(1, len(pages)),
+            ),
+            media_type="image/png",
+        )
+
     @app.get("/api/v1/content-packs")
     def list_content_packs(request: Request) -> dict[str, Any]:
         authorize(request)
@@ -3138,6 +3230,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_content_status: str | None = Header(default=None),
         x_flexdisplay_content_error: str | None = Header(default=None),
         x_flexdisplay_policy_revision: str | None = Header(default=None),
+        x_flexdisplay_quick_action: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -3571,62 +3664,112 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record,
             profile.timezone,
         )
-        page_index = int(record.get("dashboard_page_index") or 0) % len(pages)
-        selection_changed = bool(record.get("dashboard_selection")) and (
+        mixed_pages = content_channels.pages(
+            device_id, [candidate.title for candidate in pages]
+        )
+        playlist_count = len(mixed_pages) if mixed_pages else len(pages)
+        page_index = int(record.get("dashboard_page_index") or 0) % playlist_count
+        selection_changed = not mixed_pages and bool(record.get("dashboard_selection")) and (
             record.get("dashboard_selection") != page_selection
         )
+        quick_action = str(x_flexdisplay_quick_action or "").strip().lower()
+        if quick_action not in {
+            "next",
+            "previous",
+            "overview",
+            "refresh",
+            "category-dashboard",
+            "category-message",
+            "category-news",
+            "category-quote",
+        }:
+            quick_action = ""
         if page_selection == "alert" or selection_changed:
             page_index = 0
-        elif "next" in commands:
-            page_index = (page_index + 1) % len(pages)
-        elif "previous" in commands:
-            page_index = (page_index - 1) % len(pages)
-        elif "overview" in commands:
+        elif "next" in commands or quick_action == "next":
+            page_index = (page_index + 1) % playlist_count
+        elif "previous" in commands or quick_action == "previous":
+            page_index = (page_index - 1) % playlist_count
+        elif "overview" in commands or quick_action == "overview":
             page_index = 0
+        elif quick_action.startswith("category-") and mixed_pages:
+            requested_kind = quick_action.removeprefix("category-")
+            page_index = next(
+                (
+                    index
+                    for index, candidate in enumerate(mixed_pages)
+                    if candidate.kind == requested_kind
+                ),
+                page_index,
+            )
         else:
             requested_page = next(
                 (command for command in commands if command.startswith("page-")),
                 None,
             )
             if requested_page:
-                page_index = (int(requested_page.removeprefix("page-")) - 1) % len(pages)
+                page_index = (
+                    int(requested_page.removeprefix("page-")) - 1
+                ) % playlist_count
             elif physical_navigation:
                 for navigation in physical_navigation:
                     if navigation == "next":
-                        page_index = (page_index + 1) % len(pages)
+                        page_index = (page_index + 1) % playlist_count
                     elif navigation == "previous":
-                        page_index = (page_index - 1) % len(pages)
+                        page_index = (page_index - 1) % playlist_count
                     elif navigation == "overview":
                         page_index = 0
             elif dashboard_profile and _auto_rotate_due(record, dashboard_profile.auto_rotate_seconds):
-                page_index = (page_index + 1) % len(pages)
-        page = pages[page_index]
+                page_index = (page_index + 1) % playlist_count
+        content_page = mixed_pages[page_index] if mixed_pages else None
+        page = (
+            pages[content_page.dashboard_index]
+            if content_page is not None and content_page.kind == "dashboard"
+            else pages[page_index] if content_page is None else None
+        )
+        page_title = page.title if page is not None else content_page.title
+        page_kind = "dashboard" if page is not None else content_page.kind
+        playlist_titles = (
+            [candidate.title for candidate in mixed_pages]
+            if mixed_pages
+            else [candidate.title for candidate in pages]
+        )
         record = store.set_dashboard_page(
             device_id,
             page_index,
-            len(pages),
-            page.title,
-            [candidate.title for candidate in pages],
+            playlist_count,
+            page_title,
+            playlist_titles,
             profile.profile,
-            page_selection,
+            "content_channel" if mixed_pages else page_selection,
         ) or record
-        image = renderer.render(
-            title=page.title,
-            device={**record, "name": profile.name},
-            width=width,
-            height=height,
-            entities=page.entities,
-            page_index=page_index,
-            page_count=len(pages),
-            ha_error=ha_error,
-            layout=page.layout,
-            button_actions=mappings_payload(
-                record.get("button_action_mappings")
-            ),
-            show_button_indicators=bool(
-                record.get("button_action_indicators")
-            ),
-        )
+        if page is not None:
+            image = renderer.render(
+                title=page.title,
+                device={**record, "name": profile.name},
+                width=width,
+                height=height,
+                entities=page.entities,
+                page_index=page_index,
+                page_count=playlist_count,
+                ha_error=ha_error,
+                layout=page.layout,
+                button_actions=mappings_payload(
+                    record.get("button_action_mappings")
+                ),
+                show_button_indicators=bool(
+                    record.get("button_action_indicators")
+                ),
+            )
+        else:
+            image = render_content_page(
+                content_page,
+                device_name=profile.name,
+                width=width,
+                height=height,
+                page_index=page_index,
+                page_count=playlist_count,
+            )
         digest = hashlib.sha256(image).hexdigest()
         image_unchanged = bool(x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest)
         sleep_plan = _sleep_plan(
@@ -3662,6 +3805,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     timespec="seconds"
                 ),
                 "ha_error": bool(ha_error),
+                "content_page_type": page_kind,
+                "content_channel": (
+                    str(content_channels.payload()["assignments"].get(device_id) or "")
+                    if mixed_pages
+                    else ""
+                ),
             },
         )
         if settings.screen_history.enabled:
@@ -3672,10 +3821,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 metadata={
                     "mode": profile.mode,
                     "profile": profile.profile,
-                    "title": page.title,
+                    "title": page_title,
                     "page_index": page_index,
-                    "page_count": len(pages),
-                    "page_selection": page_selection,
+                    "page_count": playlist_count,
+                    "page_selection": "content_channel" if mixed_pages else page_selection,
+                    "content_type": page_kind,
                 },
             )
             record = store.touch(
@@ -3721,9 +3871,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "true" if command_acknowledged else "false"
             )
         response.headers["X-FlexDisplay-Page"] = str(page_index + 1)
-        response.headers["X-FlexDisplay-Page-Count"] = str(len(pages))
-        response.headers["X-FlexDisplay-Page-Title"] = page.title
-        response.headers["X-FlexDisplay-Page-Selection"] = page_selection
+        response.headers["X-FlexDisplay-Page-Count"] = str(playlist_count)
+        response.headers["X-FlexDisplay-Page-Title"] = page_title
+        response.headers["X-FlexDisplay-Page-Selection"] = (
+            "content_channel" if mixed_pages else page_selection
+        )
+        response.headers["X-FlexDisplay-Content-Type"] = page_kind
         if settings.firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
         if "install" in commands:

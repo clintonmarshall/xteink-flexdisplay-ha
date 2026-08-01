@@ -263,6 +263,14 @@ and exposes retry, cancellation, and rollout reset. FlexHub status, storage,
 network, receiver, and Meshtastic/MQTT diagnostics are visible in the same Home
 Assistant App. Existing X3/X4 firmware `0.32.0` remains compatible.
 
+Bridge App and shared X3/X4 firmware `0.34.0` add Mixed Content channels and an
+on-device Quick Menu. In **Dashboard Studio → Mixed content**, build a playlist
+from the device's assigned Home Assistant dashboards, large Message screens,
+daily or random Quote pages, and RSS/Atom News pages. Preview and assign the
+channel there; no YAML or SD-card file is required. While a Home Assistant page
+is showing, hold **Confirm** to open the Quick Menu, or press Confirm briefly to
+refresh the current page.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing
