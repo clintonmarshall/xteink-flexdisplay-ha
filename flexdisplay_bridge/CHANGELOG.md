@@ -19,6 +19,9 @@
 - Serialize branded loading-screen rendering with dashboard decoding so the
   render task cannot access framebuffer storage while it is loaned as PNG
   scratch memory.
+- Carry Quick Menu destinations across the intentional Wi-Fi cleanup reboot,
+  so TRMNL, OpenDisplay, Photo Frame, and All Applications open directly; the
+  Sleep action now preserves the current frame and enters real deep sleep.
 
 ## 0.34.0
 
