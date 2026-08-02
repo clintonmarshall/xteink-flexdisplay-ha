@@ -1,0 +1,50 @@
+send_meshtastic_message:
+  name: Send Meshtastic message
+  description: Send a broadcast or direct text message through the SenseCAP FlexHub.
+  fields:
+    text:
+      name: Message
+      description: Text to send, up to 220 UTF-8 bytes.
+      required: true
+      example: "Showroom closes at 17:00"
+      selector:
+        text:
+          multiline: true
+    destination:
+      name: Destination
+      description: Use broadcast or a Meshtastic node ID such as !12345678.
+      default: broadcast
+      selector:
+        text:
+    channel:
+      name: Channel
+      description: Meshtastic channel index from 0 to 7.
+      default: 0
+      selector:
+        number:
+          min: 0
+          max: 7
+          mode: box
+    request_ack:
+      name: Request acknowledgement
+      description: Ask a direct recipient for a delivery acknowledgement.
+      default: false
+      selector:
+        boolean:
+    config_entry_id:
+      name: Config entry ID
+      description: Optional FlexDisplay config entry when more than one Bridge is installed.
+      selector:
+        config_entry:
+          integration: flexdisplay
+
+clear_meshtastic_unread:
+  name: Clear Meshtastic unread count
+  description: Reset the local unread-message counter for the SenseCAP FlexHub.
+  fields:
+    config_entry_id:
+      name: Config entry ID
+      description: Optional FlexDisplay config entry when more than one Bridge is installed.
+      selector:
+        config_entry:
+          integration: flexdisplay

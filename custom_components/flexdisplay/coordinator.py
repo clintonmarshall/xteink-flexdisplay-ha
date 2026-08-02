@@ -10,7 +10,7 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import FlexDisplayApiClient, FlexDisplayApiError
-from .const import EVENT_TYPE
+from .const import DOMAIN, EVENT_TYPE, MESHTASTIC_EVENT_TYPE
 
 LOGGER = logging.getLogger(__name__)
 
@@ -18,7 +18,12 @@ LOGGER = logging.getLogger(__name__)
 class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
     """Poll the bridge for its registered devices."""
 
-    def __init__(self, hass: HomeAssistant, client: FlexDisplayApiClient) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        client: FlexDisplayApiClient,
+        config_entry_id: str,
+    ) -> None:
         super().__init__(
             hass,
             LOGGER,
@@ -27,7 +32,15 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
         )
         self.client = client
         self._hass = hass
+        self.config_entry_id = config_entry_id
+        self.flexhub_id = f"flexhub_{config_entry_id}"
         self._seen_button_events: dict[str, set[tuple[int, str, int]]] = {}
+        self.flexhub_summary: dict = {}
+        self.meshtastic_messages: list[dict] = []
+        self.meshtastic_unread_count = 0
+        self.last_meshtastic_message: dict = {}
+        self._meshtastic_cursor: int | None = None
+        self._meshtastic_session_id = ""
 
     def _fire_new_button_events(self, record: dict) -> None:
         device_id = record.get("device_id")
@@ -73,6 +86,130 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
                 },
             )
 
+    @staticmethod
+    def _message_sequence(message: dict) -> int:
+        """Return a stable sequence from a FlexHub console record."""
+        try:
+            return max(0, int(message.get("sequence") or 0))
+        except (TypeError, ValueError):
+            return 0
+
+    def _fire_meshtastic_event(self, message: dict) -> None:
+        """Forward one newly observed Meshtastic console record to Home Assistant."""
+        registry = dr.async_get(self._hass)
+        device = registry.async_get_device({(DOMAIN, self.flexhub_id)})
+        direction = str(message.get("direction") or "incoming")
+        delivery = str(message.get("delivery_state") or message.get("status") or "")
+        event_type = (
+            "message_received"
+            if direction in {"incoming", "inbound", "received"}
+            else "message_failed"
+            if delivery in {"failed", "rejected", "timeout"}
+            else "message_sent"
+        )
+        self._hass.bus.async_fire(
+            MESHTASTIC_EVENT_TYPE,
+            {
+                **message,
+                "device_id": device.id if device else None,
+                "flexdisplay_id": self.flexhub_id,
+                "config_entry_id": self.config_entry_id,
+                "type": event_type,
+            },
+        )
+
+    def _accept_meshtastic_messages(self, payload: dict) -> None:
+        """Merge a bounded message response and emit only genuinely new records."""
+        bridge = (
+            payload.get("bridge") if isinstance(payload.get("bridge"), dict) else {}
+        )
+        console = (
+            bridge.get("console") if isinstance(bridge.get("console"), dict) else {}
+        )
+        raw_unread = console.get("unread_count")
+        try:
+            authoritative_unread = max(0, int(raw_unread))
+        except (TypeError, ValueError):
+            authoritative_unread = None
+        session_id = str(payload.get("session_id") or payload.get("boot_id") or "")
+        session_changed = bool(
+            self._meshtastic_session_id
+            and session_id
+            and session_id != self._meshtastic_session_id
+        )
+        resetting = session_changed or payload.get("reset") is True
+        if resetting:
+            self._meshtastic_cursor = 0
+            self.meshtastic_messages = []
+            self.last_meshtastic_message = {}
+        if session_id:
+            self._meshtastic_session_id = session_id
+        records = payload.get("messages") or []
+        if not isinstance(records, list):
+            return
+        messages = []
+        current_session_sequences: set[int] = set()
+        for item in records:
+            if not isinstance(item, dict):
+                continue
+            message = dict(item)
+            item_session = str(
+                message.get("session_id") or message.get("boot_id") or ""
+            )
+            if resetting and session_id and item_session == session_id:
+                current_session_sequences.add(self._message_sequence(message))
+            if session_id and not message.get("session_id"):
+                message["session_id"] = session_id
+            messages.append(message)
+        messages.sort(key=self._message_sequence)
+        if messages:
+            self.last_meshtastic_message = messages[-1]
+            self.meshtastic_messages = (self.meshtastic_messages + messages)[-100:]
+
+        newest = max(
+            [self._message_sequence(item) for item in messages]
+            + [
+                self._message_sequence(
+                    {
+                        "sequence": payload.get("cursor")
+                        or payload.get("next_sequence")
+                        or payload.get("next_after")
+                        or payload.get("latest_sequence")
+                        or 0
+                    }
+                )
+            ],
+        )
+        if authoritative_unread is not None:
+            self.meshtastic_unread_count = authoritative_unread
+        if self._meshtastic_cursor is None:
+            self._meshtastic_cursor = newest
+            return
+
+        for message in messages:
+            sequence = self._message_sequence(message)
+            if sequence <= self._meshtastic_cursor:
+                continue
+            if resetting and (
+                not session_changed or sequence not in current_session_sequences
+            ):
+                continue
+            if authoritative_unread is None and str(
+                message.get("direction") or "incoming"
+            ) in {
+                "incoming",
+                "inbound",
+                "received",
+            }:
+                self.meshtastic_unread_count += 1
+            self._fire_meshtastic_event(message)
+        self._meshtastic_cursor = max(self._meshtastic_cursor, newest)
+
+    def clear_meshtastic_unread(self) -> None:
+        """Clear the local unread counter and notify hub entities."""
+        self.meshtastic_unread_count = 0
+        self.async_update_listeners()
+
     async def _async_update_data(self) -> list[dict]:
         try:
             devices = await self.client.devices()
@@ -89,6 +226,26 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
                         sw_version=str(record.get("firmware") or "unknown"),
                     )
                 self._fire_new_button_events(record)
+
+            try:
+                self.flexhub_summary = await self.client.flexhub()
+                console = self.flexhub_summary.get("meshtastic_console")
+                if isinstance(console, dict):
+                    try:
+                        self.meshtastic_unread_count = max(
+                            0, int(console.get("unread_count") or 0)
+                        )
+                    except (TypeError, ValueError):
+                        pass
+                if self.flexhub_summary.get("connected"):
+                    messages = await self.client.flexhub_meshtastic_messages(
+                        after=self._meshtastic_cursor or 0,
+                        limit=32,
+                        session_id=self._meshtastic_session_id or None,
+                    )
+                    self._accept_meshtastic_messages(messages)
+            except FlexDisplayApiError as err:
+                LOGGER.debug("FlexHub Meshtastic console is unavailable: %s", err)
             return devices
         except FlexDisplayApiError as err:
             raise UpdateFailed(f"Unable to update FlexDisplay devices: {err}") from err

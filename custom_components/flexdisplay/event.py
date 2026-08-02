@@ -9,9 +9,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import BUTTON_EVENT_TYPES, EVENT_TYPE
+from .const import (
+    BUTTON_EVENT_TYPES,
+    EVENT_TYPE,
+    MESHTASTIC_EVENT_TYPE,
+    MESHTASTIC_EVENT_TYPES,
+)
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity, setup_dynamic_entities
+from .entity import (
+    FlexDisplayEntity,
+    FlexHubEntity,
+    setup_dynamic_entities,
+    setup_flexhub_entities,
+)
 
 
 class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
@@ -53,6 +63,40 @@ class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
         self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, handle_event))
 
 
+class FlexHubMeshtasticEvent(FlexHubEntity, EventEntity):
+    """Expose Meshtastic traffic as a native Home Assistant event entity."""
+
+    _attr_translation_key = "meshtastic_message"
+    _attr_event_types: ClassVar[list[str]] = list(MESHTASTIC_EVENT_TYPES)
+
+    def __init__(self, coordinator: FlexDisplayCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.flexhub_id}_meshtastic_message"
+
+    async def async_added_to_hass(self) -> None:
+        """Listen for new console messages attributed to the FlexHub."""
+        await super().async_added_to_hass()
+
+        @callback
+        def handle_event(event: Event) -> None:
+            if event.data.get("flexdisplay_id") != self.coordinator.flexhub_id:
+                return
+            event_type = str(event.data.get("type") or "message_received")
+            if event_type not in MESHTASTIC_EVENT_TYPES:
+                return
+            attributes = {
+                key: value
+                for key, value in event.data.items()
+                if key not in {"device_id", "flexdisplay_id", "type"}
+            }
+            self._trigger_event(event_type, attributes)
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            self.hass.bus.async_listen(MESHTASTIC_EVENT_TYPE, handle_event)
+        )
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -63,5 +107,12 @@ async def async_setup_entry(
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (FlexDisplayButtonEvent(coordinator, device_id),),
+        lambda coordinator, device_id: (
+            FlexDisplayButtonEvent(coordinator, device_id),
+        ),
+    )
+    setup_flexhub_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator: (FlexHubMeshtasticEvent(coordinator),),
     )

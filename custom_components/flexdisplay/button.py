@@ -10,7 +10,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity, setup_dynamic_entities
+from .entity import (
+    FlexDisplayEntity,
+    FlexHubEntity,
+    setup_dynamic_entities,
+    setup_flexhub_entities,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -21,19 +26,29 @@ class FlexDisplayButtonDescription(ButtonEntityDescription):
 
 
 DESCRIPTIONS = (
-    FlexDisplayButtonDescription(key="refresh", translation_key="refresh", command="refresh"),
+    FlexDisplayButtonDescription(
+        key="refresh", translation_key="refresh", command="refresh"
+    ),
     FlexDisplayButtonDescription(
         key="full_refresh",
         translation_key="full_refresh",
         command="full-refresh",
     ),
-    FlexDisplayButtonDescription(key="previous", translation_key="previous", command="previous"),
+    FlexDisplayButtonDescription(
+        key="previous", translation_key="previous", command="previous"
+    ),
     FlexDisplayButtonDescription(key="next", translation_key="next", command="next"),
-    FlexDisplayButtonDescription(key="overview", translation_key="overview", command="overview"),
+    FlexDisplayButtonDescription(
+        key="overview", translation_key="overview", command="overview"
+    ),
     FlexDisplayButtonDescription(key="clear", translation_key="clear", command="clear"),
     FlexDisplayButtonDescription(key="sleep", translation_key="sleep", command="sleep"),
-    FlexDisplayButtonDescription(key="power_off", translation_key="power_off", command="power-off"),
-    FlexDisplayButtonDescription(key="restart", translation_key="restart", command="restart"),
+    FlexDisplayButtonDescription(
+        key="power_off", translation_key="power_off", command="power-off"
+    ),
+    FlexDisplayButtonDescription(
+        key="restart", translation_key="restart", command="restart"
+    ),
 )
 
 
@@ -54,7 +69,9 @@ class FlexDisplayCommandButton(FlexDisplayEntity, ButtonEntity):
 
     async def async_press(self) -> None:
         """Queue the described command."""
-        await self.coordinator.client.command(self.device_id, self.entity_description.command)
+        await self.coordinator.client.command(
+            self.device_id, self.entity_description.command
+        )
         await self.coordinator.async_request_refresh()
 
 
@@ -135,7 +152,9 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Expose the action only while every Bridge safety condition passes."""
-        return super().available and bool(self.record.get("usb_recovery_verification_ready"))
+        return super().available and bool(
+            self.record.get("usb_recovery_verification_ready")
+        )
 
     async def async_press(self) -> None:
         """Record an operator-confirmed USB recovery and release the canary gate."""
@@ -145,6 +164,72 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
             str(self.record.get("dispatched_command_id") or ""),
         )
         await self.coordinator.async_request_refresh()
+
+
+@dataclass(frozen=True, kw_only=True)
+class FlexHubButtonDescription(ButtonEntityDescription):
+    """Describe a direct FlexHub management action."""
+
+    action: str
+
+
+FLEXHUB_BUTTONS = (
+    FlexHubButtonDescription(
+        key="flexhub_scan",
+        translation_key="flexhub_scan",
+        action="scan",
+    ),
+    FlexHubButtonDescription(
+        key="flexhub_deliver",
+        translation_key="flexhub_deliver",
+        action="deliver",
+    ),
+    FlexHubButtonDescription(
+        key="flexhub_retry",
+        translation_key="flexhub_retry",
+        action="retry",
+    ),
+    FlexHubButtonDescription(
+        key="flexhub_cancel",
+        translation_key="flexhub_cancel",
+        action="cancel",
+    ),
+)
+
+
+class FlexHubActionButton(FlexHubEntity, ButtonEntity):
+    """Run a bounded receiver-fleet action on the SenseCAP hub."""
+
+    entity_description: FlexHubButtonDescription
+
+    def __init__(
+        self,
+        coordinator: FlexDisplayCoordinator,
+        description: FlexHubButtonDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.flexhub_id}_{description.key}"
+
+    async def async_press(self) -> None:
+        """Ask the Bridge to run the selected FlexHub action."""
+        await self.coordinator.client.flexhub_action(self.entity_description.action)
+        await self.coordinator.async_request_refresh()
+
+
+class FlexHubClearMeshtasticUnreadButton(FlexHubEntity, ButtonEntity):
+    """Clear both Bridge and integration-side unread counters."""
+
+    _attr_translation_key = "clear_meshtastic_unread"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator) -> None:
+        super().__init__(coordinator)
+        self._attr_unique_id = f"{coordinator.flexhub_id}_clear_meshtastic_unread"
+
+    async def async_press(self) -> None:
+        """Clear unread state without deleting message history."""
+        await self.coordinator.client.mark_meshtastic_read()
+        self.coordinator.clear_meshtastic_unread()
 
 
 async def async_setup_entry(
@@ -166,5 +251,16 @@ async def async_setup_entry(
             FlexDisplayRetryFirmwareButton(coordinator, device_id),
             FlexDisplayResetRolloutButton(coordinator, device_id),
             FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
+        ),
+    )
+    setup_flexhub_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator: (
+            *(
+                FlexHubActionButton(coordinator, description)
+                for description in FLEXHUB_BUTTONS
+            ),
+            FlexHubClearMeshtasticUnreadButton(coordinator),
         ),
     )

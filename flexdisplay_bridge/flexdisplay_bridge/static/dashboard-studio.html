@@ -348,6 +348,64 @@
     .hub-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
     .hub-facts div { padding: 7px; border-radius: 7px; background: var(--panel-2); }
     .hub-facts strong { display: block; margin-top: 2px; font-size: 12px; }
+    .mesh-console-shell {
+      display: grid; grid-template-columns: minmax(210px, 260px) minmax(360px, 1fr) minmax(260px, 330px);
+      gap: 14px; padding: 0 20px 20px;
+    }
+    .mesh-panel {
+      display: grid; align-content: start; gap: 11px; min-width: 0; padding: 14px;
+      border: 1px solid var(--line); border-radius: 11px; background: rgba(13, 21, 29, .84);
+    }
+    .mesh-panel-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .mesh-status-line { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; }
+    .mesh-badge {
+      display: inline-flex; align-items: center; min-height: 22px; padding: 2px 8px;
+      border-radius: 999px; background: var(--panel-2); color: var(--muted);
+      font-size: 10px; font-weight: 800;
+    }
+    .mesh-badge.live { background: rgba(103, 214, 193, .14); color: var(--accent-2); }
+    .mesh-badge.unread { background: var(--accent); color: #1b1207; }
+    .mesh-badge.failed { background: rgba(255, 122, 121, .14); color: var(--danger); }
+    .mesh-feed {
+      display: grid; gap: 8px; min-height: 310px; max-height: 570px;
+      overflow-y: auto; overscroll-behavior: contain; padding-right: 3px;
+    }
+    .mesh-message {
+      display: grid; gap: 6px; padding: 10px; border: 1px solid var(--line);
+      border-radius: 9px; background: var(--panel-2);
+    }
+    .mesh-message.unread { border-left: 3px solid var(--accent); }
+    .mesh-message.outbound { background: rgba(103, 214, 193, .055); }
+    .mesh-message-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+    .mesh-message-from { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px; }
+    .mesh-message-time { flex: 0 0 auto; color: var(--muted); font-size: 10px; }
+    .mesh-message-text { overflow-wrap: anywhere; white-space: pre-wrap; font-size: 13px; line-height: 1.38; }
+    .mesh-message-meta { display: flex; flex-wrap: wrap; gap: 5px; color: var(--muted); font-size: 9px; }
+    .mesh-message-meta span { padding: 2px 5px; border-radius: 5px; background: rgba(0, 0, 0, .18); }
+    .mesh-message-meta .delivered { color: var(--accent-2); }
+    .mesh-message-meta .failed { color: var(--danger); }
+    .mesh-filter-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .mesh-filter-grid .wide { grid-column: 1 / -1; }
+    .mesh-byte-count { color: var(--muted); font: 11px/1.2 ui-monospace, SFMono-Regular, Menlo, monospace; text-align: right; }
+    .mesh-byte-count.near-limit { color: var(--accent); }
+    .mesh-byte-count.over-limit { color: var(--danger); }
+    .mesh-template-list, .mesh-rule-list { display: grid; gap: 7px; }
+    .mesh-template, .mesh-rule {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center;
+      gap: 7px; padding: 8px; border: 1px solid var(--line); border-radius: 8px; background: var(--panel-2);
+    }
+    .mesh-template button { overflow: hidden; min-width: 0; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+    .mesh-template .icon, .mesh-rule .icon { width: 30px; min-height: 30px; }
+    .mesh-rule-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; }
+    .mesh-rule-targets { color: var(--muted); font-size: 9px; }
+    .mesh-collapsible { border-top: 1px solid var(--line); padding-top: 11px; }
+    .mesh-collapsible summary { cursor: pointer; color: var(--accent-2); font-size: 12px; font-weight: 800; }
+    .mesh-collapsible[open] summary { margin-bottom: 10px; }
+    .mesh-target-list { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; max-height: 140px; overflow: auto; }
+    .mesh-target-list .check-row { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .mesh-action-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
+    .mesh-action-status { min-height: 38px; padding: 9px; border-radius: 8px; background: var(--panel-2); color: var(--muted); font-size: 11px; }
+    .mesh-unavailable { padding: 9px; border: 1px dashed var(--line); border-radius: 8px; color: var(--muted); font-size: 11px; }
     .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
     .content-item-list { display: grid; gap: 10px; align-content: start; }
     .content-item-card { border: 1px solid var(--line); border-radius: 11px; background: #0d151d; overflow: hidden; }
@@ -359,6 +417,10 @@
       .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
       .tile-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
+    @media (max-width: 980px) {
+      .mesh-console-shell { grid-template-columns: minmax(220px, .7fr) minmax(340px, 1.3fr); }
+      .mesh-console-shell .mesh-panel:last-child { grid-column: 1 / -1; }
+    }
     @media (max-width: 720px) {
       .app { display: block; }
       .sidebar, .inspector, .workspace { padding: 16px; }
@@ -368,6 +430,10 @@
       .tile-list { grid-template-columns: 1fr; }
       .library-shell { grid-template-columns: 1fr; }
       .management-shell { grid-template-columns: 1fr; }
+      .mesh-console-shell { grid-template-columns: 1fr; padding: 0 14px 14px; }
+      .mesh-console-shell .mesh-panel:last-child { grid-column: auto; }
+      .mesh-feed { max-height: 440px; }
+      .mesh-target-list { grid-template-columns: 1fr; }
       .loading-shell { grid-template-columns: 1fr; }
       .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
       .fleet-grid { grid-template-columns: 1fr; padding: 14px; }
@@ -426,9 +492,9 @@
       </div>
 
       <div class="section">
-        <div class="section-head"><h2>FlexHub</h2><span class="rule-badge">v0.33</span></div>
-        <button id="openFlexHub" style="width:100%">Open FlexHub status</button>
-        <p class="small muted" style="margin:10px 0 0">View hub health, storage, fleet connection, Wi-Fi, and Meshtastic status.</p>
+        <div class="section-head"><h2>FlexHub</h2><span class="rule-badge">v0.35</span></div>
+        <button id="openFlexHub" style="width:100%">Open Hub &amp; Mesh Console</button>
+        <p class="small muted" style="margin:10px 0 0">View hub health and Meshtastic status, manage receivers, and read or send messages.</p>
       </div>
 
       <div class="section">
@@ -881,18 +947,130 @@
   </dialog>
   <dialog id="flexHubDialog" class="library-dialog">
     <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">SenseCAP FlexHub v0.33</div><h2 style="font-size:20px">Hub configuration and health</h2></div>
+      <div><div class="eyebrow">SenseCAP FlexHub v0.35</div><h2 style="font-size:20px">Hub and Meshtastic Console</h2></div>
       <div class="button-row"><button id="refreshFlexHub">Refresh</button><button id="closeFlexHub" class="icon" title="Close">×</button></div>
     </div>
     <div class="library-shell">
       <div class="library-controls">
-        <label>FlexHub address<input id="flexHubUrl" type="url" placeholder="http://flexhub.local"></label>
+        <label>FlexHub base address<input id="flexHubUrl" type="url" placeholder="http://flexhub.local"></label>
+        <p class="small muted">Enter the hub address without a page path. Pasted <code>/flexhub</code>, <code>/meshtastic</code>, and status URLs are accepted and reduced to the base address automatically.</p>
         <label>Access PIN<input id="flexHubPin" type="password" maxlength="64" placeholder="Leave blank if disabled"></label>
         <button id="saveFlexHub" class="primary">Save and connect</button>
+        <button id="testFlexHub">Test connection</button>
+        <div class="button-row">
+          <button id="openFlexHubSelector" disabled>Open selector</button>
+          <button id="openFlexHubConsole" disabled>Open FlexHub</button>
+          <button id="openMeshtasticConsole" disabled>Open Meshtastic</button>
+        </div>
         <div id="flexHubConnection" class="empty">FlexHub is not configured.</div>
-        <p class="small muted">The PIN is stored in the Bridge App data directory. Status is also published as a SenseCAP FlexHub device in Home Assistant when MQTT discovery is enabled.</p>
+        <p class="small muted">The PIN is stored in the Bridge App data directory. Console pages open directly on the local hub in a new tab; status is fetched through the Bridge and published to Home Assistant when MQTT discovery is enabled.</p>
       </div>
       <div id="flexHubCards" class="hub-cards"><div class="empty">Configure the FlexHub address to begin.</div></div>
+    </div>
+    <div class="mesh-console-shell">
+      <section class="mesh-panel" aria-label="Meshtastic filters and FlexHub actions">
+        <div class="mesh-panel-head">
+          <h2>Meshtastic inbox</h2>
+          <div class="mesh-status-line">
+            <span id="meshLiveBadge" class="mesh-badge">Paused</span>
+            <span id="meshUnreadBadge" class="mesh-badge unread">0 unread</span>
+          </div>
+        </div>
+        <label>Search messages<input id="meshSearch" type="search" maxlength="80" placeholder="Sender or message text"></label>
+        <div class="mesh-filter-grid">
+          <label>Direction
+            <select id="meshDirectionFilter">
+              <option value="">All</option>
+              <option value="inbound">Received</option>
+              <option value="outbound">Sent</option>
+            </select>
+          </label>
+          <label>Channel<select id="meshChannelFilter"><option value="">All channels</option></select></label>
+          <label class="wide">Node<select id="meshNodeFilter"><option value="">All nodes</option></select></label>
+        </div>
+        <div class="button-row">
+          <button id="applyMeshFilters">Apply filters</button>
+          <button id="markMeshRead">Mark all read</button>
+        </div>
+        <details class="mesh-collapsible" open>
+          <summary>Direct FlexHub controls</summary>
+          <div class="mesh-action-grid">
+            <button data-mesh-action="scan">Scan receivers</button>
+            <button data-mesh-action="deliver">Deliver queued</button>
+            <button data-mesh-action="retry">Retry last</button>
+            <button data-mesh-action="cancel" class="danger">Cancel task</button>
+          </div>
+          <div id="meshActionStatus" class="mesh-action-status" style="margin-top:8px">No action requested.</div>
+        </details>
+      </section>
+
+      <section class="mesh-panel" aria-label="Meshtastic messages">
+        <div class="mesh-panel-head">
+          <div>
+            <h2>Live message feed</h2>
+            <span id="meshFeedSummary" class="small muted">Waiting for the FlexHub…</span>
+          </div>
+          <button id="refreshMeshMessages" class="icon" title="Refresh messages">↻</button>
+        </div>
+        <div id="meshFeed" class="mesh-feed" aria-live="polite">
+          <div class="empty">Connect the FlexHub to load Meshtastic messages.</div>
+        </div>
+      </section>
+
+      <section class="mesh-panel" aria-label="Meshtastic message composer">
+        <div class="mesh-panel-head"><h2>Send a message</h2><span class="mesh-badge">220 bytes</span></div>
+        <div class="mesh-filter-grid">
+          <label>Destination
+            <select id="meshDestinationMode">
+              <option value="broadcast">Broadcast</option>
+              <option value="direct">Direct message</option>
+            </select>
+          </label>
+          <label>Channel<select id="meshSendChannel"></select></label>
+          <label id="meshRecipientLabel" class="wide" hidden>Recipient<select id="meshRecipient"></select></label>
+        </div>
+        <label>Message<textarea id="meshComposer" rows="4" placeholder="Type a Meshtastic message"></textarea></label>
+        <div id="meshByteCount" class="mesh-byte-count">0 / 220 bytes</div>
+        <label class="check-row"><input id="meshRequestAck" type="checkbox"> Request delivery acknowledgement</label>
+        <button id="sendMeshMessage" class="primary" disabled>Send message</button>
+        <div id="meshSendStatus" class="mesh-action-status">Ready.</div>
+
+        <details class="mesh-collapsible" open>
+          <summary>Quick replies</summary>
+          <div id="meshTemplateList" class="mesh-template-list"><div class="mesh-unavailable">No saved replies yet.</div></div>
+          <label style="margin-top:8px">Reply name<input id="meshTemplateLabel" maxlength="48" placeholder="e.g. On my way"></label>
+          <button id="saveMeshTemplate">Save current message</button>
+        </details>
+
+        <details class="mesh-collapsible">
+          <summary>Display rules</summary>
+          <p class="small muted">Turn matching mesh messages into a screen update for selected X3/X4 devices.</p>
+          <label>Rule name<input id="meshRuleLabel" maxlength="64" placeholder="Urgent mesh alerts"></label>
+          <label>Message starts with<input id="meshRulePrefix" maxlength="64" value="ALERT:"></label>
+          <label>Screen title<input id="meshRuleTitle" maxlength="64" placeholder="Mesh alert"></label>
+          <label>Channel<select id="meshRuleChannel"><option value="">Any channel</option></select></label>
+          <label>Sender<select id="meshRuleNode"><option value="">Any node</option></select></label>
+          <label>Priority
+            <select id="meshRulePriority">
+              <option value="normal">Normal</option>
+              <option value="important">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </label>
+          <label class="check-row"><input id="meshRuleEnabled" type="checkbox" checked> Rule enabled</label>
+          <label class="check-row"><input id="meshRuleCaseSensitive" type="checkbox"> Match uppercase/lowercase exactly</label>
+          <label class="check-row"><input id="meshRuleStripPrefix" type="checkbox" checked> Hide the trigger prefix on the display</label>
+          <label class="check-row"><input id="meshRuleNotify" type="checkbox"> Also send a Home Assistant notification</label>
+          <label id="meshRuleNotifyServiceField" hidden>Notify service<input id="meshRuleNotifyService" value="notify.notify" placeholder="notify.notify"></label>
+          <span class="small muted">Target devices (optional when Home Assistant notification is enabled)</span>
+          <div id="meshRuleTargets" class="mesh-target-list"><div class="mesh-unavailable">Load the fleet to select devices.</div></div>
+          <div class="button-row">
+            <button id="saveMeshRule" class="primary">Save rule</button>
+            <button id="cancelMeshRuleEdit" hidden>Cancel edit</button>
+          </div>
+          <div id="meshRuleList" class="mesh-rule-list"><div class="mesh-unavailable">No display rules yet.</div></div>
+        </details>
+      </section>
     </div>
   </dialog>
   <dialog id="loadingScreenDialog" class="library-dialog">
@@ -1010,6 +1188,27 @@
       fleetPolicies: {profiles: [], dashboard_profiles: [], photo_albums: [], devices: [], summary: {}},
       fleetManagementTimer: null,
       flexHub: {},
+      mesh: {
+        messages: [],
+        nodes: [],
+        channels: [],
+        templates: [],
+        rules: [],
+        cursor: 0,
+        sessionId: "",
+        lastRead: 0,
+        lastReadSession: "",
+        unread: 0,
+        serverUnread: null,
+        pollTimer: null,
+        pollTick: 0,
+        searchTimer: null,
+        loading: false,
+        settingsRemote: false,
+        editingRuleId: "",
+        renderSignature: "",
+        nextSendAt: 0,
+      },
       contentChannels: {channels: {}, assignments: {}, capabilities: {}},
       contentChannelDraft: null,
       contentChannelPreviewUrl: "",
@@ -1391,12 +1590,27 @@
     function renderFlexHub(summary) {
       state.flexHub = summary || {};
       $("#flexHubUrl").value = summary.url || "";
+      const unread = Number(summary.meshtastic_console?.unread_count);
+      if (Number.isFinite(unread)) {
+        state.mesh.serverUnread = unread;
+        updateMeshUnread();
+      }
       const connected = Boolean(summary.connected);
+      for (const [selector, field] of [["#openFlexHubSelector", "selector_url"], ["#openFlexHubConsole", "console_url"], ["#openMeshtasticConsole", "meshtastic_url"]]) {
+        $(selector).disabled = !summary[field];
+      }
+      const attemptedEndpoint = summary.status_url
+        ? `<br><span class="small muted">Status endpoint: ${escapeHtml(summary.status_url)}</span>`
+        : "";
       $("#flexHubConnection").innerHTML = connected
-        ? `<strong>Connected</strong><br><span class="small muted">Last seen ${escapeHtml(summary.last_seen || "now")}</span>`
-        : `<strong>${summary.configured ? "Connection unavailable" : "Not configured"}</strong><br><span class="small muted">${escapeHtml(summary.error || "Enter the FlexHub address above.")}</span>`;
+        ? `<strong>Connected</strong><br><span class="small muted">Last seen ${escapeHtml(summary.last_seen || "now")}</span>${attemptedEndpoint}`
+        : `<strong>${summary.configured ? "Connection unavailable" : "Not configured"}</strong><br><span class="small muted">${escapeHtml(summary.error || "Enter the FlexHub base address above.")}</span>${attemptedEndpoint}`;
       const status = summary.status || {};
       const fleet = status.fleet || {}, storage = status.storage || {}, network = status.network || {}, mesh = status.meshtastic || {}, slideshow = status.slideshow || {}, boot = status.boot_health || {};
+      if ($("#flexHubDialog").open && (status.state || status.detail || status.active_job)) {
+        const activity = status.active_job || status.detail || "Ready";
+        $("#meshActionStatus").textContent = `${status.state || "ready"} · ${activity}`;
+      }
       const devices = Array.isArray(fleet.devices) ? fleet.devices : [];
       const cards = [
         ["FlexHub", [["State", status.state || "offline"], ["Task", status.detail || "—"], ["Platform", status.platform_version || "—"], ["Receivers", status.target_count ?? "—"], ["Active job", status.active_job || "None"], ["Remote commands", status.remote_commands_enabled ? "Enabled" : "Disabled"], ["Access PIN", status.access_control_enabled ? "Enabled" : "Disabled"], ["Healthy boots", boot.count ?? "—"]]],
@@ -1408,9 +1622,16 @@
       $("#flexHubCards").innerHTML = cards.map(([title, facts]) => `<section class="hub-card"><h2>${title}</h2><div class="hub-facts">${facts.map(([label, value]) => `<div><span class="small muted">${label}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}</div></section>`).join("");
     }
 
-    async function loadFlexHub(refresh = false) {
-      try { const response = await api(`flexhub${refresh ? "?refresh=true" : ""}`); renderFlexHub(await response.json()); }
-      catch (error) { toast(error.message, true); }
+    async function loadFlexHub(refresh = false, quiet = false) {
+      try {
+        const response = await api(`flexhub${refresh ? "?refresh=true" : ""}`);
+        const summary = await response.json();
+        renderFlexHub(summary);
+        return summary;
+      } catch (error) {
+        if (!quiet) toast(error.message, true);
+        return null;
+      }
     }
 
     async function saveFlexHub() {
@@ -1419,7 +1640,661 @@
         $("#flexHubPin").value = "";
         renderFlexHub(await response.json());
         toast("FlexHub connection saved.");
+        if ($("#flexHubDialog").open) {
+          await loadMeshNodes();
+          await loadMeshMessages({reset: true, quiet: true});
+        }
       } catch (error) { toast(error.message, true); }
+    }
+
+    async function testFlexHubConnection() {
+      const summary = await loadFlexHub(true);
+      if (!summary) return;
+      if (summary.connected) toast(`Connected to FlexHub at ${summary.url}.`);
+      else toast(summary.error || "FlexHub connection failed.", true);
+    }
+
+    function openFlexHubRoute(field) {
+      const destination = state.flexHub?.[field];
+      if (!destination) {
+        toast("Save a FlexHub base address first.", true);
+        return;
+      }
+      window.open(destination, "_blank", "noopener,noreferrer");
+    }
+
+    function meshSequence(message) {
+      const value = Number(message?.sequence ?? message?.seq ?? 0);
+      return Number.isFinite(value) ? value : 0;
+    }
+
+    function meshSessionId(value) {
+      for (const candidate of [value?.session_id, value?.boot_id, value?.boot_session, value?._session_id, value?.session]) {
+        if (["string", "number"].includes(typeof candidate) && String(candidate).trim()) return String(candidate).trim();
+      }
+      return "";
+    }
+
+    function meshMessageKey(message) {
+      const session = meshSessionId(message) || state.mesh.sessionId || "legacy";
+      const sequence = meshSequence(message);
+      if (sequence) return `${session}:sequence:${sequence}`;
+      const packet = message?.packet_id ?? message?.id ?? message?._local_id;
+      if (packet != null && packet !== "") return `${session}:packet:${packet}`;
+      return [session, message?.direction, message?.sender, message?.timestamp, message?.text].join(":");
+    }
+
+    function meshNodeId(node) {
+      const raw = node?.node_id ?? node?.id ?? node?.num ?? node?.node_num ?? "";
+      if (typeof raw === "number") return `!${raw.toString(16).padStart(8, "0")}`;
+      const value = String(raw || "").trim();
+      if (!value) return "";
+      if (value.startsWith("!")) return value;
+      if (/^[0-9a-f]{8}$/i.test(value)) return `!${value.toLowerCase()}`;
+      return value;
+    }
+
+    function meshNodeName(node) {
+      return String((node?.long_name ?? node?.name ?? node?.short_name ?? meshNodeId(node)) || "Unknown node");
+    }
+
+    function meshDirection(message) {
+      const value = String(message?.direction ?? "").toLowerCase();
+      if (["outbound", "sent", "tx"].includes(value) || message?.outbound === true) return "outbound";
+      return "inbound";
+    }
+
+    function meshTimestamp(message) {
+      const receivedAt = message?.received_at ?? message?.sent_at;
+      const raw = receivedAt ?? message?.timestamp ?? message?.time;
+      if (raw == null || raw === "") return "—";
+      const numeric = Number(raw);
+      if (!receivedAt && message?.timestamp_source === "uptime" && Number.isFinite(numeric)) {
+        return `${Math.max(0, Math.floor(numeric))} s after hub boot`;
+      }
+      const value = Number.isFinite(numeric)
+        ? new Date(numeric < 100000000000 ? numeric * 1000 : numeric)
+        : new Date(raw);
+      if (Number.isNaN(value.getTime())) return String(raw);
+      return value.toLocaleString([], {dateStyle: "short", timeStyle: "short"});
+    }
+
+    function meshChannelValue(message) {
+      return String(message?.channel ?? message?.channel_index ?? 0);
+    }
+
+    function meshMessageSender(message) {
+      if (meshDirection(message) === "outbound") {
+        const destination = message?.destination_name ?? message?.destination ?? "broadcast";
+        return `You → ${destination === "broadcast" ? "Everyone" : destination}`;
+      }
+      return String(message?.sender_name ?? message?.from_name ?? message?.sender ?? message?.from ?? "Unknown node");
+    }
+
+    function meshIsDirect(message) {
+      if (typeof message?.is_direct === "boolean") return message.is_direct;
+      const destination = String(message?.destination ?? message?.to ?? "broadcast").toLowerCase();
+      return !["", "broadcast", "all", "!ffffffff", "ffffffff", "4294967295"].includes(destination);
+    }
+
+    function meshDeliveryState(message) {
+      return String(message?.delivery_state ?? message?.ack_state ?? message?.status ?? "").toLowerCase();
+    }
+
+    function updateMeshUnread() {
+      const visibleUnread = state.mesh.messages.filter((message) =>
+        meshDirection(message) === "inbound" && meshSequence(message) > state.mesh.lastRead
+      ).length;
+      state.mesh.unread = Number.isFinite(state.mesh.serverUnread)
+        ? Math.max(0, state.mesh.serverUnread)
+        : visibleUnread;
+      const badge = $("#meshUnreadBadge");
+      badge.textContent = `${state.mesh.unread} unread`;
+      badge.classList.toggle("unread", state.mesh.unread > 0);
+    }
+
+    function renderMeshMessages(force = false) {
+      updateMeshUnread();
+      const visible = [...state.mesh.messages].sort((left, right) =>
+        meshSequence(right) - meshSequence(left)
+      );
+      const signature = visible.map((message) => [
+        meshMessageKey(message), meshDeliveryState(message), message?.text,
+      ].join(":" )).join("|") + `:${state.mesh.lastRead}`;
+      if (!force && signature === state.mesh.renderSignature) return;
+      state.mesh.renderSignature = signature;
+      const feed = $("#meshFeed");
+      if (!visible.length) {
+        feed.innerHTML = '<div class="empty">No messages match these filters.</div>';
+        $("#meshFeedSummary").textContent = "0 messages";
+        return;
+      }
+      feed.innerHTML = visible.map((message) => {
+        const direction = meshDirection(message);
+        const sequence = meshSequence(message);
+        const unread = direction === "inbound" && sequence > state.mesh.lastRead;
+        const channel = message?.channel_name || `Channel ${meshChannelValue(message)}`;
+        const direct = meshIsDirect(message);
+        const rssi = message?.rssi ?? message?.rx_rssi;
+        const snr = message?.snr ?? message?.rx_snr;
+        const nodeId = message?.sender_id ?? message?.from_id;
+        const packetId = message?.packet_id ?? message?.id;
+        const delivery = meshDeliveryState(message);
+        const deliveryClass = ["delivered", "acknowledged", "received"].includes(delivery)
+          ? "delivered"
+          : ["failed", "rejected", "timeout"].includes(delivery) ? "failed" : "";
+        const metadata = [
+          direction === "outbound" ? "Sent" : "Received",
+          direct ? "Direct" : "Broadcast",
+          channel,
+          nodeId == null ? "" : String(nodeId),
+          packetId == null ? "" : `Packet ${packetId}`,
+          rssi == null ? "" : `RSSI ${rssi} dBm`,
+          snr == null ? "" : `SNR ${snr} dB`,
+        ].filter(Boolean).map((value) => `<span>${escapeHtml(value)}</span>`).join("");
+        return `<article class="mesh-message ${direction} ${unread ? "unread" : ""}">
+          <div class="mesh-message-head">
+            <strong class="mesh-message-from">${escapeHtml(meshMessageSender(message))}</strong>
+            <time class="mesh-message-time">${escapeHtml(meshTimestamp(message))}</time>
+          </div>
+          <div class="mesh-message-text">${escapeHtml(message?.text || "(empty message)")}</div>
+          <div class="mesh-message-meta">${metadata}${delivery ? `<span class="${deliveryClass}">${escapeHtml(delivery)}</span>` : ""}</div>
+        </article>`;
+      }).join("");
+      const sessionLabel = state.mesh.sessionId ? ` · session ${state.mesh.sessionId.slice(-12)}` : "";
+      $("#meshFeedSummary").textContent = `${visible.length} message${visible.length === 1 ? "" : "s"} · newest first${sessionLabel}`;
+    }
+
+    function mergeMeshMessages(messages, reset = false) {
+      const merged = new Map();
+      if (!reset) state.mesh.messages.forEach((message) => merged.set(meshMessageKey(message), message));
+      for (const message of messages || []) {
+        const key = meshMessageKey(message);
+        merged.set(key, {...(merged.get(key) || {}), ...message});
+      }
+      state.mesh.messages = [...merged.values()]
+        .sort((left, right) => meshSequence(left) - meshSequence(right))
+        .slice(-250);
+    }
+
+    function meshFilterQuery(reset) {
+      const params = new URLSearchParams();
+      params.set("after", reset ? "0" : String(Math.max(0, (state.mesh.cursor || 0) - 32)));
+      params.set("limit", "32");
+      if (!reset && state.mesh.sessionId) params.set("session_id", String(state.mesh.sessionId));
+      const search = $("#meshSearch").value.trim();
+      if (new TextEncoder().encode(search).length > 80) {
+        throw new Error("Message search is limited to 80 UTF-8 bytes");
+      }
+      const values = {
+        query: search,
+        direction: $("#meshDirectionFilter").value,
+        channel: $("#meshChannelFilter").value,
+        node: $("#meshNodeFilter").value,
+      };
+      for (const [name, value] of Object.entries(values)) if (value !== "") params.set(name, value);
+      return params.toString();
+    }
+
+    async function loadMeshMessages({reset = false, quiet = false} = {}) {
+      if (state.mesh.loading || !$("#flexHubDialog").open) return;
+      state.mesh.loading = true;
+      let reloadAfterSessionReset = false;
+      try {
+        const response = await api(`flexhub/meshtastic/messages?${meshFilterQuery(reset)}`);
+        const payload = await response.json();
+        const payloadSession = meshSessionId(payload);
+        const sessionChanged = Boolean(payloadSession && state.mesh.sessionId && payloadSession !== state.mesh.sessionId);
+        const readSessionChanged = Boolean(payloadSession && state.mesh.lastReadSession !== payloadSession);
+        const resetRequested = Boolean(payload.reset || payload.reset_required || sessionChanged);
+        if (payloadSession) state.mesh.sessionId = payloadSession;
+        if (resetRequested) {
+          state.mesh.cursor = 0;
+          state.mesh.messages = [];
+          state.mesh.renderSignature = "";
+          reloadAfterSessionReset = !reset;
+        }
+        const rawMessages = Array.isArray(payload) ? payload : payload.messages || payload.items || [];
+        const messages = rawMessages.map((message) => payloadSession && !meshSessionId(message)
+          ? {...message, _session_id: payloadSession}
+          : message
+        );
+        mergeMeshMessages(messages, reset || resetRequested);
+        const serverUnread = Number(payload.bridge?.console?.unread_count);
+        if (Number.isFinite(serverUnread)) state.mesh.serverUnread = serverUnread;
+        const returnedCursor = Number(payload.latest_sequence ?? payload.next_sequence ?? payload.next_after ?? payload.sequence ?? 0);
+        const messageCursor = messages.reduce((latest, message) => Math.max(latest, meshSequence(message)), 0);
+        if (readSessionChanged) {
+          const inbound = messages
+            .filter((message) => meshDirection(message) === "inbound")
+            .sort((left, right) => meshSequence(left) - meshSequence(right));
+          const unread = Number.isFinite(serverUnread) ? Math.max(0, Math.floor(serverUnread)) : 0;
+          if (unread > 0 && inbound.length) {
+            const firstUnread = inbound[Math.max(0, inbound.length - unread)];
+            state.mesh.lastRead = Math.max(0, meshSequence(firstUnread) - 1);
+          } else {
+            state.mesh.lastRead = Math.max(returnedCursor, messageCursor);
+          }
+          state.mesh.lastReadSession = payloadSession;
+          storeMeshReadState();
+        }
+        state.mesh.cursor = reset
+          ? Math.max(returnedCursor, messageCursor)
+          : Math.max(state.mesh.cursor, returnedCursor, messageCursor);
+        $("#meshLiveBadge").textContent = "Live";
+        $("#meshLiveBadge").className = "mesh-badge live";
+        renderMeshMessages();
+      } catch (error) {
+        $("#meshLiveBadge").textContent = "Unavailable";
+        $("#meshLiveBadge").className = "mesh-badge failed";
+        if (!quiet) {
+          $("#meshFeed").innerHTML = `<div class="mesh-unavailable">${escapeHtml(error.message)}. Update the Bridge and FlexHub to v0.35 if the console endpoint is not available.</div>`;
+        }
+      } finally {
+        state.mesh.loading = false;
+      }
+      if (reloadAfterSessionReset && $("#flexHubDialog").open) {
+        await loadMeshMessages({reset: true, quiet});
+      }
+    }
+
+    function renderMeshSelectors() {
+      const channelValues = state.mesh.channels.length
+        ? state.mesh.channels
+        : Array.from({length: 8}, (_, index) => ({index, name: `Channel ${index}`}));
+      const channelOptions = channelValues.map((channel) => {
+        const index = channel.index ?? channel.channel ?? channel.id ?? 0;
+        const label = channel.name || channel.label || `Channel ${index}`;
+        return `<option value="${escapeHtml(index)}">${escapeHtml(label)}</option>`;
+      }).join("");
+      const currentFilter = $("#meshChannelFilter").value;
+      const currentSend = $("#meshSendChannel").value;
+      const currentRule = $("#meshRuleChannel").value;
+      $("#meshChannelFilter").innerHTML = `<option value="">All channels</option>${channelOptions}`;
+      $("#meshSendChannel").innerHTML = channelOptions;
+      $("#meshRuleChannel").innerHTML = `<option value="">Any channel</option>${channelOptions}`;
+      if ([...$("#meshChannelFilter").options].some((option) => option.value === currentFilter)) $("#meshChannelFilter").value = currentFilter;
+      if ([...$("#meshSendChannel").options].some((option) => option.value === currentSend)) $("#meshSendChannel").value = currentSend;
+      if ([...$("#meshRuleChannel").options].some((option) => option.value === currentRule)) $("#meshRuleChannel").value = currentRule;
+
+      const nodeOptions = state.mesh.nodes.map((node) => {
+        const id = meshNodeId(node);
+        return id ? `<option value="${escapeHtml(id)}">${escapeHtml(meshNodeName(node))} · ${escapeHtml(id)}</option>` : "";
+      }).join("");
+      const filterValue = $("#meshNodeFilter").value;
+      const recipientValue = $("#meshRecipient").value;
+      const ruleNodeValue = $("#meshRuleNode").value;
+      $("#meshNodeFilter").innerHTML = `<option value="">All nodes</option>${nodeOptions}`;
+      $("#meshRecipient").innerHTML = nodeOptions || '<option value="">No mesh nodes discovered</option>';
+      $("#meshRuleNode").innerHTML = `<option value="">Any node</option>${nodeOptions}`;
+      if ([...$("#meshNodeFilter").options].some((option) => option.value === filterValue)) $("#meshNodeFilter").value = filterValue;
+      if ([...$("#meshRecipient").options].some((option) => option.value === recipientValue)) $("#meshRecipient").value = recipientValue;
+      if ([...$("#meshRuleNode").options].some((option) => option.value === ruleNodeValue)) $("#meshRuleNode").value = ruleNodeValue;
+      updateMeshComposer();
+    }
+
+    async function loadMeshNodes() {
+      try {
+        const response = await api("flexhub/meshtastic/nodes");
+        const payload = await response.json();
+        state.mesh.nodes = Array.isArray(payload) ? payload : payload.nodes || [];
+        state.mesh.channels = Array.isArray(payload.channels) ? payload.channels : [];
+        renderMeshSelectors();
+      } catch (_) {
+        state.mesh.nodes = [];
+        renderMeshSelectors();
+      }
+    }
+
+    function meshSettingsSnapshot() {
+      return {templates: state.mesh.templates, rules: state.mesh.rules};
+    }
+
+    function storeMeshReadState() {
+      try {
+        localStorage.setItem("flexdisplayMeshtasticReadState", JSON.stringify({
+          session_id: state.mesh.lastReadSession || state.mesh.sessionId || "",
+          last_read: Math.max(0, state.mesh.lastRead || 0),
+        }));
+      } catch (_) {}
+    }
+
+    function loadLocalMeshSettings() {
+      try {
+        const value = JSON.parse(localStorage.getItem("flexdisplayMeshtasticSettings") || "{}");
+        state.mesh.templates = Array.isArray(value.templates) ? value.templates : [];
+        state.mesh.rules = Array.isArray(value.rules) ? value.rules : [];
+        const readState = JSON.parse(localStorage.getItem("flexdisplayMeshtasticReadState") || "{}");
+        const lastRead = Number(readState.last_read || 0);
+        state.mesh.lastRead = Number.isFinite(lastRead) ? Math.max(0, lastRead) : 0;
+        state.mesh.lastReadSession = String(readState.session_id || "");
+      } catch (_) {
+        state.mesh.templates = [];
+        state.mesh.rules = [];
+        state.mesh.lastRead = 0;
+        state.mesh.lastReadSession = "";
+      }
+    }
+
+    function storeLocalMeshSettings() {
+      try { localStorage.setItem("flexdisplayMeshtasticSettings", JSON.stringify(meshSettingsSnapshot())); } catch (_) {}
+    }
+
+    async function loadMeshSettings() {
+      loadLocalMeshSettings();
+      renderMeshTemplates();
+      renderMeshRules();
+      try {
+        const response = await api("flexhub/meshtastic/settings");
+        const payload = await response.json();
+        state.mesh.templates = Array.isArray(payload.templates) ? payload.templates : [];
+        state.mesh.rules = Array.isArray(payload.rules) ? payload.rules : [];
+        state.mesh.settingsRemote = true;
+        storeLocalMeshSettings();
+        renderMeshTemplates();
+        renderMeshRules();
+      } catch (_) {
+        state.mesh.settingsRemote = false;
+      }
+    }
+
+    async function saveMeshSettings(successMessage) {
+      storeLocalMeshSettings();
+      try {
+        const response = await api("flexhub/meshtastic/settings", {method: "PUT", body: meshSettingsSnapshot()});
+        const payload = await response.json();
+        state.mesh.templates = Array.isArray(payload.templates) ? payload.templates : state.mesh.templates;
+        state.mesh.rules = Array.isArray(payload.rules) ? payload.rules : state.mesh.rules;
+        state.mesh.settingsRemote = true;
+        storeLocalMeshSettings();
+        renderMeshTemplates();
+        renderMeshRules();
+        toast(successMessage);
+      } catch (error) {
+        state.mesh.settingsRemote = false;
+        toast(`${successMessage} Saved in this browser; Bridge sync is unavailable (${error.message}).`, true);
+      }
+    }
+
+    function renderMeshTemplates() {
+      const list = $("#meshTemplateList");
+      list.innerHTML = state.mesh.templates.length ? state.mesh.templates.map((template) => `
+        <div class="mesh-template">
+          <button type="button" data-mesh-template="${escapeHtml(template.id)}" title="${escapeHtml(template.text)}">${escapeHtml(template.label || template.text)}</button>
+          <button type="button" class="icon danger" data-delete-mesh-template="${escapeHtml(template.id)}" title="Delete saved reply">×</button>
+        </div>`).join("") : '<div class="mesh-unavailable">No saved replies yet. Type a message and save it below.</div>';
+    }
+
+    function newMeshId(prefix) {
+      if (globalThis.crypto?.randomUUID) return `${prefix}-${crypto.randomUUID()}`;
+      return `${prefix}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+    }
+
+    function selectMeshNode(select, nodeId) {
+      if (!nodeId) {
+        select.value = "";
+        return;
+      }
+      if (![...select.options].some((option) => option.value === nodeId)) {
+        const option = document.createElement("option");
+        option.value = nodeId;
+        option.textContent = `${nodeId} · saved node`;
+        select.append(option);
+      }
+      select.value = nodeId;
+    }
+
+    function applyMeshTemplate(template) {
+      $("#meshComposer").value = template.text || "";
+      const destination = String(template.destination || "broadcast");
+      $("#meshDestinationMode").value = destination === "broadcast" ? "broadcast" : "direct";
+      if (destination !== "broadcast") selectMeshNode($("#meshRecipient"), destination);
+      if ([...$("#meshSendChannel").options].some((option) => option.value === String(template.channel ?? 0))) {
+        $("#meshSendChannel").value = String(template.channel ?? 0);
+      }
+      $("#meshRequestAck").checked = Boolean(template.request_ack);
+      updateMeshComposer();
+      $("#meshComposer").focus();
+    }
+
+    async function saveMeshTemplate() {
+      const text = $("#meshComposer").value.trim();
+      const label = $("#meshTemplateLabel").value.trim();
+      const bytes = new TextEncoder().encode(text).length;
+      if (!text || bytes > 220) return toast("Enter a message of no more than 220 UTF-8 bytes first.", true);
+      if (!label) return toast("Give the quick reply a short name.", true);
+      const destination = $("#meshDestinationMode").value === "direct" ? $("#meshRecipient").value : "broadcast";
+      state.mesh.templates.push({
+        id: newMeshId("reply"), label, text, destination,
+        channel: Number($("#meshSendChannel").value || 0),
+        request_ack: $("#meshRequestAck").checked,
+      });
+      $("#meshTemplateLabel").value = "";
+      renderMeshTemplates();
+      await saveMeshSettings("Quick reply saved.");
+    }
+
+    function renderMeshRuleTargets() {
+      const selected = new Set(
+        [...document.querySelectorAll("[data-mesh-rule-target]:checked")].map((node) => node.value)
+      );
+      $("#meshRuleTargets").innerHTML = state.devices.length ? state.devices.map((device) => `
+        <label class="check-row" title="${escapeHtml(device.device_id)}">
+          <input type="checkbox" data-mesh-rule-target value="${escapeHtml(device.device_id)}">
+          ${escapeHtml(device.name || device.device_id)}
+        </label>`).join("") : '<div class="mesh-unavailable">No FlexDisplay devices have checked in yet.</div>';
+      document.querySelectorAll("[data-mesh-rule-target]").forEach((node) => { node.checked = selected.has(node.value); });
+    }
+
+    function renderMeshRules() {
+      $("#meshRuleList").innerHTML = state.mesh.rules.length ? state.mesh.rules.map((rule) => `
+        <div class="mesh-rule">
+          <button type="button" data-edit-mesh-rule="${escapeHtml(rule.id)}" style="min-width:0;text-align:left">
+            <span class="mesh-rule-summary">${rule.enabled === false ? "○" : "●"} ${escapeHtml(rule.label || rule.match_prefix || "Mesh rule")}</span>
+            <span class="mesh-rule-targets">${escapeHtml(rule.match_prefix || "Any message")}${rule.node ? ` from ${escapeHtml(rule.node)}` : ""} → ${escapeHtml((rule.device_ids || []).length)} device(s)${rule.notify ? " · HA notify" : ""}</span>
+          </button>
+          <button type="button" class="icon danger" data-delete-mesh-rule="${escapeHtml(rule.id)}" title="Delete rule">×</button>
+        </div>`).join("") : '<div class="mesh-unavailable">No display rules yet.</div>';
+    }
+
+    function resetMeshRuleEditor() {
+      state.mesh.editingRuleId = "";
+      $("#meshRuleLabel").value = "";
+      $("#meshRulePrefix").value = "ALERT:";
+      $("#meshRuleTitle").value = "";
+      $("#meshRulePriority").value = "normal";
+      $("#meshRuleChannel").value = "";
+      $("#meshRuleNode").value = "";
+      $("#meshRuleEnabled").checked = true;
+      $("#meshRuleCaseSensitive").checked = false;
+      $("#meshRuleStripPrefix").checked = true;
+      $("#meshRuleNotify").checked = false;
+      $("#meshRuleNotifyService").value = "notify.notify";
+      $("#meshRuleNotifyServiceField").hidden = true;
+      document.querySelectorAll("[data-mesh-rule-target]").forEach((node) => { node.checked = false; });
+      $("#saveMeshRule").textContent = "Save rule";
+      $("#cancelMeshRuleEdit").hidden = true;
+    }
+
+    function editMeshRule(rule) {
+      state.mesh.editingRuleId = rule.id;
+      $("#meshRuleLabel").value = rule.label || "";
+      $("#meshRulePrefix").value = rule.match_prefix || "";
+      $("#meshRuleTitle").value = rule.title || "";
+      $("#meshRulePriority").value = rule.priority || "normal";
+      $("#meshRuleChannel").value = rule.channel == null ? "" : String(rule.channel);
+      selectMeshNode($("#meshRuleNode"), rule.node || "");
+      $("#meshRuleEnabled").checked = rule.enabled !== false;
+      $("#meshRuleCaseSensitive").checked = Boolean(rule.case_sensitive);
+      $("#meshRuleStripPrefix").checked = Boolean(rule.strip_prefix);
+      $("#meshRuleNotify").checked = Boolean(rule.notify);
+      $("#meshRuleNotifyService").value = rule.notify_service || "notify.notify";
+      $("#meshRuleNotifyServiceField").hidden = !rule.notify;
+      const targets = new Set(rule.device_ids || []);
+      document.querySelectorAll("[data-mesh-rule-target]").forEach((node) => { node.checked = targets.has(node.value); });
+      $("#saveMeshRule").textContent = "Update rule";
+      $("#cancelMeshRuleEdit").hidden = false;
+    }
+
+    async function saveMeshRule() {
+      const label = $("#meshRuleLabel").value.trim();
+      const prefix = $("#meshRulePrefix").value.trim();
+      const deviceIds = [...document.querySelectorAll("[data-mesh-rule-target]:checked")].map((node) => node.value);
+      if (!label) return toast("Give the display rule a name.", true);
+      if (!prefix) return toast("Enter the message prefix that should trigger this rule.", true);
+      if (!deviceIds.length && !$("#meshRuleNotify").checked) {
+        return toast("Select an X3/X4 target or enable a Home Assistant notification.", true);
+      }
+      const rule = {
+        id: state.mesh.editingRuleId || newMeshId("rule"),
+        label,
+        enabled: $("#meshRuleEnabled").checked,
+        match_prefix: prefix,
+        device_ids: deviceIds,
+        title: $("#meshRuleTitle").value.trim(),
+        priority: $("#meshRulePriority").value,
+        channel: $("#meshRuleChannel").value === "" ? null : Number($("#meshRuleChannel").value),
+        node: $("#meshRuleNode").value,
+        case_sensitive: $("#meshRuleCaseSensitive").checked,
+        strip_prefix: $("#meshRuleStripPrefix").checked,
+        notify: $("#meshRuleNotify").checked,
+        notify_service: $("#meshRuleNotifyService").value.trim() || "notify.notify",
+      };
+      const index = state.mesh.rules.findIndex((item) => item.id === rule.id);
+      if (index >= 0) state.mesh.rules[index] = rule;
+      else state.mesh.rules.push(rule);
+      renderMeshRules();
+      resetMeshRuleEditor();
+      await saveMeshSettings(index >= 0 ? "Display rule updated." : "Display rule saved.");
+    }
+
+    function updateMeshComposer() {
+      const direct = $("#meshDestinationMode").value === "direct";
+      $("#meshRecipientLabel").hidden = !direct;
+      $("#meshRequestAck").disabled = !direct;
+      if (!direct) $("#meshRequestAck").checked = false;
+      const bytes = new TextEncoder().encode($("#meshComposer").value).length;
+      const invalidControl = /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test($("#meshComposer").value);
+      const counter = $("#meshByteCount");
+      counter.textContent = `${bytes} / 220 bytes`;
+      counter.className = `mesh-byte-count ${bytes > 220 ? "over-limit" : bytes >= 190 ? "near-limit" : ""}`;
+      const coolingDown = Date.now() < state.mesh.nextSendAt;
+      $("#sendMeshMessage").disabled = coolingDown || invalidControl || bytes === 0 || bytes > 220 || (direct && !$("#meshRecipient").value);
+    }
+
+    async function sendMeshMessage() {
+      const text = $("#meshComposer").value.trim();
+      const destination = $("#meshDestinationMode").value === "direct" ? $("#meshRecipient").value : "broadcast";
+      const bytes = new TextEncoder().encode(text).length;
+      if (!text || bytes > 220 || !destination || /[\x00-\x08\x0B\x0C\x0E-\x1F]/.test(text)) return updateMeshComposer();
+      const payload = {
+        text,
+        destination,
+        channel: Number($("#meshSendChannel").value || 0),
+        request_ack: $("#meshRequestAck").checked,
+      };
+      const optimisticId = newMeshId("pending");
+      const optimistic = {
+        _local_id: optimisticId,
+        direction: "outbound",
+        sender: "You",
+        destination,
+        channel: payload.channel,
+        text,
+        timestamp: Date.now(),
+        delivery_state: "sending",
+      };
+      state.mesh.messages.push(optimistic);
+      state.mesh.nextSendAt = Date.now() + 1000;
+      state.mesh.renderSignature = "";
+      renderMeshMessages();
+      $("#sendMeshMessage").disabled = true;
+      $("#meshSendStatus").textContent = "Sending through the FlexHub…";
+      try {
+        const response = await api("flexhub/meshtastic/messages", {method: "POST", body: payload});
+        const result = await response.json();
+        state.mesh.messages = state.mesh.messages.filter((message) => message?._local_id !== optimisticId);
+        const returnedMessage = result.message || {
+          ...optimistic,
+          _local_id: undefined,
+          packet_id: result.packet_id ?? result.id,
+          sequence: result.sequence,
+          delivery_state: result.delivery_state || result.status || "queued",
+        };
+        mergeMeshMessages([returnedMessage]);
+        state.mesh.cursor = Math.max(state.mesh.cursor, meshSequence(returnedMessage));
+        state.mesh.renderSignature = "";
+        renderMeshMessages();
+        $("#meshComposer").value = "";
+        $("#meshSendStatus").textContent = `Message ${meshDeliveryState(returnedMessage) || "queued"}.`;
+        toast(destination === "broadcast" ? "Meshtastic broadcast queued." : `Direct message to ${destination} queued.`);
+      } catch (error) {
+        const pending = state.mesh.messages.find((message) => message?._local_id === optimisticId);
+        if (pending) pending.delivery_state = "failed";
+        state.mesh.renderSignature = "";
+        renderMeshMessages();
+        $("#meshSendStatus").textContent = error.message;
+        toast(error.message, true);
+      } finally {
+        updateMeshComposer();
+        setTimeout(updateMeshComposer, Math.max(0, state.mesh.nextSendAt - Date.now()) + 20);
+      }
+    }
+
+    async function runMeshHubAction(action, button) {
+      const labels = {scan: "Receiver scan", deliver: "Queued delivery", retry: "Retry", cancel: "Cancellation"};
+      button.disabled = true;
+      $("#meshActionStatus").textContent = `${labels[action] || action} requested…`;
+      try {
+        const response = await api(`flexhub/actions/${encodeURIComponent(action)}`, {method: "POST", body: {}});
+        const payload = await response.json();
+        $("#meshActionStatus").textContent = payload.detail || payload.message || payload.status || `${labels[action]} accepted.`;
+        toast(`${labels[action]} accepted by the FlexHub.`);
+        await loadFlexHub(true);
+      } catch (error) {
+        $("#meshActionStatus").textContent = error.message;
+        toast(error.message, true);
+      } finally {
+        button.disabled = false;
+      }
+    }
+
+    async function markMeshMessagesRead() {
+      state.mesh.lastRead = Math.max(state.mesh.lastRead, state.mesh.cursor);
+      state.mesh.lastReadSession = state.mesh.sessionId;
+      state.mesh.serverUnread = 0;
+      storeMeshReadState();
+      state.mesh.renderSignature = "";
+      renderMeshMessages();
+      try { await api("flexhub/meshtastic/read", {method: "POST", body: {}}); } catch (_) {}
+    }
+
+    async function startMeshConsole() {
+      clearInterval(state.mesh.pollTimer);
+      state.mesh.pollTimer = null;
+      state.mesh.pollTick = 0;
+      loadLocalMeshSettings();
+      renderMeshRuleTargets();
+      renderMeshTemplates();
+      renderMeshRules();
+      updateMeshComposer();
+      await Promise.all([loadFlexHub(true), loadMeshNodes(), loadMeshSettings()]);
+      await loadMeshMessages({reset: true});
+      state.mesh.pollTimer = setInterval(() => {
+        if (!$("#flexHubDialog").open) return;
+        loadMeshMessages({quiet: true});
+        state.mesh.pollTick += 1;
+        if (state.mesh.pollTick % 5 === 0) loadFlexHub(true, true);
+      }, 3000);
+    }
+
+    function stopMeshConsole() {
+      clearInterval(state.mesh.pollTimer);
+      clearTimeout(state.mesh.searchTimer);
+      state.mesh.pollTimer = null;
+      state.mesh.searchTimer = null;
+      $("#meshLiveBadge").textContent = "Paused";
+      $("#meshLiveBadge").className = "mesh-badge";
     }
 
     async function loadContentPacks() {
@@ -2237,6 +3112,7 @@
         });
         if ([...select.options].some((option) => option.value === previous)) select.value = previous;
       }
+      renderMeshRuleTargets();
     }
 
     async function loadButtonActions(deviceId) {
@@ -3478,10 +4354,79 @@
       const remove = event.target.closest("[data-remove-device]");
       if (remove) return removeFleetDevice(remove.dataset.removeDevice);
     });
-    $("#openFlexHub").addEventListener("click", () => { $("#flexHubDialog").showModal(); loadFlexHub(true); });
-    $("#refreshFlexHub").addEventListener("click", () => loadFlexHub(true));
+    $("#openFlexHub").addEventListener("click", () => { $("#flexHubDialog").showModal(); startMeshConsole(); });
+    $("#refreshFlexHub").addEventListener("click", async () => {
+      await Promise.all([loadFlexHub(true), loadMeshNodes()]);
+      await loadMeshMessages({reset: true});
+    });
     $("#saveFlexHub").addEventListener("click", saveFlexHub);
-    $("#closeFlexHub").addEventListener("click", () => $("#flexHubDialog").close());
+    $("#testFlexHub").addEventListener("click", testFlexHubConnection);
+    $("#openFlexHubSelector").addEventListener("click", () => openFlexHubRoute("selector_url"));
+    $("#openFlexHubConsole").addEventListener("click", () => openFlexHubRoute("console_url"));
+    $("#openMeshtasticConsole").addEventListener("click", () => openFlexHubRoute("meshtastic_url"));
+    $("#closeFlexHub").addEventListener("click", () => { stopMeshConsole(); $("#flexHubDialog").close(); });
+    $("#flexHubDialog").addEventListener("close", stopMeshConsole);
+    $("#refreshMeshMessages").addEventListener("click", () => loadMeshMessages({reset: true}));
+    $("#markMeshRead").addEventListener("click", markMeshMessagesRead);
+    $("#applyMeshFilters").addEventListener("click", () => loadMeshMessages({reset: true}));
+    for (const selector of ["#meshDirectionFilter", "#meshChannelFilter", "#meshNodeFilter"]) {
+      $(selector).addEventListener("change", () => loadMeshMessages({reset: true, quiet: true}));
+    }
+    $("#meshSearch").addEventListener("input", () => {
+      clearTimeout(state.mesh.searchTimer);
+      state.mesh.searchTimer = setTimeout(() => loadMeshMessages({reset: true, quiet: true}), 350);
+    });
+    $("#meshSearch").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        clearTimeout(state.mesh.searchTimer);
+        loadMeshMessages({reset: true});
+      }
+    });
+    $("#meshDestinationMode").addEventListener("change", updateMeshComposer);
+    $("#meshRecipient").addEventListener("change", updateMeshComposer);
+    $("#meshComposer").addEventListener("input", updateMeshComposer);
+    $("#meshComposer").addEventListener("keydown", (event) => {
+      if ((event.metaKey || event.ctrlKey) && event.key === "Enter" && !$("#sendMeshMessage").disabled) sendMeshMessage();
+    });
+    $("#sendMeshMessage").addEventListener("click", sendMeshMessage);
+    $("#saveMeshTemplate").addEventListener("click", saveMeshTemplate);
+    $("#meshTemplateList").addEventListener("click", async (event) => {
+      const remove = event.target.closest("[data-delete-mesh-template]");
+      if (remove) {
+        state.mesh.templates = state.mesh.templates.filter((item) => item.id !== remove.dataset.deleteMeshTemplate);
+        renderMeshTemplates();
+        return saveMeshSettings("Quick reply removed.");
+      }
+      const choice = event.target.closest("[data-mesh-template]");
+      if (choice) {
+        const template = state.mesh.templates.find((item) => item.id === choice.dataset.meshTemplate);
+        if (template) applyMeshTemplate(template);
+      }
+    });
+    $("#saveMeshRule").addEventListener("click", saveMeshRule);
+    $("#cancelMeshRuleEdit").addEventListener("click", resetMeshRuleEditor);
+    $("#meshRuleNotify").addEventListener("change", (event) => {
+      $("#meshRuleNotifyServiceField").hidden = !event.target.checked;
+    });
+    $("#meshRuleList").addEventListener("click", async (event) => {
+      const remove = event.target.closest("[data-delete-mesh-rule]");
+      if (remove) {
+        state.mesh.rules = state.mesh.rules.filter((item) => item.id !== remove.dataset.deleteMeshRule);
+        if (state.mesh.editingRuleId === remove.dataset.deleteMeshRule) resetMeshRuleEditor();
+        renderMeshRules();
+        return saveMeshSettings("Display rule removed.");
+      }
+      const edit = event.target.closest("[data-edit-mesh-rule]");
+      if (edit) {
+        const rule = state.mesh.rules.find((item) => item.id === edit.dataset.editMeshRule);
+        if (rule) editMeshRule(rule);
+      }
+    });
+    $("#flexHubDialog").addEventListener("click", (event) => {
+      const action = event.target.closest("[data-mesh-action]");
+      if (action) runMeshHubAction(action.dataset.meshAction, action);
+    });
     $("#openContentChannels").addEventListener("click", openContentChannels);
     $("#closeContentChannels").addEventListener("click", () => $("#contentChannelDialog").close());
     $("#contentChannelSelect").addEventListener("change", (event) => chooseContentChannel(event.target.value));

@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import io
+import json
+import logging
 import os
 import re
 from contextlib import asynccontextmanager, suppress
@@ -19,20 +21,25 @@ from PIL import Image
 from . import __version__
 from .button_actions import (
     BUTTONS as CONFIGURABLE_BUTTONS,
+)
+from .button_actions import (
     GESTURES,
-    MODE as BUTTON_ACTION_MODE,
     ButtonActionValidationError,
     mappings_payload,
     normalize_mappings,
     resolve_action,
 )
+from .button_actions import (
+    MODE as BUTTON_ACTION_MODE,
+)
 from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
-from .content_pack import ContentPackError, ContentPackStore, MAX_PACK_BYTES
 from .content_channels import (
     ContentChannelStore,
     ContentChannelValidationError,
+    ContentPage,
     parse_channel,
 )
+from .content_pack import MAX_PACK_BYTES, ContentPackError, ContentPackStore
 from .content_renderer import render_content_page
 from .dashboard_assets import (
     MAX_BADGE_PHOTO_BYTES,
@@ -55,6 +62,10 @@ from .loading_screen import (
     LoadingScreenStore,
     LoadingScreenValidationError,
 )
+from .meshtastic_console import (
+    MeshtasticConsoleStore,
+    MeshtasticConsoleValidationError,
+)
 from .mqtt_service import MqttService
 from .photo_frame import (
     MAX_IMAGE_BYTES,
@@ -64,6 +75,8 @@ from .photo_frame import (
 from .renderer import DashboardRenderer
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
+
+LOGGER = logging.getLogger(__name__)
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
 SUPPORTED_COMMANDS = {
@@ -136,6 +149,10 @@ FIRMWARE_PROGRESS_STAGES = {
     "failed",
     "cancelled",
 }
+
+
+def _flexhub_proxy_status(error: FlexHubClientError) -> int:
+    return error.status_code if error.status_code in {409, 413, 429, 503} else 502
 
 
 def _valid_external_usb_evidence(device_id: str, evidence: Any) -> bool:
@@ -221,7 +238,9 @@ def _firmware_maintenance_status(
         "end": f"{end // 60:02d}:{end % 60:02d}",
         "timezone": str(zone),
         "next_start": (
-            None if open_now else next_start.astimezone(UTC).isoformat(timespec="seconds")
+            None
+            if open_now
+            else next_start.astimezone(UTC).isoformat(timespec="seconds")
         ),
         "usb_override": firmware.maintenance_usb_override,
     }
@@ -237,7 +256,9 @@ def _firmware_install_blockers(
     blockers = [error] if error else []
     if error:
         return blockers
-    if _firmware_version(firmware.version) <= _firmware_version(str(record.get("firmware") or "")):
+    if _firmware_version(firmware.version) <= _firmware_version(
+        str(record.get("firmware") or "")
+    ):
         blockers.append("Device already runs this release or a newer release")
     if record.get("sd_ready") is not True:
         blockers.append("Device SD card is not ready")
@@ -251,13 +272,13 @@ def _firmware_install_blockers(
         )
     if record.get("pending_commands") and "install" not in record["pending_commands"]:
         blockers.append("Another command is pending")
-    if record.get("dispatched_commands") and "install" not in record["dispatched_commands"]:
+    if (
+        record.get("dispatched_commands")
+        and "install" not in record["dispatched_commands"]
+    ):
         blockers.append("Waiting for the previous command acknowledgement")
     maintenance = _firmware_maintenance_status(settings)
-    if (
-        not maintenance["open"]
-        and not (maintenance["usb_override"] and usb_connected)
-    ):
+    if not maintenance["open"] and not (maintenance["usb_override"] and usb_connected):
         blockers.append(
             "Outside firmware maintenance window "
             f"{maintenance['start']}-{maintenance['end']} "
@@ -288,13 +309,16 @@ def _firmware_install_blockers(
             and not usb_connected
         ):
             blockers.append("The first canary installation requires USB power")
-    elif firmware.canary_required and firmware.require_usb_for_canary and not usb_connected:
+    elif (
+        firmware.canary_required
+        and firmware.require_usb_for_canary
+        and not usb_connected
+    ):
         blockers.append("The first canary installation requires USB power")
 
-    already_active = (
-        "install" in (record.get("pending_commands") or [])
-        or "install" in (record.get("dispatched_commands") or [])
-    )
+    already_active = "install" in (
+        record.get("pending_commands") or []
+    ) or "install" in (record.get("dispatched_commands") or [])
     if not already_active and store.active_firmware_installs() >= firmware.max_parallel:
         blockers.append(
             f"Maximum of {firmware.max_parallel} concurrent firmware install(s) reached"
@@ -313,7 +337,9 @@ def _firmware_retry_blockers(
     if error:
         return [error]
     if record.get("firmware_update_status") not in {"failed", "cancelled"}:
-        blockers.append("The device has no failed or cancelled firmware update to retry")
+        blockers.append(
+            "The device has no failed or cancelled firmware update to retry"
+        )
     if _firmware_version(settings.firmware.version) <= _firmware_version(
         str(record.get("firmware") or "")
     ):
@@ -368,10 +394,9 @@ def _usb_recovery_blockers(
     if not target:
         blockers.append("No target firmware release is configured")
     rollout = store.firmware_rollout()
-    rollout_still_blocked = (
-        rollout.get("target_version") == target
-        and rollout.get("status") in {"awaiting_canary", "canary_active", "failed"}
-    )
+    rollout_still_blocked = rollout.get("target_version") == target and rollout.get(
+        "status"
+    ) in {"awaiting_canary", "canary_active", "failed"}
     if record.get("firmware_update_status") == "verified" and not rollout_still_blocked:
         blockers.append("This firmware installation is already verified")
     tracked = bool(
@@ -429,10 +454,7 @@ def _advanced_health_metrics(
         if isinstance(rssi, (int, float)):
             wifi_points.append((observed, float(rssi)))
         battery = point.get("battery_percent")
-        if (
-            isinstance(battery, (int, float))
-            and point.get("usb_connected") is not True
-        ):
+        if isinstance(battery, (int, float)) and point.get("usb_connected") is not True:
             battery_points.append((observed, float(battery)))
 
     wifi_recent = wifi_points[-8:]
@@ -509,9 +531,7 @@ def _advanced_health_metrics(
         "battery_drain_percent_per_day": battery_drain_per_day,
         "estimated_battery_runtime_hours": battery_runtime_hours,
         "sd_failure_events": int(record.get("sd_failure_events") or 0),
-        "consecutive_sd_failures": int(
-            record.get("consecutive_sd_failures") or 0
-        ),
+        "consecutive_sd_failures": int(record.get("consecutive_sd_failures") or 0),
         "reset_count": int(record.get("reset_count") or 0),
         "watchdog_reset_count": int(record.get("watchdog_reset_count") or 0),
         "panic_reset_count": int(record.get("panic_reset_count") or 0),
@@ -544,21 +564,35 @@ def _decorate_device(
                 result,
             )
             planned_sleep = _integer(
-                str(result.get("sleep_seconds")) if result.get("sleep_seconds") is not None else None,
+                str(result.get("sleep_seconds"))
+                if result.get("sleep_seconds") is not None
+                else None,
                 0,
                 0,
                 86400,
             )
-            online_window = max(180, int(profile.refresh_interval_seconds * 1.5) + 60, planned_sleep + 300)
+            online_window = max(
+                180,
+                int(profile.refresh_interval_seconds * 1.5) + 60,
+                planned_sleep + 300,
+            )
             online = age <= online_window
             sleep_action = str(result.get("sleep_action") or "")
             if sleep_action == "power_off":
                 power_state = "powered_off"
             elif sleep_action == "scheduled":
-                grace = 0 if result.get("wake_reason") == "scheduled_timer" else profile.manual_wake_grace_seconds
-                power_state = "awake" if age <= grace else ("sleeping" if online else "offline")
+                grace = (
+                    0
+                    if result.get("wake_reason") == "scheduled_timer"
+                    else profile.manual_wake_grace_seconds
+                )
+                power_state = (
+                    "awake" if age <= grace else ("sleeping" if online else "offline")
+                )
             else:
-                power_state = "awake" if age <= 90 else ("sleeping" if online else "offline")
+                power_state = (
+                    "awake" if age <= 90 else ("sleeping" if online else "offline")
+                )
         except ValueError:
             pass
     result["online"] = online
@@ -593,9 +627,7 @@ def _decorate_device(
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
     desired_revision = int(result.get("assigned_policy_revision") or 0)
     reported_revision = int(result.get("reported_policy_revision") or 0)
-    result["assigned_policy_name"] = str(
-        result.get("assigned_policy_name") or "custom"
-    )
+    result["assigned_policy_name"] = str(result.get("assigned_policy_name") or "custom")
     result["policy_revision"] = desired_revision
     result["reported_policy_revision"] = reported_revision
     result["policy_sync_state"] = (
@@ -607,8 +639,8 @@ def _decorate_device(
         if desired_revision == 0
         else "mismatch"
     )
-    result["available_policy_profiles"] = (
-        available_policy_profiles or list(FLEET_POLICY_PRESETS)
+    result["available_policy_profiles"] = available_policy_profiles or list(
+        FLEET_POLICY_PRESETS
     )
     result.update(_advanced_health_metrics(result, profile))
     maintenance = _firmware_maintenance_status(settings)
@@ -624,7 +656,8 @@ def _decorate_device(
     result["update_available"] = bool(
         settings.firmware.version
         and settings.firmware.url
-        and _firmware_version(settings.firmware.version) > _firmware_version(str(result.get("firmware") or ""))
+        and _firmware_version(settings.firmware.version)
+        > _firmware_version(str(result.get("firmware") or ""))
     )
     if store:
         blockers = _firmware_install_blockers(result, settings, store)
@@ -648,10 +681,12 @@ def _decorate_device(
         result["firmware_retry_backoff_seconds"] = (
             settings.firmware.retry_backoff_seconds
         )
-        result["firmware_rollout_reset_ready"] = (
-            rollout.get("target_version") == settings.firmware.version
-            and rollout.get("status") in {"failed", "canary_active"}
-        )
+        result["firmware_rollout_reset_ready"] = rollout.get(
+            "target_version"
+        ) == settings.firmware.version and rollout.get("status") in {
+            "failed",
+            "canary_active",
+        }
         recovery_blockers = _usb_recovery_blockers(result, settings, store)
         result["usb_recovery_verification_blockers"] = recovery_blockers
         result["usb_recovery_verification_ready"] = not recovery_blockers
@@ -678,7 +713,10 @@ def _decorate_device(
         health_issues.append("low_battery")
     if result.get("missed_checkins", 0) >= 2:
         health_issues.append("checkin_overdue")
-    if result.get("wifi_average_rssi") is not None and result["wifi_average_rssi"] <= -80:
+    if (
+        result.get("wifi_average_rssi") is not None
+        and result["wifi_average_rssi"] <= -80
+    ):
         health_issues.append("weak_wifi")
     if result.get("consecutive_sd_failures", 0) >= 2:
         health_issues.append("repeated_sd_failure")
@@ -692,9 +730,7 @@ def _decorate_device(
         health_issues.append("problem_reset")
     if health_issues:
         result["health_state"] = (
-            "offline"
-            if health_issues == ["offline"]
-            else "needs_attention"
+            "offline" if health_issues == ["offline"] else "needs_attention"
         )
     elif power_state in {"sleeping", "powered_off"}:
         result["health_state"] = power_state
@@ -730,7 +766,9 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             60,
             86400,
         ),
-        intelligent_sleep=bool(record.get("assigned_intelligent_sleep", base.intelligent_sleep)),
+        intelligent_sleep=bool(
+            record.get("assigned_intelligent_sleep", base.intelligent_sleep)
+        ),
         active_start=str(record.get("assigned_active_start") or base.active_start),
         active_end=str(record.get("assigned_active_end") or base.active_end),
         timezone=str(record.get("assigned_timezone") or base.timezone),
@@ -766,7 +804,9 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             1,
             12,
         ),
-        stay_awake_on_usb=bool(record.get("assigned_stay_awake_on_usb", base.stay_awake_on_usb)),
+        stay_awake_on_usb=bool(
+            record.get("assigned_stay_awake_on_usb", base.stay_awake_on_usb)
+        ),
         manual_wake_grace_seconds=_integer(
             str(record.get("assigned_manual_wake_grace_seconds"))
             if record.get("assigned_manual_wake_grace_seconds") is not None
@@ -950,17 +990,24 @@ def _sleep_plan(
         return plan("awake", 0, "disabled")
     if usb_connected and profile.stay_awake_on_usb:
         return plan("awake", 0, "usb_connected")
-    if battery_percent is not None and battery_percent <= profile.critical_battery_percent:
+    if (
+        battery_percent is not None
+        and battery_percent <= profile.critical_battery_percent
+    ):
         return plan("power_off", 0, "critical_battery")
 
     start = _clock_minutes(profile.active_start, 6 * 60)
     end = _clock_minutes(profile.active_end, 22 * 60)
     minute = local.hour * 60 + local.minute
     always_active = start == end
-    active = always_active or (start <= minute < end if start < end else minute >= start or minute < end)
+    active = always_active or (
+        start <= minute < end if start < end else minute >= start or minute < end
+    )
 
     if not active:
-        next_start = datetime.combine(local.date(), time(start // 60, start % 60), tzinfo=zone)
+        next_start = datetime.combine(
+            local.date(), time(start // 60, start % 60), tzinfo=zone
+        )
         if next_start <= local:
             next_start += timedelta(days=1)
         seconds = max(60, int((next_start - local).total_seconds()))
@@ -973,11 +1020,15 @@ def _sleep_plan(
         reason = "low_battery"
     if image_unchanged:
         seconds *= profile.unchanged_image_multiplier
-        reason = "unchanged_image" if reason == "refresh_interval" else f"{reason}_unchanged"
+        reason = (
+            "unchanged_image" if reason == "refresh_interval" else f"{reason}_unchanged"
+        )
     return plan("scheduled", max(60, seconds), reason)
 
 
-def _button_events(value: str | None, default_mode: str = BUTTON_ACTION_MODE) -> list[dict[str, Any]]:
+def _button_events(
+    value: str | None, default_mode: str = BUTTON_ACTION_MODE
+) -> list[dict[str, Any]]:
     result: list[dict[str, Any]] = []
     for encoded in (value or "").split(";"):
         parts = encoded.split(",")
@@ -1009,7 +1060,9 @@ def _button_events(value: str | None, default_mode: str = BUTTON_ACTION_MODE) ->
     return result[:16]
 
 
-def _new_button_events(record: dict[str, Any], events: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _new_button_events(
+    record: dict[str, Any], events: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
     known = {
         (
             int(event.get("sequence") or 0),
@@ -1104,7 +1157,9 @@ def _device_id(value: str | None) -> str:
 
 
 def _valid_command(command: str) -> bool:
-    return command in SUPPORTED_COMMANDS or bool(re.fullmatch(r"page-[1-9][0-9]?", command))
+    return command in SUPPORTED_COMMANDS or bool(
+        re.fullmatch(r"page-[1-9][0-9]?", command)
+    )
 
 
 def _auto_rotate_due(record: dict[str, Any], seconds: int) -> bool:
@@ -1114,7 +1169,9 @@ def _auto_rotate_due(record: dict[str, Any], seconds: int) -> bool:
     if not isinstance(changed_at, str):
         return False
     try:
-        return (datetime.now(UTC) - datetime.fromisoformat(changed_at)).total_seconds() >= seconds
+        return (
+            datetime.now(UTC) - datetime.fromisoformat(changed_at)
+        ).total_seconds() >= seconds
     except ValueError:
         return False
 
@@ -1153,6 +1210,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         default_url=settings.flexhub.url,
         default_access_pin=settings.flexhub.access_pin,
         timeout_seconds=settings.flexhub.timeout_seconds,
+    )
+    meshtastic_console = MeshtasticConsoleStore(
+        settings.state_path.with_name("flexdisplay-meshtastic-console.json")
     )
     screen_history = ScreenHistoryStore(
         settings.state_path.with_name("screen-history"),
@@ -1216,7 +1276,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if not record:
                 result["blocked"][device_id] = "Device has not checked in"
                 continue
-            if _firmware_version(str(record.get("firmware") or "")) >= _firmware_version(target):
+            if _firmware_version(
+                str(record.get("firmware") or "")
+            ) >= _firmware_version(target):
                 result["complete"].append(device_id)
                 continue
             if "install" in (record.get("pending_commands") or []) or "install" in (
@@ -1253,9 +1315,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         uncompressed_bytes: int,
     ) -> Response:
         empty_unchanged = (
-            image_unchanged
-            and image_cached
-            and "empty-unchanged" in capabilities
+            image_unchanged and image_cached and "empty-unchanged" in capabilities
         )
         content = b"" if empty_unchanged else image
         transfer_format = (
@@ -1285,9 +1345,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "last_transfer_optimized": bool(
                     empty_unchanged or media_type == "image/png"
                 ),
-                "last_transfer_at": datetime.now(UTC).isoformat(
-                    timespec="seconds"
-                ),
+                "last_transfer_at": datetime.now(UTC).isoformat(timespec="seconds"),
             },
         )
         publish_current(device_id)
@@ -1356,6 +1414,42 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         mqtt.publish_screen(device_id, preview)
 
     def queue_from_mqtt(device_id: str, command: str, payload: str) -> None:
+        if device_id == "flexhub":
+            try:
+                if command == "send-meshtastic":
+                    selected = payload.strip()
+                    if selected.startswith("{"):
+                        parsed = json.loads(selected)
+                        if not isinstance(parsed, dict):
+                            raise ValueError("Meshtastic command must be a JSON object")
+                    else:
+                        parsed = {
+                            "text": selected,
+                            "destination": "broadcast",
+                            "channel": 0,
+                            "request_ack": False,
+                        }
+                    normalized = FlexHubClient.normalize_meshtastic_message(parsed)
+                    flexhub.send_meshtastic_message(normalized)
+                elif command == "clear-meshtastic-unread":
+                    flexhub.mark_meshtastic_read()
+                elif command in {"scan", "deliver", "retry", "cancel"}:
+                    flexhub.action(command)
+                else:
+                    raise ValueError("Unsupported FlexHub MQTT command")
+            except (json.JSONDecodeError, FlexHubClientError, ValueError) as exc:
+                LOGGER.warning("FlexHub MQTT %s failed: %s", command, str(exc)[:180])
+                publisher = getattr(mqtt, "publish_flexhub_message", None)
+                if callable(publisher) and command == "send-meshtastic":
+                    publisher(
+                        {
+                            "text": payload[:220],
+                            "direction": "outbound",
+                            "status": "failed",
+                            "error": str(exc)[:180],
+                        }
+                    )
+            return
         if not DEVICE_ID_PATTERN.fullmatch(device_id):
             return
         current = store.get(device_id)
@@ -1487,15 +1581,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     preset["settings"], device_id, dashboards.names()
                 )
                 assignment["assigned_policy_name"] = payload
-                assignment["assigned_policy_revision"] = (
-                    store.next_policy_revision()
-                )
+                assignment["assigned_policy_revision"] = store.next_policy_revision()
                 store.provision(device_id, assignment)
                 store.queue_command(device_id, "refresh")
             elif command in {"set-name", "set-area"}:
-                field = (
-                    "assigned_name" if command == "set-name" else "assigned_area"
-                )
+                field = "assigned_name" if command == "set-name" else "assigned_area"
                 value = _header_value(payload)
                 if command == "set-name" and not value:
                     value = device_id
@@ -1527,12 +1617,135 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 store.queue_command(device_id, "refresh")
             else:
                 raise ValueError("Unsupported MQTT command")
-            store.record_management_result(device_id, command, True, f"{command}:accepted")
+            store.record_management_result(
+                device_id, command, True, f"{command}:accepted"
+            )
         except (ScreenHistoryError, ValueError) as err:
             store.record_management_result(device_id, command, False, str(err))
         publish_current(device_id)
 
     mqtt = MqttService(settings.mqtt, queue_from_mqtt)
+
+    def process_meshtastic_messages(
+        messages: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        processed: list[dict[str, Any]] = []
+        publisher = getattr(mqtt, "publish_flexhub_message", None)
+        for message in meshtastic_console.claim_messages(messages):
+            if callable(publisher):
+                publisher(message)
+            rule_results: list[dict[str, Any]] = []
+            for rule in meshtastic_console.matching_rules(message):
+                body = str(message.get("text") or "")
+                prefix = str(rule.get("match_prefix") or "")
+                if rule.get("strip_prefix") and body.casefold().startswith(
+                    prefix.casefold()
+                ):
+                    body = body[len(prefix) :].lstrip(" :-")
+                sender = str(
+                    message.get("sender")
+                    or message.get("sender_name")
+                    or message.get("from")
+                    or message.get("from_id")
+                    or "Meshtastic"
+                )[:80]
+                channel = message.get("channel", 0)
+                if rule.get("notify"):
+                    notify_success, notify_detail = ha.call_service(
+                        str(rule.get("notify_service") or "notify.notify"),
+                        data={
+                            "title": str(rule.get("title") or "Meshtastic alert"),
+                            "message": body,
+                        },
+                    )
+                    rule_results.append(
+                        {
+                            "rule_id": rule["id"],
+                            "device_id": "home_assistant_notification",
+                            "success": notify_success,
+                            "detail": notify_detail,
+                        }
+                    )
+                for device_id in rule.get("device_ids") or []:
+                    record = store.get(str(device_id))
+                    if not record:
+                        rule_results.append(
+                            {
+                                "rule_id": rule["id"],
+                                "device_id": device_id,
+                                "success": False,
+                                "detail": "Display has not checked in",
+                            }
+                        )
+                        continue
+                    try:
+                        width = int(record.get("width") or 480)
+                        height = int(record.get("height") or 800)
+                        configured = settings.device(
+                            str(device_id),
+                            width,
+                            height,
+                            str(record.get("model") or ""),
+                        )
+                        profile = _effective_device(configured, record)
+                        image = render_content_page(
+                            ContentPage(
+                                kind="message",
+                                title=str(rule.get("title") or "MESHTASTIC ALERT"),
+                                body=body,
+                                footer=f"{sender} · channel {channel}",
+                                source="Meshtastic",
+                                priority=str(rule.get("priority") or "important"),
+                            ),
+                            device_name=profile.name,
+                            width=width,
+                            height=height,
+                            page_index=0,
+                            page_count=1,
+                        )
+                        captured = screen_history.record(
+                            str(device_id),
+                            image,
+                            media_type="image/png",
+                            metadata={
+                                "source": "meshtastic_rule",
+                                "rule_id": rule["id"],
+                                "message_sequence": message.get("sequence"),
+                                "title": rule.get("title"),
+                            },
+                        )
+                        store.set_screen_override(str(device_id), str(captured["id"]))
+                        store.queue_command(str(device_id), "refresh")
+                        store.record_management_result(
+                            str(device_id),
+                            "meshtastic-rule",
+                            True,
+                            f"Rule {rule['id']} queued message {message.get('sequence', '')}",
+                        )
+                        publish_current(str(device_id))
+                        rule_results.append(
+                            {
+                                "rule_id": rule["id"],
+                                "device_id": device_id,
+                                "success": True,
+                                "screen_id": captured["id"],
+                            }
+                        )
+                    except (OSError, ScreenHistoryError, ValueError) as exc:
+                        store.record_management_result(
+                            str(device_id), "meshtastic-rule", False, str(exc)
+                        )
+                        rule_results.append(
+                            {
+                                "rule_id": rule["id"],
+                                "device_id": device_id,
+                                "success": False,
+                                "detail": str(exc)[:160],
+                            }
+                        )
+            meshtastic_console.record_evaluation(message, rule_results)
+            processed.append({"message": message, "rule_results": rule_results})
+        return processed
 
     async def warm_firmware_mirror() -> None:
         try:
@@ -1553,17 +1766,33 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     async def monitor_flexhub() -> None:
         while True:
-            if flexhub.configured:
-                summary = await asyncio.to_thread(flexhub.poll)
-                mqtt.publish_flexhub(summary)
+            try:
+                if flexhub.configured:
+                    summary = await asyncio.to_thread(flexhub.poll)
+                    mqtt.publish_flexhub(summary)
+                    if summary.get("connected"):
+                        try:
+                            _, observed = await asyncio.to_thread(
+                                flexhub.fetch_messages,
+                                after=0,
+                                limit=FlexHubClient.MESHTASTIC_MESSAGE_CAPACITY,
+                            )
+                        except FlexHubClientError:
+                            observed = []
+                        if observed:
+                            await asyncio.to_thread(
+                                process_meshtastic_messages, observed
+                            )
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                LOGGER.exception("FlexHub monitor iteration failed")
             await asyncio.sleep(settings.flexhub.poll_seconds)
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         del app
-        store.expire_stale_firmware_installs(
-            settings.firmware.stale_install_seconds
-        )
+        store.expire_stale_firmware_installs(settings.firmware.stale_install_seconds)
         for purged_device_id in store.purged_device_ids:
             mqtt.remove_device(purged_device_id)
         mqtt.start()
@@ -1583,7 +1812,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             await flexhub_task
         mqtt.stop()
 
-    app = FastAPI(title="FlexDisplay Home Assistant Bridge", version=__version__, lifespan=lifespan)
+    app = FastAPI(
+        title="FlexDisplay Home Assistant Bridge",
+        version=__version__,
+        lifespan=lifespan,
+    )
     app.state.config = settings
     app.state.store = store
     app.state.dashboards = dashboards
@@ -1593,6 +1826,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.content_channels = content_channels
     app.state.firmware_mirror = firmware_mirror
     app.state.flexhub = flexhub
+    app.state.meshtastic_console = meshtastic_console
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
 
@@ -1669,6 +1903,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def health() -> dict[str, Any]:
+        flexhub_health = flexhub.summary()
         return {
             "status": "ok",
             "version": __version__,
@@ -1681,12 +1916,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "screen_history_limit": settings.screen_history.limit,
             "firmware_mirror": firmware_mirror.status(settings.firmware),
             "firmware_maintenance": _firmware_maintenance_status(settings),
-            "flexhub": flexhub.summary(),
+            "flexhub": {
+                "configured": bool(flexhub_health.get("configured")),
+                "connected": bool(flexhub_health.get("connected")),
+                "last_seen": flexhub_health.get("last_seen") or "",
+                "error": flexhub_health.get("error") or "",
+            },
         }
 
     @app.get("/api/v1/flexhub")
-    def flexhub_status(refresh: bool = False) -> dict[str, Any]:
-        summary = flexhub.poll() if refresh and flexhub.configured else flexhub.summary()
+    def flexhub_status(request: Request, refresh: bool = False) -> dict[str, Any]:
+        authorize(request)
+        summary = (
+            flexhub.poll() if refresh and flexhub.configured else flexhub.summary()
+        )
         mqtt.publish_flexhub(summary)
         return summary
 
@@ -1710,6 +1953,102 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         summary = flexhub.poll()
         mqtt.publish_flexhub(summary)
         return summary
+
+    @app.get("/api/v1/flexhub/meshtastic/messages")
+    def flexhub_meshtastic_messages(
+        request: Request,
+        after: int = 0,
+        limit: int = 30,
+        session_id: int | None = None,
+        query: str = "",
+        direction: str = "",
+        channel: int | None = None,
+        node: str = "",
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            result, observed = flexhub.fetch_messages(
+                after=after,
+                limit=limit,
+                session_id=session_id,
+                query=query,
+                direction=direction,
+                channel=channel,
+                node=node,
+            )
+        except FlexHubClientError as err:
+            status = (
+                400 if str(err).startswith("Meshtastic") else _flexhub_proxy_status(err)
+            )
+            raise HTTPException(status_code=status, detail=str(err)) from err
+        processed = process_meshtastic_messages(observed)
+        return {
+            **result,
+            "bridge": {
+                "new_messages": len(processed),
+                "console": flexhub.summary()["meshtastic_console"],
+            },
+        }
+
+    @app.get("/api/v1/flexhub/meshtastic/nodes")
+    def flexhub_meshtastic_nodes(request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            return flexhub.meshtastic_nodes()
+        except FlexHubClientError as err:
+            raise HTTPException(
+                status_code=_flexhub_proxy_status(err), detail=str(err)
+            ) from err
+
+    @app.post("/api/v1/flexhub/meshtastic/messages")
+    def send_flexhub_meshtastic_message(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            normalized = FlexHubClient.normalize_meshtastic_message(payload)
+        except FlexHubClientError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        try:
+            result = flexhub.send_meshtastic_message(normalized)
+        except FlexHubClientError as err:
+            raise HTTPException(
+                status_code=_flexhub_proxy_status(err), detail=str(err)
+            ) from err
+        return result
+
+    @app.post("/api/v1/flexhub/actions/{action}")
+    def run_flexhub_action(action: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        try:
+            return flexhub.action(action)
+        except FlexHubClientError as err:
+            status = (
+                400
+                if str(err) == "Unsupported FlexHub action"
+                else _flexhub_proxy_status(err)
+            )
+            raise HTTPException(status_code=status, detail=str(err)) from err
+
+    @app.get("/api/v1/flexhub/meshtastic/settings")
+    def flexhub_meshtastic_settings(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return meshtastic_console.payload()
+
+    @app.put("/api/v1/flexhub/meshtastic/settings")
+    def save_flexhub_meshtastic_settings(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        try:
+            return meshtastic_console.replace(payload)
+        except MeshtasticConsoleValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+
+    @app.post("/api/v1/flexhub/meshtastic/read")
+    def mark_flexhub_meshtastic_read(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return {"meshtastic_console": flexhub.mark_meshtastic_read()}
 
     @app.get("/api/v1/firmware/current.bin", name="firmware_binary")
     def firmware_binary() -> FileResponse:
@@ -1743,9 +2082,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     @app.get("/api/v1/devices")
     def devices() -> dict[str, Any]:
-        store.expire_stale_firmware_installs(
-            settings.firmware.stale_install_seconds
-        )
+        store.expire_stale_firmware_installs(settings.firmware.stale_install_seconds)
         return {
             "devices": [
                 {
@@ -1954,7 +2291,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         }
 
     def authorize(request: Request) -> None:
-        if settings.api_key and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key:
+        if (
+            settings.api_key
+            and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key
+        ):
             raise HTTPException(status_code=401, detail="Bridge API key required")
 
     @app.get("/studio", include_in_schema=False)
@@ -2211,9 +2551,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if target != "default":
             _device_id(target)
         model = str(payload.get("model") or "X4").upper()
-        default_width, default_height = (
-            (528, 792) if model == "X3" else (480, 800)
-        )
+        default_width, default_height = (528, 792) if model == "X3" else (480, 800)
         width = _integer(
             str(payload.get("width") or default_width),
             default_width,
@@ -2226,9 +2564,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             240,
             1600,
         )
-        selected_device_id = (
-            str(payload.get("device_id") or "")
-            or (target if target != "default" else f"{model}-PREVIEW")
+        selected_device_id = str(payload.get("device_id") or "") or (
+            target if target != "default" else f"{model}-PREVIEW"
         )
         current = store.get(selected_device_id) or {
             "device_id": selected_device_id,
@@ -2279,8 +2616,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         selected = _device_id(device_id)
         current = store.get(selected) or {}
         model = str(
-            current.get("model")
-            or ("X4" if selected.startswith("X4-") else "X3")
+            current.get("model") or ("X4" if selected.startswith("X4-") else "X3")
         )
         default_width, default_height = (
             (480, 800) if "X4" in model.upper() else (528, 792)
@@ -2373,7 +2709,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_rotation: int | None = Header(default=0),
     ) -> dict[str, Any]:
         authorize(request)
-        content_length = _integer(request.headers.get("Content-Length"), 0, 0, MAX_IMAGE_BYTES + 1)
+        content_length = _integer(
+            request.headers.get("Content-Length"), 0, 0, MAX_IMAGE_BYTES + 1
+        )
         if content_length > MAX_IMAGE_BYTES:
             raise HTTPException(status_code=413, detail="Images may not exceed 8 MB")
         content = await request.body()
@@ -2477,7 +2815,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ) -> Response:
         authorize(request)
         selected_model = model.upper()
-        default_width, default_height = (528, 792) if selected_model == "X3" else (480, 800)
+        default_width, default_height = (
+            (528, 792) if selected_model == "X3" else (480, 800)
+        )
         try:
             content = photo_frames.render(
                 album_id,
@@ -2500,7 +2840,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         selected = _device_id(device_id)
         try:
-            assignment = photo_frames.assign(selected, str(payload.get("album_id") or "default"))
+            assignment = photo_frames.assign(
+                selected, str(payload.get("album_id") or "default")
+            )
         except KeyError as err:
             raise HTTPException(status_code=404, detail="Album not found") from err
         store.provision(selected, {"assigned_mode": "photo_frame"})
@@ -2542,7 +2884,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(err)) from err
         refreshed: list[str] = []
         for record in store.all():
-            if str(record.get("assigned_profile") or settings.default_profile) == profile_name:
+            if (
+                str(record.get("assigned_profile") or settings.default_profile)
+                == profile_name
+            ):
                 store.queue_command(str(record["device_id"]), "refresh")
                 refreshed.append(str(record["device_id"]))
         return {"profile": profile_payload(profile), "refresh_queued": refreshed}
@@ -2553,7 +2898,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         assigned = [
             str(record["device_id"])
             for record in store.all()
-            if str(record.get("assigned_profile") or settings.default_profile) == profile_name
+            if str(record.get("assigned_profile") or settings.default_profile)
+            == profile_name
         ]
         if assigned:
             raise HTTPException(
@@ -2573,15 +2919,21 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         raw_profile = payload.get("profile")
         if not isinstance(raw_profile, dict):
-            raise HTTPException(status_code=400, detail="A dashboard profile is required")
+            raise HTTPException(
+                status_code=400, detail="A dashboard profile is required"
+            )
         try:
             draft = parse_profile("preview", raw_profile)
         except DashboardValidationError as err:
             raise HTTPException(status_code=400, detail=str(err)) from err
         model = str(payload.get("model") or "X4").upper()
-        default_width, default_height = ((528, 792) if model == "X3" else (480, 800))
-        width = _integer(str(payload.get("width") or default_width), default_width, 240, 1200)
-        height = _integer(str(payload.get("height") or default_height), default_height, 240, 1600)
+        default_width, default_height = (528, 792) if model == "X3" else (480, 800)
+        width = _integer(
+            str(payload.get("width") or default_width), default_width, 240, 1200
+        )
+        height = _integer(
+            str(payload.get("height") or default_height), default_height, 240, 1600
+        )
         device_id = str(payload.get("device_id") or f"{model}-PREVIEW")
         record = store.get(device_id) or {
             "device_id": device_id,
@@ -2617,12 +2969,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             page_count=len(pages),
             ha_error=ha_error,
             layout=page.layout,
-            button_actions=mappings_payload(
-                record.get("button_action_mappings")
-            ),
-            show_button_indicators=bool(
-                record.get("button_action_indicators")
-            ),
+            button_actions=mappings_payload(record.get("button_action_mappings")),
+            show_button_indicators=bool(record.get("button_action_indicators")),
         )
         return Response(
             content=image,
@@ -2728,7 +3076,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=409, detail="Device identity mismatch")
         stage = str(x_flexdisplay_firmware_stage or "").strip().lower()
         if stage not in FIRMWARE_PROGRESS_STAGES:
-            raise HTTPException(status_code=400, detail="Unsupported firmware progress stage")
+            raise HTTPException(
+                status_code=400, detail="Unsupported firmware progress stage"
+            )
         record, cancel_requested = store.record_firmware_progress(
             selected,
             str(x_flexdisplay_command_id or ""),
@@ -2768,7 +3118,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         target = str(payload.get("expected_target_version") or "")
         command_id = str(payload.get("expected_command_id") or "")
         if target != settings.firmware.version:
-            raise HTTPException(status_code=409, detail="Expected target does not match configuration")
+            raise HTTPException(
+                status_code=409, detail="Expected target does not match configuration"
+            )
         try:
             record = store.verify_usb_recovery(
                 selected,
@@ -2777,7 +3129,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 canary_required=settings.firmware.canary_required,
                 max_checkin_age_seconds=USB_RECOVERY_MAX_CHECKIN_AGE_SECONDS,
                 external_usb_evidence=(
-                    external_usb_evidence if isinstance(external_usb_evidence, dict) else None
+                    external_usb_evidence
+                    if isinstance(external_usb_evidence, dict)
+                    else None
                 ),
             )
         except ValueError as err:
@@ -2790,14 +3144,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         }
 
     @app.put("/api/v1/devices/{device_id}/provision")
-    def provision_device(device_id: str, payload: dict[str, Any], request: Request) -> dict[str, Any]:
+    def provision_device(
+        device_id: str, payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
-        assignment = _provisioning_assignment(
-            payload, selected, dashboards.names()
-        )
+        assignment = _provisioning_assignment(payload, selected, dashboards.names())
         if not assignment:
-            raise HTTPException(status_code=400, detail="No provisioning fields supplied")
+            raise HTTPException(
+                status_code=400, detail="No provisioning fields supplied"
+            )
         assignment["assigned_policy_name"] = "custom"
         assignment["assigned_policy_revision"] = store.next_policy_revision()
         record = store.provision(selected, assignment)
@@ -2859,12 +3215,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     record.get("policy_sync_state") == "pending" for record in records
                 ),
                 "x3": sum(
-                    "X3" in str(record.get("model") or "").upper()
-                    for record in records
+                    "X3" in str(record.get("model") or "").upper() for record in records
                 ),
                 "x4": sum(
-                    "X4" in str(record.get("model") or "").upper()
-                    for record in records
+                    "X4" in str(record.get("model") or "").upper() for record in records
                 ),
             },
             "devices": [
@@ -2879,23 +3233,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "health_state": record.get("health_state"),
                     "policy_name": record.get("assigned_policy_name"),
                     "policy_revision": record.get("policy_revision"),
-                    "reported_policy_revision": record.get(
-                        "reported_policy_revision"
-                    ),
+                    "reported_policy_revision": record.get("reported_policy_revision"),
                     "policy_sync_state": record.get("policy_sync_state"),
                     "last_seen": record.get("last_seen"),
-                    "provisioning_updated_at": record.get(
-                        "provisioning_updated_at"
-                    ),
+                    "provisioning_updated_at": record.get("provisioning_updated_at"),
                     "update_available": record.get("update_available"),
                     "firmware_install_ready": record.get("firmware_install_ready"),
-                    "firmware_install_blockers": record.get("firmware_install_blockers") or [],
-                    "firmware_update_status": record.get("firmware_update_status") or "idle",
-                    "firmware_update_stage": record.get("firmware_update_stage") or "idle",
-                    "firmware_update_percent": record.get("firmware_update_percent") or 0,
+                    "firmware_install_blockers": record.get("firmware_install_blockers")
+                    or [],
+                    "firmware_update_status": record.get("firmware_update_status")
+                    or "idle",
+                    "firmware_update_stage": record.get("firmware_update_stage")
+                    or "idle",
+                    "firmware_update_percent": record.get("firmware_update_percent")
+                    or 0,
                     "firmware_update_error": record.get("firmware_update_error"),
                     "firmware_retry_ready": record.get("firmware_retry_ready"),
-                    "firmware_retry_blockers": record.get("firmware_retry_blockers") or [],
+                    "firmware_retry_blockers": record.get("firmware_retry_blockers")
+                    or [],
                     "usb_connected": record.get("usb_connected"),
                     "sd_ready": record.get("sd_ready"),
                 }
@@ -2914,36 +3269,50 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,31}", selected):
             raise HTTPException(status_code=400, detail="Invalid policy profile ID")
         if selected in FLEET_POLICY_PRESETS:
-            raise HTTPException(status_code=409, detail="Built-in profiles cannot be replaced")
+            raise HTTPException(
+                status_code=409, detail="Built-in profiles cannot be replaced"
+            )
         raw_settings = payload.get("settings")
         if not isinstance(raw_settings, dict):
             raise HTTPException(status_code=400, detail="Policy settings are required")
         allowed = {
-            "live_mode", "intelligent_sleep", "stay_awake_on_usb",
-            "refresh_interval_seconds", "manual_sleep_seconds",
-            "manual_wake_grace_seconds", "critical_battery_percent",
-            "low_battery_percent", "low_battery_multiplier",
-            "unchanged_image_multiplier", "active_start", "active_end", "timezone",
+            "live_mode",
+            "intelligent_sleep",
+            "stay_awake_on_usb",
+            "refresh_interval_seconds",
+            "manual_sleep_seconds",
+            "manual_wake_grace_seconds",
+            "critical_battery_percent",
+            "low_battery_percent",
+            "low_battery_multiplier",
+            "unchanged_image_multiplier",
+            "active_start",
+            "active_end",
+            "timezone",
         }
         unknown = set(raw_settings) - allowed
         if unknown:
             raise HTTPException(
                 status_code=400,
-                detail=f"Unsupported policy setting: {sorted(unknown)[0]}",
+                detail=f"Unsupported policy setting: {min(unknown)}",
             )
         for field in ("live_mode", "intelligent_sleep", "stay_awake_on_usb"):
             if field in raw_settings and not isinstance(raw_settings[field], bool):
-                raise HTTPException(status_code=400, detail=f"{field} must be true or false")
+                raise HTTPException(
+                    status_code=400, detail=f"{field} must be true or false"
+                )
         assignment = _provisioning_assignment(
             raw_settings,
             "POLICY-VALIDATION",
             dashboards.names(),
         )
         normalised = {
-            key.removeprefix("assigned_"): value
-            for key, value in assignment.items()
+            key.removeprefix("assigned_"): value for key, value in assignment.items()
         }
-        label = _header_value(payload.get("label"))[:48] or selected.replace("_", " ").title()
+        label = (
+            _header_value(payload.get("label"))[:48]
+            or selected.replace("_", " ").title()
+        )
         description = _header_value(payload.get("description"))[:160]
         profile = store.put_custom_policy_profile(
             selected,
@@ -2952,19 +3321,21 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return {"saved": True, "profile": {**profile, "built_in": False}}
 
     @app.delete("/api/v1/fleet/policies/{profile_id}")
-    def delete_fleet_policy_profile(profile_id: str, request: Request) -> dict[str, Any]:
+    def delete_fleet_policy_profile(
+        profile_id: str, request: Request
+    ) -> dict[str, Any]:
         authorize(request)
         selected = profile_id.strip().lower()
         if selected in FLEET_POLICY_PRESETS:
-            raise HTTPException(status_code=409, detail="Built-in profiles cannot be deleted")
+            raise HTTPException(
+                status_code=409, detail="Built-in profiles cannot be deleted"
+            )
         if not store.delete_custom_policy_profile(selected):
             raise HTTPException(status_code=404, detail="Policy profile not found")
         return {"deleted": selected}
 
     @app.put("/api/v1/fleet/policy")
-    def apply_fleet_policy(
-        payload: dict[str, Any], request: Request
-    ) -> dict[str, Any]:
+    def apply_fleet_policy(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         authorize(request)
         policy_id = str(payload.get("profile") or "")
         preset = fleet_policy_profiles().get(policy_id)
@@ -2980,12 +3351,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
         overrides = payload.get("overrides") or {}
         if not isinstance(overrides, dict):
-            raise HTTPException(status_code=400, detail="Policy overrides must be an object")
+            raise HTTPException(
+                status_code=400, detail="Policy overrides must be an object"
+            )
         merged = {**preset["settings"], **overrides}
         selected_mode = str(payload.get("mode") or "").strip().lower()
         if selected_mode and selected_mode != "unchanged":
             if selected_mode not in SUPPORTED_MODES:
-                raise HTTPException(status_code=400, detail="Unsupported default application")
+                raise HTTPException(
+                    status_code=400, detail="Unsupported default application"
+                )
             merged["mode"] = selected_mode
         dashboard_profile = str(payload.get("dashboard_profile") or "").strip()
         if dashboard_profile:
@@ -3001,9 +3376,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         targets: list[str] = []
         for record in scoped_records:
             device_id = str(record.get("device_id") or "")
-            assignment = _provisioning_assignment(
-                merged, device_id, dashboards.names()
-            )
+            assignment = _provisioning_assignment(merged, device_id, dashboards.names())
             assignment["assigned_policy_name"] = policy_id
             assignment["assigned_policy_revision"] = revision
             store.provision(device_id, assignment)
@@ -3014,7 +3387,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             targets.append(device_id)
 
         if not targets:
-            raise HTTPException(status_code=404, detail="No devices matched the fleet scope")
+            raise HTTPException(
+                status_code=404, detail="No devices matched the fleet scope"
+            )
         return {
             "accepted": True,
             "profile": policy_id,
@@ -3107,7 +3482,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         try:
             content_channels.delete(channel_id)
         except KeyError as err:
-            raise HTTPException(status_code=404, detail="Content channel not found") from err
+            raise HTTPException(
+                status_code=404, detail="Content channel not found"
+            ) from err
         return {"deleted": channel_id}
 
     @app.put("/api/v1/content-channels/devices/{device_id}")
@@ -3137,7 +3514,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         model = str(payload.get("model") or "X4").upper()
         width = _integer(payload.get("width"), 480 if "4" in model else 528, 240, 1200)
-        height = _integer(payload.get("height"), 800 if "4" in model else 792, 240, 1600)
+        height = _integer(
+            payload.get("height"), 800 if "4" in model else 792, 240, 1600
+        )
         try:
             draft = parse_channel("preview", payload.get("channel") or {})
             pages = content_channels.pages_for_channel(
@@ -3147,7 +3526,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(err)) from err
         selected = next((page for page in pages if page.kind != "dashboard"), None)
         if selected is None:
-            raise HTTPException(status_code=400, detail="Add a Message, Quote, or News item to preview")
+            raise HTTPException(
+                status_code=400, detail="Add a Message, Quote, or News item to preview"
+            )
         return Response(
             content=render_content_page(
                 selected,
@@ -3201,7 +3582,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail=str(err)) from err
         for device_id in device_ids:
             store.queue_command(device_id, "refresh")
-        return {"version": version, "device_ids": device_ids, "assignments": assignments}
+        return {
+            "version": version,
+            "device_ids": device_ids,
+            "assignments": assignments,
+        }
 
     @app.get(
         "/api/v1/content-packs/{version}/manifest.json",
@@ -3284,9 +3669,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "rssi": _number(x_flexdisplay_rssi),
             "mode": x_flexdisplay_mode or "home_assistant",
             "usb_connected": _boolean(x_flexdisplay_usb_connected),
-            "uptime_seconds": _optional_integer(x_flexdisplay_uptime_seconds, 0, 31_536_000),
+            "uptime_seconds": _optional_integer(
+                x_flexdisplay_uptime_seconds, 0, 31_536_000
+            ),
             "free_heap": _optional_integer(x_flexdisplay_free_heap, 0, 1_000_000),
-            "min_free_heap": _optional_integer(x_flexdisplay_min_free_heap, 0, 1_000_000),
+            "min_free_heap": _optional_integer(
+                x_flexdisplay_min_free_heap, 0, 1_000_000
+            ),
             "sd_ready": _boolean(x_flexdisplay_sd_ready),
             "wake_reason": x_flexdisplay_wake_reason or None,
             "reset_reason": x_flexdisplay_reset_reason or None,
@@ -3394,7 +3783,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         override_id = str(record.get("screen_override_id") or "")
         if override_id:
             try:
-                override_path, override_item = screen_history.get(device_id, override_id)
+                override_path, override_item = screen_history.get(
+                    device_id, override_id
+                )
                 image = override_path.read_bytes()
             except (OSError, ScreenHistoryError) as err:
                 store.clear_screen_override(device_id, override_id)
@@ -3406,9 +3797,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
             else:
                 store.clear_screen_override(device_id, override_id)
-                source_media_type = str(
-                    override_item.get("media_type") or "image/png"
-                )
+                source_media_type = str(override_item.get("media_type") or "image/png")
                 publish_screen_preview(device_id, image, source_media_type)
                 image, delivery_media_type = _device_screen_payload(
                     image,
@@ -3417,8 +3806,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
                 digest = hashlib.sha256(image).hexdigest()
                 image_unchanged = bool(
-                    x_flexdisplay_image_sha256
-                    and x_flexdisplay_image_sha256 == digest
+                    x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest
                 )
                 sleep_plan = _sleep_plan(
                     profile,
@@ -3465,9 +3853,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Device-Name"] = _header_value(
                         profile.name
                     )
-                    response.headers["X-FlexDisplay-Area"] = _header_value(
-                        profile.area
-                    )
+                    response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)
                     response.headers["X-FlexDisplay-Profile"] = _header_value(
                         profile.profile
                     )
@@ -3528,7 +3914,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             elif "refresh" in commands or "full-refresh" in commands:
                 direction = "current"
             for event in new_button_events:
-                if event.get("mode") != "photo_frame" or event.get("gesture") != "short":
+                if (
+                    event.get("mode") != "photo_frame"
+                    or event.get("gesture") != "short"
+                ):
                     continue
                 if event.get("button") in {"right", "down"}:
                     direction = "next"
@@ -3539,9 +3928,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 if "png-photo" in capabilities and not _is_x3_model(model)
                 else "BMP"
             )
-            photo_media_type = (
-                "image/png" if photo_format == "PNG" else "image/bmp"
-            )
+            photo_media_type = "image/png" if photo_format == "PNG" else "image/bmp"
             try:
                 image, photo_headers = photo_frames.next_for_device(
                     device_id,
@@ -3595,7 +3982,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "sleep_seconds": profile.manual_sleep_seconds,
                     "sleep_reason": "remote_command",
                     "next_wake_at": (
-                        datetime.now(UTC) + timedelta(seconds=profile.manual_sleep_seconds)
+                        datetime.now(UTC)
+                        + timedelta(seconds=profile.manual_sleep_seconds)
                     ).isoformat(timespec="seconds"),
                 }
             record = store.touch(
@@ -3630,9 +4018,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     device_id,
                     {
                         "last_screen_history_id": captured["id"],
-                        "screen_history_count": len(
-                            screen_history.list(device_id)
-                        ),
+                        "screen_history_count": len(screen_history.list(device_id)),
                     },
                 )
             publish_screen_preview(device_id, image, photo_media_type)
@@ -3645,16 +4031,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "true" if image_unchanged else "false"
             )
             response.headers["X-FlexDisplay-Sleep-Action"] = sleep_plan["sleep_action"]
-            response.headers["X-FlexDisplay-Sleep-Seconds"] = str(sleep_plan["sleep_seconds"])
+            response.headers["X-FlexDisplay-Sleep-Seconds"] = str(
+                sleep_plan["sleep_seconds"]
+            )
             response.headers["X-FlexDisplay-Sleep-Reason"] = sleep_plan["sleep_reason"]
             response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
                 profile.manual_wake_grace_seconds
             )
             if settings.provisioning.enabled:
                 response.headers["X-FlexDisplay-Provisioned"] = "true"
-                response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)
+                response.headers["X-FlexDisplay-Device-Name"] = _header_value(
+                    profile.name
+                )
                 response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)
-                response.headers["X-FlexDisplay-Profile"] = _header_value(profile.profile)
+                response.headers["X-FlexDisplay-Profile"] = _header_value(
+                    profile.profile
+                )
                 response.headers["X-FlexDisplay-Assigned-Mode"] = "photo_frame"
                 response.headers["X-FlexDisplay-Auto-Start"] = (
                     "true" if profile.auto_start else "false"
@@ -3673,13 +4065,19 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "true" if command_acknowledged else "false"
                 )
             if settings.firmware.version:
-                response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
-            if "install" in commands:
-                response.headers["X-FlexDisplay-Firmware-URL"] = (
-                    firmware_delivery_url(request)
+                response.headers["X-FlexDisplay-Latest-Firmware"] = (
+                    settings.firmware.version
                 )
-                response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
-                response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
+            if "install" in commands:
+                response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
+                    request
+                )
+                response.headers["X-FlexDisplay-Firmware-SHA256"] = (
+                    settings.firmware.sha256
+                )
+                response.headers["X-FlexDisplay-Firmware-Size"] = str(
+                    settings.firmware.size
+                )
                 response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                     settings.firmware.minimum_battery_percent
                 )
@@ -3729,8 +4127,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
         playlist_count = len(mixed_pages) if mixed_pages else len(pages)
         page_index = int(record.get("dashboard_page_index") or 0) % playlist_count
-        selection_changed = not mixed_pages and bool(record.get("dashboard_selection")) and (
-            record.get("dashboard_selection") != page_selection
+        selection_changed = (
+            not mixed_pages
+            and bool(record.get("dashboard_selection"))
+            and (record.get("dashboard_selection") != page_selection)
         )
         quick_action = str(x_flexdisplay_quick_action or "").strip().lower()
         if quick_action not in {
@@ -3779,13 +4179,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         page_index = (page_index - 1) % playlist_count
                     elif navigation == "overview":
                         page_index = 0
-            elif dashboard_profile and _auto_rotate_due(record, dashboard_profile.auto_rotate_seconds):
+            elif dashboard_profile and _auto_rotate_due(
+                record, dashboard_profile.auto_rotate_seconds
+            ):
                 page_index = (page_index + 1) % playlist_count
         content_page = mixed_pages[page_index] if mixed_pages else None
         page = (
             pages[content_page.dashboard_index]
             if content_page is not None and content_page.kind == "dashboard"
-            else pages[page_index] if content_page is None else None
+            else pages[page_index]
+            if content_page is None
+            else None
         )
         page_title = page.title if page is not None else content_page.title
         page_kind = "dashboard" if page is not None else content_page.kind
@@ -3794,15 +4198,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if mixed_pages
             else [candidate.title for candidate in pages]
         )
-        record = store.set_dashboard_page(
-            device_id,
-            page_index,
-            playlist_count,
-            page_title,
-            playlist_titles,
-            profile.profile,
-            "content_channel" if mixed_pages else page_selection,
-        ) or record
+        record = (
+            store.set_dashboard_page(
+                device_id,
+                page_index,
+                playlist_count,
+                page_title,
+                playlist_titles,
+                profile.profile,
+                "content_channel" if mixed_pages else page_selection,
+            )
+            or record
+        )
         if page is not None:
             image = renderer.render(
                 title=page.title,
@@ -3814,12 +4221,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 page_count=playlist_count,
                 ha_error=ha_error,
                 layout=page.layout,
-                button_actions=mappings_payload(
-                    record.get("button_action_mappings")
-                ),
-                show_button_indicators=bool(
-                    record.get("button_action_indicators")
-                ),
+                button_actions=mappings_payload(record.get("button_action_mappings")),
+                show_button_indicators=bool(record.get("button_action_indicators")),
             )
         else:
             image = render_content_page(
@@ -3837,7 +4240,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             model,
         )
         digest = hashlib.sha256(image).hexdigest()
-        image_unchanged = bool(x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest)
+        image_unchanged = bool(
+            x_flexdisplay_image_sha256 and x_flexdisplay_image_sha256 == digest
+        )
         sleep_plan = _sleep_plan(
             profile,
             _number(x_flexdisplay_battery_percent),
@@ -3890,7 +4295,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "title": page_title,
                     "page_index": page_index,
                     "page_count": playlist_count,
-                    "page_selection": "content_channel" if mixed_pages else page_selection,
+                    "page_selection": "content_channel"
+                    if mixed_pages
+                    else page_selection,
                     "content_type": page_kind,
                 },
             )
@@ -3911,21 +4318,35 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         del state
         publish_current(device_id)
         response.headers["ETag"] = f'"{digest}"'
-        response.headers["X-FlexDisplay-Refresh-Interval"] = str(profile.refresh_interval_seconds)
+        response.headers["X-FlexDisplay-Refresh-Interval"] = str(
+            profile.refresh_interval_seconds
+        )
         response.headers["X-FlexDisplay-Image-SHA256"] = digest
-        response.headers["X-FlexDisplay-Image-Unchanged"] = "true" if image_unchanged else "false"
+        response.headers["X-FlexDisplay-Image-Unchanged"] = (
+            "true" if image_unchanged else "false"
+        )
         response.headers["X-FlexDisplay-Sleep-Action"] = sleep_plan["sleep_action"]
-        response.headers["X-FlexDisplay-Sleep-Seconds"] = str(sleep_plan["sleep_seconds"])
+        response.headers["X-FlexDisplay-Sleep-Seconds"] = str(
+            sleep_plan["sleep_seconds"]
+        )
         response.headers["X-FlexDisplay-Sleep-Reason"] = sleep_plan["sleep_reason"]
-        response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(profile.manual_wake_grace_seconds)
+        response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
+            profile.manual_wake_grace_seconds
+        )
         if settings.provisioning.enabled:
             response.headers["X-FlexDisplay-Provisioned"] = "true"
             response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)
             response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)
             response.headers["X-FlexDisplay-Profile"] = _header_value(profile.profile)
-            response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(profile.mode)
-            response.headers["X-FlexDisplay-Auto-Start"] = "true" if profile.auto_start else "false"
-            response.headers["X-FlexDisplay-Live-Mode"] = "true" if profile.live_mode else "false"
+            response.headers["X-FlexDisplay-Assigned-Mode"] = _header_value(
+                profile.mode
+            )
+            response.headers["X-FlexDisplay-Auto-Start"] = (
+                "true" if profile.auto_start else "false"
+            )
+            response.headers["X-FlexDisplay-Live-Mode"] = (
+                "true" if profile.live_mode else "false"
+            )
             response.headers["X-FlexDisplay-Policy-Revision"] = str(
                 int(record.get("assigned_policy_revision") or 0)
             )
@@ -3944,13 +4365,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
         response.headers["X-FlexDisplay-Content-Type"] = page_kind
         if settings.firmware.version:
-            response.headers["X-FlexDisplay-Latest-Firmware"] = settings.firmware.version
+            response.headers["X-FlexDisplay-Latest-Firmware"] = (
+                settings.firmware.version
+            )
         if "install" in commands:
-            response.headers["X-FlexDisplay-Firmware-URL"] = (
-                firmware_delivery_url(request)
+            response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
+                request
             )
             response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
-            response.headers["X-FlexDisplay-Firmware-Size"] = str(settings.firmware.size)
+            response.headers["X-FlexDisplay-Firmware-Size"] = str(
+                settings.firmware.size
+            )
             response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
                 settings.firmware.minimum_battery_percent
             )

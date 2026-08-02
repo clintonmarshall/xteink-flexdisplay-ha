@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from typing import Any
 
 from homeassistant.components.sensor import (
@@ -19,7 +20,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
 
 from .coordinator import FlexDisplayCoordinator
-from .entity import FlexDisplayEntity, setup_dynamic_entities
+from .entity import (
+    FlexDisplayEntity,
+    FlexHubEntity,
+    setup_dynamic_entities,
+    setup_flexhub_entities,
+)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -99,7 +105,9 @@ DESCRIPTIONS = (
     FlexDisplaySensorDescription(
         key="pending_commands",
         translation_key="pending_commands",
-        value_fn=lambda record: ", ".join(record.get("pending_commands") or []) or "none",
+        value_fn=lambda record: (
+            ", ".join(record.get("pending_commands") or []) or "none"
+        ),
     ),
     FlexDisplaySensorDescription(
         key="last_command_result",
@@ -269,11 +277,13 @@ DESCRIPTIONS = (
     FlexDisplaySensorDescription(
         key="firmware_install_blockers",
         translation_key="firmware_install_blockers",
-        value_fn=lambda record: "; ".join(
-            str(blocker)
-            for blocker in (record.get("firmware_install_blockers") or [])
-        )
-        or "none",
+        value_fn=lambda record: (
+            "; ".join(
+                str(blocker)
+                for blocker in (record.get("firmware_install_blockers") or [])
+            )
+            or "none"
+        ),
     ),
 )
 
@@ -299,6 +309,89 @@ class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
         return self.entity_description.value_fn(self.record)
 
 
+@dataclass(frozen=True, kw_only=True)
+class FlexHubSensorDescription(SensorEntityDescription):
+    """Describe one Meshtastic console sensor."""
+
+    value_fn: Callable[[FlexDisplayCoordinator], Any]
+
+
+def _meshtastic_message_time(coordinator: FlexDisplayCoordinator) -> datetime | None:
+    """Normalize either an ISO timestamp or a device epoch value."""
+    message = coordinator.last_meshtastic_message
+    raw = message.get("received_at") or message.get("timestamp") or message.get("time")
+    if not message.get("received_at") and message.get("timestamp_source") == "uptime":
+        return None
+    if isinstance(raw, (int, float)):
+        try:
+            return datetime.fromtimestamp(raw, UTC)
+        except (OverflowError, OSError, ValueError):
+            return None
+    return parse_datetime(str(raw or ""))
+
+
+FLEXHUB_DESCRIPTIONS = (
+    FlexHubSensorDescription(
+        key="meshtastic_last_message",
+        translation_key="meshtastic_last_message",
+        value_fn=lambda coordinator: (
+            coordinator.last_meshtastic_message.get("text") or "none"
+        ),
+    ),
+    FlexHubSensorDescription(
+        key="meshtastic_last_sender",
+        translation_key="meshtastic_last_sender",
+        value_fn=lambda coordinator: (
+            coordinator.last_meshtastic_message.get("sender_name")
+            or coordinator.last_meshtastic_message.get("sender")
+            or coordinator.last_meshtastic_message.get("from")
+            or "none"
+        ),
+    ),
+    FlexHubSensorDescription(
+        key="meshtastic_last_channel",
+        translation_key="meshtastic_last_channel",
+        value_fn=lambda coordinator: (
+            coordinator.last_meshtastic_message.get("channel_name")
+            or coordinator.last_meshtastic_message.get("channel")
+            or 0
+        ),
+    ),
+    FlexHubSensorDescription(
+        key="meshtastic_last_message_time",
+        translation_key="meshtastic_last_message_time",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=_meshtastic_message_time,
+    ),
+    FlexHubSensorDescription(
+        key="meshtastic_unread_count",
+        translation_key="meshtastic_unread_count",
+        state_class=SensorStateClass.MEASUREMENT,
+        value_fn=lambda coordinator: coordinator.meshtastic_unread_count,
+    ),
+)
+
+
+class FlexHubSensor(FlexHubEntity, SensorEntity):
+    """A message or unread state from the SenseCAP Meshtastic gateway."""
+
+    entity_description: FlexHubSensorDescription
+
+    def __init__(
+        self,
+        coordinator: FlexDisplayCoordinator,
+        description: FlexHubSensorDescription,
+    ) -> None:
+        super().__init__(coordinator)
+        self.entity_description = description
+        self._attr_unique_id = f"{coordinator.flexhub_id}_{description.key}"
+
+    @property
+    def native_value(self) -> Any:
+        """Return the latest console value."""
+        return self.entity_description.value_fn(self.coordinator)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -312,5 +405,13 @@ async def async_setup_entry(
         lambda coordinator, device_id: (
             FlexDisplaySensor(coordinator, device_id, description)
             for description in DESCRIPTIONS
+        ),
+    )
+    setup_flexhub_entities(
+        entry,
+        async_add_entities,
+        lambda coordinator: (
+            FlexHubSensor(coordinator, description)
+            for description in FLEXHUB_DESCRIPTIONS
         ),
     )
