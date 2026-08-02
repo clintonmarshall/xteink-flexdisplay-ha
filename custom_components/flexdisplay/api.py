@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from typing import Any
+from urllib.parse import urlencode
 
 from aiohttp import ClientError, ClientResponseError, ClientSession
 
@@ -14,12 +15,16 @@ class FlexDisplayApiError(Exception):
 class FlexDisplayApiClient:
     """Small asynchronous client for the bridge API."""
 
-    def __init__(self, session: ClientSession, base_url: str, api_key: str = "") -> None:
+    def __init__(
+        self, session: ClientSession, base_url: str, api_key: str = ""
+    ) -> None:
         self._session = session
         self._base_url = base_url.rstrip("/")
         self._headers = {"X-FlexDisplay-Bridge-Key": api_key} if api_key else {}
 
-    async def _request(self, method: str, path: str, json: dict[str, Any] | None = None) -> dict[str, Any]:
+    async def _request(
+        self, method: str, path: str, json: dict[str, Any] | None = None
+    ) -> dict[str, Any]:
         try:
             async with self._session.request(
                 method,
@@ -110,7 +115,9 @@ class FlexDisplayApiClient:
 
     async def provision(self, device_id: str, assignment: dict[str, Any]) -> None:
         """Update the server-side assignment for a device."""
-        await self._request("PUT", f"/api/v1/devices/{device_id}/provision", json=assignment)
+        await self._request(
+            "PUT", f"/api/v1/devices/{device_id}/provision", json=assignment
+        )
 
     async def apply_policy(
         self,
@@ -149,3 +156,55 @@ class FlexDisplayApiClient:
             f"/api/v1/devices/{device_id}/button-actions",
             json={"mappings": mappings},
         )
+
+    async def flexhub(self) -> dict[str, Any]:
+        """Return the configured FlexHub and Meshtastic status."""
+        return await self._request("GET", "/api/v1/flexhub")
+
+    async def flexhub_meshtastic_messages(
+        self,
+        *,
+        after: int = 0,
+        limit: int = 30,
+        session_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Return recent messages from the FlexHub's bounded console."""
+        values: dict[str, Any] = {
+            "after": max(0, after),
+            "limit": max(1, min(limit, 32)),
+        }
+        if session_id:
+            values["session_id"] = session_id
+        query = urlencode(values)
+        return await self._request(
+            "GET",
+            f"/api/v1/flexhub/meshtastic/messages?{query}",
+        )
+
+    async def send_meshtastic_message(
+        self,
+        *,
+        text: str,
+        destination: str = "broadcast",
+        channel: int = 0,
+        request_ack: bool = False,
+    ) -> dict[str, Any]:
+        """Send a broadcast or direct message through the FlexHub."""
+        return await self._request(
+            "POST",
+            "/api/v1/flexhub/meshtastic/messages",
+            json={
+                "text": text,
+                "destination": destination,
+                "channel": channel,
+                "request_ack": request_ack,
+            },
+        )
+
+    async def flexhub_action(self, action: str) -> dict[str, Any]:
+        """Run one bounded receiver-fleet action on the FlexHub."""
+        return await self._request("POST", f"/api/v1/flexhub/actions/{action}")
+
+    async def mark_meshtastic_read(self) -> dict[str, Any]:
+        """Reset the Bridge-side Meshtastic unread counter."""
+        return await self._request("POST", "/api/v1/flexhub/meshtastic/read")

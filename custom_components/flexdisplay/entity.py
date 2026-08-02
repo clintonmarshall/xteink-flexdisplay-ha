@@ -5,15 +5,16 @@ from __future__ import annotations
 from collections.abc import Callable, Iterable
 
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FlexDisplayCoordinator
 
 EntityFactory = Callable[[FlexDisplayCoordinator, str], Iterable[Entity]]
+FlexHubEntityFactory = Callable[[FlexDisplayCoordinator], Iterable[Entity]]
 
 
 def setup_dynamic_entities(
@@ -38,6 +39,26 @@ def setup_dynamic_entities(
 
     add_new_devices()
     entry.async_on_unload(coordinator.async_add_listener(add_new_devices))
+
+
+def setup_flexhub_entities(
+    entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+    factory: FlexHubEntityFactory,
+) -> None:
+    """Add optional FlexHub entities once a hub is configured on this Bridge."""
+    coordinator: FlexDisplayCoordinator = entry.runtime_data
+    added = False
+
+    def add_when_configured() -> None:
+        nonlocal added
+        if added or not coordinator.flexhub_summary.get("configured"):
+            return
+        added = True
+        async_add_entities(factory(coordinator))
+
+    add_when_configured()
+    entry.async_on_unload(coordinator.async_add_listener(add_when_configured))
 
 
 class FlexDisplayEntity(CoordinatorEntity[FlexDisplayCoordinator]):
@@ -69,4 +90,38 @@ class FlexDisplayEntity(CoordinatorEntity[FlexDisplayCoordinator]):
             serial_number=self.device_id,
             suggested_area=str(record.get("area") or "") or None,
             sw_version=str(record.get("firmware") or "unknown"),
+        )
+
+
+class FlexHubEntity(CoordinatorEntity[FlexDisplayCoordinator]):
+    """Entity linked to the optional SenseCAP FlexHub."""
+
+    _attr_has_entity_name = True
+
+    @property
+    def available(self) -> bool:
+        """Report availability without affecting the X3/X4 coordinator."""
+        return super().available and bool(
+            self.coordinator.flexhub_summary.get("connected")
+        )
+
+    @property
+    def device_info(self) -> DeviceInfo:
+        """Describe the SenseCAP gateway as its own Home Assistant device."""
+        summary = self.coordinator.flexhub_summary
+        status = (
+            summary.get("status") if isinstance(summary.get("status"), dict) else {}
+        )
+        return DeviceInfo(
+            identifiers={(DOMAIN, self.coordinator.flexhub_id)},
+            manufacturer="Seeed Studio / FlexDisplay",
+            model="SenseCAP Indicator FlexHub",
+            name="SenseCAP FlexHub",
+            serial_number=str(
+                (status.get("meshtastic") or {}).get("node_id") or "flexhub"
+            ),
+            sw_version=str(
+                status.get("platform_version") or status.get("firmware") or "unknown"
+            ),
+            configuration_url=str(summary.get("url") or "") or None,
         )

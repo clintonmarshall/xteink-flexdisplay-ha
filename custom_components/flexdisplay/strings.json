@@ -144,6 +144,21 @@
       },
       "policy_revision": {
         "name": "Fleet policy revision"
+      },
+      "meshtastic_last_message": {
+        "name": "Meshtastic last message"
+      },
+      "meshtastic_last_sender": {
+        "name": "Meshtastic last sender"
+      },
+      "meshtastic_last_channel": {
+        "name": "Meshtastic last channel"
+      },
+      "meshtastic_last_message_time": {
+        "name": "Meshtastic last message time"
+      },
+      "meshtastic_unread_count": {
+        "name": "Meshtastic unread messages"
       }
     },
     "binary_sensor": {
@@ -172,6 +187,9 @@
     "event": {
       "physical_button": {
         "name": "Physical button"
+      },
+      "meshtastic_message": {
+        "name": "Meshtastic message"
       }
     },
     "image": {
@@ -218,6 +236,21 @@
             },
       "verify_usb_recovery": {
         "name": "Verify USB firmware recovery"
+      },
+      "flexhub_scan": {
+        "name": "Scan for FlexDisplay receivers"
+      },
+      "flexhub_deliver": {
+        "name": "Deliver selected FlexHub job"
+      },
+      "flexhub_retry": {
+        "name": "Retry failed FlexHub receivers"
+      },
+      "flexhub_cancel": {
+        "name": "Cancel FlexHub operation"
+      },
+      "clear_meshtastic_unread": {
+        "name": "Clear Meshtastic unread count"
       }
     },
     "select": {

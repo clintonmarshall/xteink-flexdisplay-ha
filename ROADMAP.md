@@ -193,3 +193,31 @@ Reader, OpenDisplay, Photo Frame, TRMNL, fleet policy, and OTA paths are retaine
   Confirm is reserved in the Studio action mapper.
 - The device and Bridge negotiate mixed-content support and exchange page title,
   type, position, and selection metadata for later fleet diagnostics.
+
+## v0.35 — Meshtastic Console and alert routing
+
+Status: implemented and locally validated, pending SenseCAP canary deployment.
+Delivery: Bridge App, HACS integration, and FlexHub platform `0.35.0`; shared
+X3/X4 firmware `0.34.1` remains compatible and does not require a reflash.
+
+- Live, filtered Meshtastic inbox with direct/broadcast, channel, sender,
+  timestamp, RSSI, SNR, direction, packet, and delivery-state detail.
+- Broadcast and direct-message composer with node/channel selection, exact
+  220-byte UTF-8 validation, optional direct acknowledgement, rate limiting,
+  and honest queued/sent/acknowledged/failed states.
+- Bounded on-hub message history and Bridge-side cursors prevent unbounded RAM
+  growth and duplicate Home Assistant events.
+- Persistent quick replies and incoming prefix rules; a rule such as `ALERT:`
+  can create a large message screen for a selected X3/X4 scope.
+- Direct receiver scan, delivery, retry, and cancel controls in the same Studio
+  workspace.
+- Native Home Assistant send action, event bus event, event entity, last-message
+  sensors, and resettable unread counter.
+- Equivalent App-only MQTT Discovery message sensors, event, broadcast control,
+  and unread-reset control.
+- FlexHub PIN protection, bounded request bodies and history, safe node IDs,
+  redirect rejection, and transmit throttling at the browser, Bridge, and hub
+  boundaries.
+- Reboot/session-aware read cursors suppress retained-history replays; the
+  bounded plaintext hub history is disclosed, and LoRa fleet commands remain
+  disabled unless explicitly enabled for locally favourited nodes.

@@ -271,11 +271,59 @@ channel there; no YAML or SD-card file is required. While a Home Assistant page
 is showing, hold **Confirm** to open the Quick Menu, or press Confirm briefly to
 refresh the current page.
 
+Bridge App, Home Assistant integration, and FlexHub platform `0.35.0` add the
+**Meshtastic Console**. Open **Dashboard Studio → FlexHub** to read live direct
+and channel messages, filter the bounded history, inspect node and radio signal
+details, send a broadcast or direct message, request a direct-message
+acknowledgement, and save quick replies. Incoming-message rules can match a
+prefix such as `ALERT:` and queue a large message screen to selected X3/X4
+displays. The console also exposes receiver scan, delivery, retry, and cancel
+controls without leaving Home Assistant.
+
+The HACS integration exposes the `flexdisplay.send_meshtastic_message` action,
+the `flexdisplay_meshtastic_message` event, a native Meshtastic event entity,
+and last-message, sender, channel, time, and unread-count sensors. For example:
+
+```yaml
+action: flexdisplay.send_meshtastic_message
+data:
+  text: "Showroom closes at 17:00"
+  destination: broadcast
+  channel: 0
+  request_ack: false
+```
+
+```yaml
+trigger:
+  - platform: event
+    event_type: flexdisplay_meshtastic_message
+    event_data:
+      type: message_received
+action:
+  - service: persistent_notification.create
+    data:
+      title: Meshtastic message
+      message: "{{ trigger.event.data.text }}"
+```
+
+App-only installations receive equivalent MQTT Discovery sensors, an event
+entity, a broadcast text control, and an unread-reset button. The compact MQTT
+text entity accepts up to 220 printable ASCII characters; Studio, the native
+Home Assistant action, and direct JSON MQTT commands retain the full 220-byte
+UTF-8 validation. Direct delivery acknowledgement means the mesh reported a
+routing result, while broadcast delivery can only be reported as queued/sent
+because broadcasts have no single recipient acknowledgement.
+
 ## Security
 
 Keep port 8099 on a trusted LAN. Configure a Bridge API key before exposing
-command endpoints to other networks. Never commit Home Assistant tokens, MQTT
-passwords, Wi-Fi credentials, device SD-card contents, or flash backups.
+command endpoints to other networks, and set a FlexHub PIN before using its
+message or fleet APIs on a shared network. LoRa fleet commands are disabled by
+default and, when enabled, accept only locally favourited Meshtastic nodes. The
+hub retains at most 32 recent sender names and message bodies in plain text on
+its SD card (or internal fallback storage), so treat that media as sensitive.
+Never commit Home Assistant tokens, MQTT passwords, Wi-Fi credentials, device
+SD-card contents, or flash backups.
 
 ## License
 

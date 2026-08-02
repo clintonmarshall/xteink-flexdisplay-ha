@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
 import requests
 from fastapi.testclient import TestClient
-
 from flexdisplay_bridge.app import create_app
 from flexdisplay_bridge.config import BridgeConfig, MqttConfig
 from flexdisplay_bridge.flexhub_client import FlexHubClient
@@ -13,13 +13,27 @@ from flexdisplay_bridge.mqtt_service import MqttService
 
 
 class FakeResponse:
-    def __init__(self, payload: dict) -> None:
+    def __init__(
+        self,
+        payload: dict | None = None,
+        *,
+        status_code: int = 200,
+        content_type: str = "application/json",
+        text: str | None = None,
+        headers: dict[str, str] | None = None,
+    ) -> None:
         self.payload = payload
+        self.status_code = status_code
+        self.headers = {"Content-Type": content_type, **(headers or {})}
+        self.text = text if text is not None else json.dumps(payload or {})
 
     def raise_for_status(self) -> None:
-        return None
+        if self.status_code >= 400:
+            raise requests.HTTPError(f"HTTP {self.status_code}", response=self)
 
     def json(self) -> dict:
+        if self.payload is None:
+            raise ValueError("No JSON response")
         return self.payload
 
 
@@ -54,16 +68,24 @@ def _hub_status() -> dict:
             "selected_scope": "all",
             "devices": [
                 {"device_id": "X3-ONE", "online": True},
-                {"device_id": "X4-TWO", "online": False, "policy_sync_state": "pending"},
+                {
+                    "device_id": "X4-TWO",
+                    "online": False,
+                    "policy_sync_state": "pending",
+                },
             ],
         },
     }
 
 
-def test_flexhub_client_persists_configuration_and_polls(tmp_path: Path, monkeypatch) -> None:
+def test_flexhub_client_persists_configuration_and_polls(
+    tmp_path: Path, monkeypatch
+) -> None:
     calls: list[tuple[str, dict, float, bool]] = []
 
-    def fake_get(url: str, *, headers: dict, timeout: float, allow_redirects: bool) -> FakeResponse:
+    def fake_get(
+        url: str, *, headers: dict, timeout: float, allow_redirects: bool
+    ) -> FakeResponse:
         calls.append((url, headers, timeout, allow_redirects))
         return FakeResponse(_hub_status())
 
@@ -87,8 +109,85 @@ def test_flexhub_client_persists_configuration_and_polls(tmp_path: Path, monkeyp
     assert FlexHubClient(path).summary()["access_pin_configured"] is True
 
 
-def test_studio_exposes_fleet_policy_and_flexhub_workspaces(tmp_path: Path, monkeypatch) -> None:
-    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: FakeResponse(_hub_status()))
+@pytest.mark.parametrize(
+    "entered",
+    [
+        "http://10.200.40.55",
+        "http://10.200.40.55/",
+        "http://10.200.40.55/flexhub",
+        "http://10.200.40.55/flexhub/",
+        "http://10.200.40.55/meshtastic",
+        "http://10.200.40.55/api/flexhub/status",
+    ],
+)
+def test_flexhub_client_normalizes_known_hub_routes(
+    tmp_path: Path, entered: str
+) -> None:
+    client = FlexHubClient(tmp_path / "flexhub.json")
+    summary = client.configure(entered)
+
+    assert summary["url"] == "http://10.200.40.55"
+    assert summary["selector_url"] == "http://10.200.40.55/"
+    assert summary["console_url"] == "http://10.200.40.55/flexhub"
+    assert summary["meshtastic_url"] == "http://10.200.40.55/meshtastic"
+    assert summary["status_url"] == "http://10.200.40.55/api/flexhub/status"
+
+
+def test_flexhub_client_rejects_unknown_page_paths(tmp_path: Path) -> None:
+    client = FlexHubClient(tmp_path / "flexhub.json")
+
+    with pytest.raises(ValueError, match="hub base address"):
+        client.configure("http://10.200.40.55/admin")
+
+
+@pytest.mark.parametrize(
+    ("response", "expected"),
+    [
+        (
+            FakeResponse(
+                None,
+                content_type="text/html",
+                text="<!doctype html><title>Meshtastic</title>",
+            ),
+            "Meshtastic web page was reached",
+        ),
+        (
+            FakeResponse(None, status_code=404, text="Not found"),
+            "FlexHub status API was not found (HTTP 404)",
+        ),
+        (
+            FakeResponse(
+                None,
+                status_code=302,
+                headers={"Location": "http://meshtastic.local/"},
+            ),
+            "FlexHub status endpoint redirected",
+        ),
+    ],
+)
+def test_flexhub_client_reports_route_compatibility_errors(
+    tmp_path: Path,
+    monkeypatch,
+    response: FakeResponse,
+    expected: str,
+) -> None:
+    monkeypatch.setattr(requests, "get", lambda *args, **kwargs: response)
+    client = FlexHubClient(tmp_path / "flexhub.json")
+    client.configure("http://10.200.40.55")
+
+    summary = client.poll()
+
+    assert summary["connected"] is False
+    assert expected in summary["error"]
+    assert summary["status_url"] == "http://10.200.40.55/api/flexhub/status"
+
+
+def test_studio_exposes_fleet_policy_and_flexhub_workspaces(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setattr(
+        requests, "get", lambda *args, **kwargs: FakeResponse(_hub_status())
+    )
     config = BridgeConfig(state_path=tmp_path / "state.json")
     with TestClient(create_app(config)) as client:
         html = client.get("/studio/").text
@@ -97,6 +196,11 @@ def test_studio_exposes_fleet_policy_and_flexhub_workspaces(tmp_path: Path, monk
         assert 'id="fleetPolicyScope"' in html
         assert '<option value="devices">Selected devices</option>' in html
         assert 'id="openFlexHub"' in html
+        assert 'id="testFlexHub"' in html
+        assert 'id="openFlexHubSelector"' in html
+        assert 'id="openFlexHubConsole"' in html
+        assert 'id="openMeshtasticConsole"' in html
+        assert "Enter the hub address without a page path" in html
         assert "Meshtastic status" in html
 
         connected = client.put(
@@ -105,6 +209,7 @@ def test_studio_exposes_fleet_policy_and_flexhub_workspaces(tmp_path: Path, monk
         )
         assert connected.status_code == 200
         assert connected.json()["status"]["network"]["ip"] == "10.200.40.55"
+        assert connected.json()["console_url"] == "http://10.200.40.55/flexhub"
         assert client.get("/api/v1/flexhub").json()["connected"] is True
 
 
@@ -136,4 +241,6 @@ def test_mqtt_discovery_publishes_flexhub_health_and_meshtastic() -> None:
     assert state["fleet_policy_pending"] == 1
     assert state["meshtastic_mqtt_connected"] is True
     assert "homeassistant/sensor/flexhub/meshtastic_nodes/config" in topics
-    assert "homeassistant/binary_sensor/flexhub/meshtastic_mqtt_connected/config" in topics
+    assert (
+        "homeassistant/binary_sensor/flexhub/meshtastic_mqtt_connected/config" in topics
+    )

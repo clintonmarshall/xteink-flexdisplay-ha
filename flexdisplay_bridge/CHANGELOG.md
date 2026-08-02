@@ -1,5 +1,45 @@
 # Changelog
 
+## 0.35.0
+
+- Add a live Meshtastic inbox to the FlexHub workspace with search, channel,
+  node, direction, signal, direct/broadcast, packet, and delivery-state detail.
+- Add broadcast and direct-message sending with node/channel selectors, exact
+  220-byte UTF-8 validation, optional acknowledgement requests, quick replies,
+  and clear queued or failure feedback.
+- Add persistent incoming-message rules that can convert prefixes such as
+  `ALERT:` into large message screens queued to selected X3/X4 displays.
+- Proxy the bounded FlexHub message and node APIs through the Bridge while
+  preserving the configured PIN and rejecting redirects or malformed payloads.
+- Add direct receiver scan, delivery, retry, and cancel controls to the Studio
+  FlexHub workspace.
+- Add `flexdisplay.send_meshtastic_message`, the
+  `flexdisplay_meshtastic_message` event, a native event entity, and last
+  message, sender, channel, time, and unread-count Home Assistant sensors.
+- Add equivalent App-only MQTT Discovery message sensors, event, broadcast
+  text control, send-result diagnostics, and unread-reset button.
+- Add session-aware cursors so hub reboots cannot replay retained messages as
+  new Home Assistant automation events, and use the Bridge unread state as the
+  single source of truth across Studio, HACS, and MQTT.
+- Serialize Bridge-to-hub requests, enforce the hub's 32-message/80-byte query
+  bounds, throttle sends at all three layers, and reject invalid UTF-8,
+  reserved node IDs, and unsafe control characters before transmission.
+- Protect message-bearing status behind the Bridge API key, redact health
+  responses, sanitize corrupt saved rules, and keep monitor failures isolated.
+- Keep the bundled X3/X4 firmware at `1.5.0-flexdisplay.0.34.1`; this release
+  updates the Home Assistant and SenseCAP FlexHub management layers.
+
+## 0.34.2
+
+- Add a discoverable FlexHub interface selector and direct links for the
+  FlexHub console and Meshtastic tools in Dashboard Studio.
+- Accept a hub base address or pasted `/flexhub`, `/meshtastic`, and
+  `/api/flexhub/status` URLs, then store one canonical base address.
+- Report precise connection failures for redirects, invalid access PINs,
+  Meshtastic-only pages, missing FlexHub APIs, and non-JSON responses.
+- Keep the bundled X3/X4 firmware at `1.5.0-flexdisplay.0.34.1`; this patch
+  updates the Home Assistant management layer and SenseCAP Hub connectivity.
+
 ## 0.34.1
 
 - Deliver server-rendered dashboards, mixed content, photo frames, and restored

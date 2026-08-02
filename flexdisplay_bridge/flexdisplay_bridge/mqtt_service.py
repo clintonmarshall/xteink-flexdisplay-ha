@@ -28,6 +28,16 @@ class MqttService:
         self.client: mqtt.Client | None = None
         self.connected = False
         self._last_event: dict[str, str] = {}
+        self._last_flexhub_message = ""
+        self._flexhub_console_state: dict[str, Any] = {
+            "last_message": "",
+            "last_sender": "",
+            "last_channel": 0,
+            "last_message_at": "",
+            "unread_count": 0,
+            "last_send_status": "idle",
+            "last_send_error": "",
+        }
         self._pending_device_removals: dict[
             str, tuple[DeviceConfig, dict[str, Any]]
         ] = {}
@@ -39,13 +49,17 @@ class MqttService:
     def start(self) -> None:
         if not self.config.enabled:
             return
-        client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2, client_id="flexdisplay-ha-bridge")
+        client = mqtt.Client(
+            mqtt.CallbackAPIVersion.VERSION2, client_id="flexdisplay-ha-bridge"
+        )
         if self.config.username:
             client.username_pw_set(self.config.username, self.config.password)
         client.on_connect = self._on_connect
         client.on_disconnect = self._on_disconnect
         client.on_message = self._on_message
-        client.will_set(f"{self.config.topic_prefix}/bridge/status", "offline", retain=True)
+        client.will_set(
+            f"{self.config.topic_prefix}/bridge/status", "offline", retain=True
+        )
         self.client = client
         try:
             client.connect_async(self.config.host, self.config.port, keepalive=60)
@@ -57,7 +71,9 @@ class MqttService:
         if not self.client:
             return
         if self.connected:
-            self.client.publish(f"{self.config.topic_prefix}/bridge/status", "offline", retain=True)
+            self.client.publish(
+                f"{self.config.topic_prefix}/bridge/status", "offline", retain=True
+            )
             self.client.disconnect()
         self.client.loop_stop()
 
@@ -67,7 +83,9 @@ class MqttService:
             LOGGER.warning("MQTT connection rejected: %s", reason_code)
             return
         self.connected = True
-        client.publish(f"{self.config.topic_prefix}/bridge/status", "online", retain=True)
+        client.publish(
+            f"{self.config.topic_prefix}/bridge/status", "online", retain=True
+        )
         client.subscribe(f"{self.config.topic_prefix}/+/command/+")
         LOGGER.info(
             "Connected to MQTT broker %s:%s (entity source: %s)",
@@ -75,12 +93,12 @@ class MqttService:
             self.config.port,
             self.config.entity_source,
         )
-        for device_id, (profile, state) in list(
-            self._pending_device_removals.items()
-        ):
+        for device_id, (profile, state) in list(self._pending_device_removals.items()):
             self._clear_device(device_id, profile, state)
 
-    def _on_disconnect(self, client, userdata, disconnect_flags, reason_code, properties) -> None:
+    def _on_disconnect(
+        self, client, userdata, disconnect_flags, reason_code, properties
+    ) -> None:
         del client, userdata, disconnect_flags, properties
         self.connected = False
         if reason_code != 0:
@@ -89,11 +107,18 @@ class MqttService:
     def _on_message(self, client, userdata, message) -> None:
         del client, userdata
         parts = message.topic.split("/")
-        if len(parts) != 4 or parts[0] != self.config.topic_prefix or parts[2] != "command":
+        if (
+            len(parts) != 4
+            or parts[0] != self.config.topic_prefix
+            or parts[2] != "command"
+        ):
             return
         device_id, command = parts[1], parts[3]
         payload = message.payload.decode("utf-8", errors="replace").strip()
         try:
+            if device_id == "flexhub" and command == "clear-meshtastic-unread":
+                self._flexhub_console_state["unread_count"] = 0
+                self._publish_flexhub_console_state()
             self.on_command(device_id, command, payload)
         except Exception:
             LOGGER.exception("MQTT command %s failed for %s", command, device_id)
@@ -538,7 +563,11 @@ class MqttService:
             configs.append((f"button/{slug}/{key}", payload))
 
         switches = {
-            "auto_start": ("Automatic display mode", "assigned_auto_start", "set-auto-start"),
+            "auto_start": (
+                "Automatic display mode",
+                "assigned_auto_start",
+                "set-auto-start",
+            ),
             "live_mode": ("Live polling", "assigned_live_mode", "set-live-mode"),
             "intelligent_sleep": (
                 "Intelligent sleep",
@@ -634,7 +663,15 @@ class MqttService:
                 "s",
             ),
         }
-        for key, (name, field, command, minimum, maximum, step, unit) in numbers.items():
+        for key, (
+            name,
+            field,
+            command,
+            minimum,
+            maximum,
+            step,
+            unit,
+        ) in numbers.items():
             payload = {
                 **self._base(
                     device=device,
@@ -686,7 +723,9 @@ class MqttService:
                 "name": name,
                 "value_template": f"{{{{ value_json.{field} }}}}",
                 "command_topic": f"{command_root}/{command}",
-                "options": list(dict.fromkeys(str(option) for option in options if option)),
+                "options": list(
+                    dict.fromkeys(str(option) for option in options if option)
+                ),
                 "entity_category": "config",
             }
             configs.append((f"select/{slug}/{key}", payload))
@@ -779,7 +818,9 @@ class MqttService:
         configs.append((f"image/{slug}/current_screen", image))
         return configs
 
-    def publish_device(self, device_id: str, profile: DeviceConfig, state: dict[str, Any]) -> None:
+    def publish_device(
+        self, device_id: str, profile: DeviceConfig, state: dict[str, Any]
+    ) -> None:
         if not self.client or not self.connected:
             return
         configs = self._configs(device_id, profile, state)
@@ -797,7 +838,8 @@ class MqttService:
         if events and isinstance(events[-1], dict):
             event = events[-1]
             identity = ":".join(
-                str(event.get(key) or "") for key in ("sequence", "button", "gesture", "uptime")
+                str(event.get(key) or "")
+                for key in ("sequence", "button", "gesture", "uptime")
             )
             if identity and self._last_event.get(device_id) != identity:
                 self._last_event[device_id] = identity
@@ -809,7 +851,8 @@ class MqttService:
                             "button": event.get("button"),
                             "mode": event.get("mode"),
                             "sequence": event.get("sequence"),
-                            "occurred_at": event.get("occurred_at") or state.get("last_seen"),
+                            "occurred_at": event.get("occurred_at")
+                            or state.get("last_seen"),
                         }
                     ),
                     retain=False,
@@ -872,11 +915,57 @@ class MqttService:
         """Publish the SenseCAP FlexHub as a Home Assistant MQTT device."""
         if not self.client or not self.connected:
             return
-        status = summary.get("status") if isinstance(summary.get("status"), dict) else {}
+        status = (
+            summary.get("status") if isinstance(summary.get("status"), dict) else {}
+        )
         fleet = status.get("fleet") if isinstance(status.get("fleet"), dict) else {}
-        storage = status.get("storage") if isinstance(status.get("storage"), dict) else {}
-        network = status.get("network") if isinstance(status.get("network"), dict) else {}
-        meshtastic = status.get("meshtastic") if isinstance(status.get("meshtastic"), dict) else {}
+        storage = (
+            status.get("storage") if isinstance(status.get("storage"), dict) else {}
+        )
+        network = (
+            status.get("network") if isinstance(status.get("network"), dict) else {}
+        )
+        meshtastic = (
+            status.get("meshtastic")
+            if isinstance(status.get("meshtastic"), dict)
+            else {}
+        )
+        console = (
+            summary.get("meshtastic_console")
+            if isinstance(summary.get("meshtastic_console"), dict)
+            else {}
+        )
+        last_record = console.get("last_message")
+        if isinstance(last_record, dict):
+            self._flexhub_console_state.update(
+                {
+                    "last_message": last_record.get("text") or "",
+                    "last_sender": last_record.get("sender_name")
+                    or last_record.get("sender")
+                    or last_record.get("from")
+                    or console.get("last_sender")
+                    or "",
+                    "last_channel": last_record.get("channel_name")
+                    or last_record.get("channel")
+                    or console.get("last_channel")
+                    or 0,
+                    "last_message_at": last_record.get("received_at")
+                    or last_record.get("timestamp")
+                    or last_record.get("time")
+                    or console.get("last_message_at")
+                    or "",
+                }
+            )
+        elif last_record is not None:
+            self._flexhub_console_state["last_message"] = last_record
+        for source, target in {
+            "last_sender": "last_sender",
+            "last_channel": "last_channel",
+            "last_message_at": "last_message_at",
+            "unread_count": "unread_count",
+        }.items():
+            if source in console:
+                self._flexhub_console_state[target] = console[source]
         devices = fleet.get("devices") if isinstance(fleet.get("devices"), list) else []
         state = {
             "connected": bool(summary.get("connected")),
@@ -884,7 +973,9 @@ class MqttService:
             "last_seen": summary.get("last_seen") or "",
             "error": summary.get("error") or "",
             "state": status.get("state") or "offline",
-            "detail": status.get("detail") or summary.get("error") or "Waiting for FlexHub",
+            "detail": status.get("detail")
+            or summary.get("error")
+            or "Waiting for FlexHub",
             "firmware": status.get("firmware") or "unknown",
             "platform_version": status.get("platform_version") or "unknown",
             "target_count": status.get("target_count") or 0,
@@ -894,13 +985,19 @@ class MqttService:
             "remote_commands_enabled": bool(status.get("remote_commands_enabled")),
             "access_control_enabled": bool(status.get("access_control_enabled")),
             "slideshow_enabled": bool((status.get("slideshow") or {}).get("enabled")),
-            "slideshow_interval_seconds": (status.get("slideshow") or {}).get("interval_seconds"),
+            "slideshow_interval_seconds": (status.get("slideshow") or {}).get(
+                "interval_seconds"
+            ),
             "healthy_boots": (status.get("boot_health") or {}).get("count"),
             "fleet_bridge_connected": bool(fleet.get("connected")),
             "fleet_devices": len(devices),
-            "fleet_online": sum(bool(item.get("online")) for item in devices if isinstance(item, dict)),
+            "fleet_online": sum(
+                bool(item.get("online")) for item in devices if isinstance(item, dict)
+            ),
             "fleet_policy_pending": sum(
-                item.get("policy_sync_state") == "pending" for item in devices if isinstance(item, dict)
+                item.get("policy_sync_state") == "pending"
+                for item in devices
+                if isinstance(item, dict)
             ),
             "selected_policy": fleet.get("selected_policy") or "unknown",
             "selected_scope": fleet.get("selected_scope") or "unknown",
@@ -911,7 +1008,9 @@ class MqttService:
             "free_heap": network.get("free_heap"),
             "uptime_seconds": network.get("uptime_seconds"),
             "meshtastic_node_id": meshtastic.get("node_id") or "",
-            "meshtastic_firmware": meshtastic.get("firmware") or status.get("firmware") or "unknown",
+            "meshtastic_firmware": meshtastic.get("firmware")
+            or status.get("firmware")
+            or "unknown",
             "meshtastic_nodes": meshtastic.get("node_count"),
             "meshtastic_online_nodes": meshtastic.get("online_node_count"),
             "meshtastic_mqtt_enabled": bool(meshtastic.get("mqtt_enabled")),
@@ -1000,9 +1099,185 @@ class MqttService:
                 json.dumps(payload) if self.discovery_enabled else "",
                 retain=True,
             )
+
+        console_state_topic = f"{self.config.topic_prefix}/flexhub/meshtastic/state"
+        for field, name in {
+            "last_message": "Meshtastic last message",
+            "last_sender": "Meshtastic last sender",
+            "last_channel": "Meshtastic last channel",
+            "last_message_at": "Meshtastic last message time",
+            "unread_count": "Meshtastic unread messages",
+            "last_send_status": "Meshtastic last send status",
+            "last_send_error": "Meshtastic last send error",
+        }.items():
+            payload = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_flexhub_meshtastic_{field}",
+                    state_topic=console_state_topic,
+                ),
+                "name": name,
+                "value_template": f"{{{{ value_json.{field} }}}}",
+                "availability_topic": availability_topic,
+            }
+            self.client.publish(
+                f"{self.config.discovery_prefix}/sensor/flexhub/meshtastic_{field}/config",
+                json.dumps(payload) if self.discovery_enabled else "",
+                retain=True,
+            )
+
+        event_payload = {
+            **self._base(
+                device=device,
+                unique_id="flexdisplay_flexhub_meshtastic_message",
+                state_topic=f"{self.config.topic_prefix}/flexhub/meshtastic/event",
+            ),
+            "name": "Meshtastic message",
+            "event_types": ["message_received", "message_sent", "message_failed"],
+            "value_template": "{{ value_json.event_type }}",
+            "availability_topic": availability_topic,
+        }
+        self.client.publish(
+            f"{self.config.discovery_prefix}/event/flexhub/meshtastic_message/config",
+            json.dumps(event_payload) if self.discovery_enabled else "",
+            retain=True,
+        )
+        text_payload = {
+            **self._base(
+                device=device,
+                unique_id="flexdisplay_flexhub_send_meshtastic",
+            ),
+            "name": "Send Meshtastic broadcast (ASCII)",
+            "command_topic": f"{self.config.topic_prefix}/flexhub/command/send-meshtastic",
+            "mode": "text",
+            "min": 1,
+            "max": 220,
+            "pattern": r"^[\x20-\x7E]{1,220}$",
+            "availability_topic": availability_topic,
+        }
+        self.client.publish(
+            f"{self.config.discovery_prefix}/text/flexhub/send_meshtastic/config",
+            json.dumps(text_payload) if self.discovery_enabled else "",
+            retain=True,
+        )
+        clear_payload = {
+            **self._base(
+                device=device,
+                unique_id="flexdisplay_flexhub_clear_meshtastic_unread",
+            ),
+            "name": "Clear Meshtastic unread count",
+            "command_topic": f"{self.config.topic_prefix}/flexhub/command/clear-meshtastic-unread",
+            "payload_press": "PRESS",
+            "availability_topic": availability_topic,
+        }
+        self.client.publish(
+            f"{self.config.discovery_prefix}/button/flexhub/clear_meshtastic_unread/config",
+            json.dumps(clear_payload) if self.discovery_enabled else "",
+            retain=True,
+        )
+        for action, name in {
+            "scan": "Scan for FlexDisplay receivers",
+            "deliver": "Deliver selected FlexHub job",
+            "retry": "Retry failed FlexHub receivers",
+            "cancel": "Cancel FlexHub operation",
+        }.items():
+            action_payload = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_flexhub_{action}",
+                ),
+                "name": name,
+                "command_topic": f"{self.config.topic_prefix}/flexhub/command/{action}",
+                "payload_press": "PRESS",
+                "availability_topic": availability_topic,
+            }
+            self.client.publish(
+                f"{self.config.discovery_prefix}/button/flexhub/{action}/config",
+                json.dumps(action_payload) if self.discovery_enabled else "",
+                retain=True,
+            )
         self.client.publish(
             availability_topic,
             "online" if summary.get("connected") else "offline",
             retain=True,
         )
         self.client.publish(state_topic, json.dumps(state), retain=True)
+        self._publish_flexhub_console_state()
+
+    def _publish_flexhub_console_state(self) -> None:
+        """Publish the retained Meshtastic summary used by App-only entities."""
+        if not self.client or not self.connected:
+            return
+        self.client.publish(
+            f"{self.config.topic_prefix}/flexhub/meshtastic/state",
+            json.dumps(self._flexhub_console_state),
+            retain=True,
+        )
+
+    def publish_flexhub_message(self, message: dict[str, Any]) -> None:
+        """Publish one non-retained Meshtastic event and update retained summary."""
+        if not self.client or not self.connected or not isinstance(message, dict):
+            return
+        has_stable_identity = any(
+            message.get(key) not in {None, ""}
+            for key in ("sequence", "packet_id", "id")
+        )
+        identity = (
+            ":".join(
+                str(message.get(key) or "")
+                for key in (
+                    "session_id",
+                    "sequence",
+                    "packet_id",
+                    "id",
+                    "direction",
+                    "delivery_state",
+                    "status",
+                )
+            )
+            if has_stable_identity
+            else ""
+        )
+        if identity and identity == self._last_flexhub_message:
+            return
+        self._last_flexhub_message = identity
+        direction = str(message.get("direction") or "incoming")
+        delivery = str(message.get("delivery_state") or message.get("status") or "")
+        event_type = (
+            "message_received"
+            if direction in {"incoming", "inbound", "received"}
+            else "message_failed"
+            if delivery in {"failed", "rejected", "timeout"}
+            else "message_sent"
+        )
+        self._flexhub_console_state.update(
+            {
+                "last_message": message.get("text") or "",
+                "last_sender": message.get("sender_name")
+                or message.get("sender")
+                or message.get("from")
+                or "",
+                "last_channel": message.get("channel_name")
+                or message.get("channel")
+                or 0,
+                "last_message_at": message.get("received_at")
+                or message.get("timestamp")
+                or message.get("time")
+                or "",
+            }
+        )
+        if event_type == "message_received":
+            self._flexhub_console_state["unread_count"] = (
+                int(self._flexhub_console_state.get("unread_count") or 0) + 1
+            )
+        else:
+            self._flexhub_console_state["last_send_status"] = delivery or "submitted"
+            self._flexhub_console_state["last_send_error"] = str(
+                message.get("error") or ""
+            )[:180]
+        self._publish_flexhub_console_state()
+        self.client.publish(
+            f"{self.config.topic_prefix}/flexhub/meshtastic/event",
+            json.dumps({**message, "event_type": event_type}),
+            retain=False,
+        )
