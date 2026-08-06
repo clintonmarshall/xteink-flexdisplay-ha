@@ -11,6 +11,7 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 from qrcode.exceptions import DataOverflowError
 
+from .eink_calibration import calibrate_monochrome
 from .home_assistant import EntityState
 
 
@@ -1292,5 +1293,7 @@ class DashboardRenderer:
         draw.text((badge_left + 16, status_y - 3), connection, fill=0, font=connection_font)
 
         output = BytesIO()
-        image.convert("1", dither=Image.Dither.NONE).save(output, format="PNG", optimize=True)
+        calibrate_monochrome(image, model=str(device.get("model") or ""), photo=False).save(
+            output, format="PNG", optimize=True
+        )
         return output.getvalue()

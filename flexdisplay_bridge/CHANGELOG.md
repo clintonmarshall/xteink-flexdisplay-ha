@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.36.0
+
+- Add model-aware X3/X4 e-paper calibration to dashboards, photo frames, and
+  mixed-content pages, preserving fine detail on X3 while producing stronger,
+  less washed-out X4 output.
+- Bundle shared X3/X4 firmware `1.5.0-flexdisplay.0.36.0` with the refreshed
+  CrossPoint hardware layer, X3 panel and battery fixes, cached fast Wi-Fi
+  reconnects, TRMNL pairing reset, and server-requested one-page sleep.
+- Add transactional OpenDisplay delivery with transfer IDs, content hashes,
+  render acknowledgements, and receiver diagnostic phases.
+- Add local-network OpenDisplay transport with BLE fallback. The FlexHub
+  discovers compatible receivers over mDNS, negotiates capabilities, and can
+  deliver to two LAN receivers concurrently while keeping BLE delivery
+  sequential and bounded.
+
 ## 0.35.0
 
 - Add a live Meshtastic inbox to the FlexHub workspace with search, channel,

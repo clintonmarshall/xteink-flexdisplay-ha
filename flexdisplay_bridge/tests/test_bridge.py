@@ -10,6 +10,7 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from flexdisplay_bridge.app import (
     _advanced_health_metrics,
+    _decorate_device,
     _firmware_maintenance_status,
     _sleep_plan,
     create_app,
@@ -42,6 +43,29 @@ from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
+
+
+def test_awake_sleep_plan_stays_awake_between_checkins(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        profiles={"home": DashboardProfileConfig(name="home")},
+        default_profile="home",
+    )
+    record = {
+        "device_id": "X3-LIVE01",
+        "model": "XTEINK_X3",
+        "width": 528,
+        "height": 792,
+        "last_seen": (datetime.now(UTC) - timedelta(seconds=150)).isoformat(),
+        "sleep_action": "awake",
+        "assigned_live_mode": True,
+        "assigned_refresh_interval_seconds": 300,
+    }
+
+    device = _decorate_device(record, config)
+
+    assert device["online"] is True
+    assert device["power_state"] == "awake"
 
 
 def test_v034_content_channel_validates_and_renders_daily_quote(tmp_path: Path) -> None:
@@ -98,6 +122,55 @@ def test_v034_content_channel_rejects_credentialed_feed_url() -> None:
         assert "credentials" in str(err)
     else:
         raise AssertionError("Credentialed feed URL was accepted")
+
+
+def test_v034_content_channel_normalizes_duplicate_item_ids() -> None:
+    channel = parse_channel(
+        "briefing",
+        {
+            "name": "Briefing",
+            "items": [
+                {"id": "item-same", "type": "dashboard", "title": "Dashboard"},
+                {"id": "item-same", "type": "message", "title": "Message"},
+                {"id": "item-same", "type": "quote", "title": "Quote"},
+            ],
+        },
+    )
+    assert [item["id"] for item in channel["items"]] == [
+        "item-same",
+        "item-same-2",
+        "item-same-3",
+    ]
+
+
+def test_v035_dependent_stores_purge_unknown_device_assignments(tmp_path: Path) -> None:
+    photo_path = tmp_path / "photo-frame.json"
+    photo_path.write_text(
+        json.dumps(
+            {
+                "albums": {},
+                "assignments": {"UNKNOWN": "default", "X3-VALID": "default"},
+                "playback": {"UNKNOWN": {}, "X3-VALID": {}},
+            }
+        ),
+        encoding="utf-8",
+    )
+    photos = PhotoFrameMediaStore(photo_path).payload()
+    assert photos["assignments"] == {"X3-VALID": "default"}
+    assert photos["playback"] == {"X3-VALID": {}}
+
+    channel_path = tmp_path / "content-channels.json"
+    channel_path.write_text(
+        json.dumps(
+            {
+                "channels": {},
+                "assignments": {"UNKNOWN": "briefing", "X3-VALID": "briefing"},
+            }
+        ),
+        encoding="utf-8",
+    )
+    channels = ContentChannelStore(channel_path).payload()
+    assert channels["assignments"] == {"X3-VALID": "briefing"}
 
 
 def test_v034_mixed_channel_interleaves_dashboard_and_message(tmp_path: Path) -> None:
@@ -223,6 +296,51 @@ def test_identityless_checkin_is_rejected_without_creating_unknown_device(
         assert response.status_code == 400
         assert response.json()["detail"] == "X-FlexDisplay-ID is required"
         assert client.get("/api/v1/devices").json()["devices"] == []
+
+
+def test_compact_device_list_keeps_sparkline_data_without_diagnostic_histories(
+    tmp_path: Path,
+) -> None:
+    state_path = tmp_path / "state.json"
+    state_path.write_text(
+        json.dumps(
+            {
+                "devices": {
+                    "X3-COMPACT": {
+                        "device_id": "X3-COMPACT",
+                        "model": "XTEINK_X3",
+                        "checkin_history": [
+                            {"at": f"2026-08-03T00:{index:02d}:00Z", "rssi": -60}
+                            for index in range(30)
+                        ],
+                        "recent_button_events": [{"sequence": 1}],
+                        "reset_history": [{"reason": "software"}],
+                        "command_history": [{"command": "refresh"}],
+                        "firmware_progress_history": [{"percent": 50}],
+                        "management_history": [{"event": "policy"}],
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app(BridgeConfig(state_path=state_path))) as client:
+        full = client.get("/api/v1/devices").json()["devices"][0]
+        compact = client.get("/api/v1/devices?compact=true").json()["devices"][0]
+
+    assert len(full["checkin_history"]) == 30
+    assert len(compact["checkin_history"]) == 24
+    assert compact["checkin_history"][0]["at"] == "2026-08-03T00:06:00Z"
+    for key in (
+        "recent_button_events",
+        "reset_history",
+        "command_history",
+        "firmware_progress_history",
+        "management_history",
+    ):
+        assert key in full
+        assert key not in compact
 
 
 def test_legacy_unknown_device_is_purged_from_registry_and_rollout(

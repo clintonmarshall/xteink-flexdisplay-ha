@@ -186,10 +186,22 @@ def parse_channel(channel_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         raise ContentChannelValidationError(
             f"A channel must contain between 1 and {MAX_CHANNEL_ITEMS} items"
         )
+    items = [_item(value, index) for index, value in enumerate(raw_items)]
+    used_ids: set[str] = set()
+    for index, item in enumerate(items):
+        base = str(item.get("id") or f"item-{index + 1}")
+        candidate = base
+        suffix = 2
+        while candidate in used_ids:
+            marker = f"-{suffix}"
+            candidate = f"{base[: 48 - len(marker)]}{marker}"
+            suffix += 1
+        item["id"] = candidate
+        used_ids.add(candidate)
     return {
         "id": channel_id,
         "name": _bounded(payload.get("name"), channel_id, 64),
-        "items": [_item(value, index) for index, value in enumerate(raw_items)],
+        "items": items,
         "updated_at": datetime.now(UTC).isoformat(timespec="seconds"),
     }
 
@@ -305,10 +317,15 @@ class ContentChannelStore:
             try:
                 payload = json.loads(self.path.read_text(encoding="utf-8"))
                 if isinstance(payload, dict):
+                    assignments = dict(payload.get("assignments") or {})
                     return {
                         "version": 1,
                         "channels": dict(payload.get("channels") or {}),
-                        "assignments": dict(payload.get("assignments") or {}),
+                        "assignments": {
+                            device_id: channel_id
+                            for device_id, channel_id in assignments.items()
+                            if device_id and device_id.upper() != "UNKNOWN"
+                        },
                     }
             except (OSError, ValueError):
                 pass

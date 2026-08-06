@@ -1272,7 +1272,7 @@
       const grid = $("#fleetHealthGrid");
       grid.innerHTML = '<div class="empty">Loading fleet health…</div>';
       try {
-        const response = await api("devices");
+        const response = await api("devices?compact=true");
         const payload = await response.json();
         state.devices = payload.devices || [];
         const histories = await Promise.all(state.devices.map(async (device) => {
@@ -1820,7 +1820,7 @@
     function meshFilterQuery(reset) {
       const params = new URLSearchParams();
       params.set("after", reset ? "0" : String(Math.max(0, (state.mesh.cursor || 0) - 32)));
-      params.set("limit", "32");
+      params.set("limit", "16");
       if (!reset && state.mesh.sessionId) params.set("session_id", String(state.mesh.sessionId));
       const search = $("#meshSearch").value.trim();
       if (new TextEncoder().encode(search).length > 80) {
@@ -2577,7 +2577,7 @@
     }
 
     function defaultContentItem(type) {
-      const id = `item-${Date.now().toString(36)}`;
+      const id = uniqueId("item");
       if (type === "dashboard") return {id, type, enabled:true, title:"Home Assistant"};
       if (type === "quote") return {id, type, enabled:true, title:"Quote of the day", selection:"daily", footer:"Quote of the day", quotes:[]};
       if (type === "rss") return {id, type, enabled:true, title:"Australian news", preset:"sbs_australia", url:"https://www.sbs.com.au/news/topic/australia/feed", source:"SBS News", layout:"digest", limit:4, cache_seconds:900};

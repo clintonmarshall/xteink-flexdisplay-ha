@@ -21,7 +21,8 @@ class FlexHubClientError(ValueError):
 class FlexHubClient:
     """Persist a FlexHub connection and expose its bounded status endpoint."""
 
-    MESHTASTIC_MESSAGE_CAPACITY = 32
+    # Kept in sync with the memory-constrained SenseCAP FlexHub ring buffer.
+    MESHTASTIC_MESSAGE_CAPACITY = 16
 
     def __init__(
         self,

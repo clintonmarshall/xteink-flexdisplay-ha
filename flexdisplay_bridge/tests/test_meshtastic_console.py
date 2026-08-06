@@ -87,7 +87,7 @@ def test_client_filters_messages_and_tracks_compact_console_state(
     assert console["cursor"] == 17
     assert client.fetch_messages(after=10)[1] == []
     client.fetch_messages(limit=500, session_id=42)
-    assert calls[-1][1]["params"]["limit"] == 32
+    assert calls[-1][1]["params"]["limit"] == 16
     assert calls[-1][1]["params"]["session_id"] == 42
     client.observe_meshtastic_messages(
         {

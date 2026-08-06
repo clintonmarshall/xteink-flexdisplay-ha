@@ -13,6 +13,8 @@ from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from PIL import Image, ImageDraw, ImageFont, ImageOps, UnidentifiedImageError
 
+from .eink_calibration import calibrate_monochrome, normalize_model
+
 MAX_IMAGE_BYTES = 8 * 1024 * 1024
 MAX_IMAGE_PIXELS = 20_000_000
 ALBUM_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
@@ -159,7 +161,11 @@ def render_eink(
             font=font,
         )
 
-    rendered = canvas.convert("1", dither=Image.Dither.FLOYDSTEINBERG)
+    rendered = calibrate_monochrome(
+        canvas,
+        model=normalize_model(None, width, height),
+        photo=True,
+    )
     output = BytesIO()
     rendered.save(output, format=output_format)
     return output.getvalue()
@@ -235,6 +241,16 @@ class PhotoFrameMediaStore:
                     payload.setdefault("albums", {})
                     payload.setdefault("assignments", {})
                     payload.setdefault("playback", {})
+                    payload["assignments"] = {
+                        device_id: album_id
+                        for device_id, album_id in payload["assignments"].items()
+                        if device_id and device_id.upper() != "UNKNOWN"
+                    }
+                    payload["playback"] = {
+                        device_id: state
+                        for device_id, state in payload["playback"].items()
+                        if device_id and device_id.upper() != "UNKNOWN"
+                    }
                     if "default" not in payload["albums"]:
                         payload["albums"]["default"] = self._default_album()
                     return payload

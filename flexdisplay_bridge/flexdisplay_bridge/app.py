@@ -589,6 +589,12 @@ def _decorate_device(
                 power_state = (
                     "awake" if age <= grace else ("sleeping" if online else "offline")
                 )
+            elif sleep_action == "awake":
+                # Live/USB-kiosk devices intentionally report only on their
+                # refresh interval. A quiet period longer than 90 seconds does
+                # not mean they slept when their last explicit plan was to
+                # remain awake.
+                power_state = "awake" if online else "offline"
             else:
                 power_state = (
                     "awake" if age <= 90 else ("sleeping" if online else "offline")
@@ -2081,24 +2087,34 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/devices")
-    def devices() -> dict[str, Any]:
+    def devices(compact: bool = False) -> dict[str, Any]:
         store.expire_stale_firmware_installs(settings.firmware.stale_install_seconds)
-        return {
-            "devices": [
-                {
-                    **_decorate_device(
-                        record,
-                        settings,
-                        store,
-                        dashboards.names(),
-                    ),
-                    "screen_history_count": len(
-                        screen_history.list(str(record.get("device_id") or ""))
-                    ),
-                }
-                for record in store.all()
-            ]
-        }
+        payload: list[dict[str, Any]] = []
+        for record in store.all():
+            decorated = {
+                **_decorate_device(record, settings, store, dashboards.names()),
+                "screen_history_count": len(
+                    screen_history.list(str(record.get("device_id") or ""))
+                ),
+            }
+            if compact:
+                # Studio needs a short check-in series for its sparklines, but
+                # not the large diagnostic/event histories returned by the
+                # per-device detail endpoint. Keeping those out of the fleet
+                # poll removes most of a multi-device response and JSON parse.
+                decorated["checkin_history"] = list(
+                    decorated.get("checkin_history") or []
+                )[-24:]
+                for key in (
+                    "recent_button_events",
+                    "reset_history",
+                    "command_history",
+                    "firmware_progress_history",
+                    "management_history",
+                ):
+                    decorated.pop(key, None)
+            payload.append(decorated)
+        return {"devices": payload}
 
     @app.get("/api/v1/devices/{device_id}")
     def device(device_id: str) -> dict[str, Any]:

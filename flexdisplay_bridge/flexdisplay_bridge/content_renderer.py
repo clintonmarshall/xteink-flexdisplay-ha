@@ -7,6 +7,7 @@ import qrcode
 from PIL import Image, ImageDraw, ImageFont
 
 from .content_channels import ContentPage
+from .eink_calibration import calibrate_monochrome, normalize_model
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.ImageFont:
@@ -126,5 +127,9 @@ def render_content_page(
     draw.text((margin, footer_top + max(12, footer // 4)), footer_text, fill=0, font=footer_font)
 
     output = io.BytesIO()
-    canvas.convert("1", dither=Image.Dither.FLOYDSTEINBERG).save(output, format="PNG", optimize=True)
+    calibrate_monochrome(
+        canvas,
+        model=normalize_model(None, width, height),
+        photo=False,
+    ).save(output, format="PNG", optimize=True)
     return output.getvalue()
