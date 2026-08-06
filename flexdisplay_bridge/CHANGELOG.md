@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.36.1
+
+- Bundle the verified `1.5.0-flexdisplay.0.36.0` OTA image directly in the
+  Home Assistant App and align the runtime manifest checksum and size. This
+  keeps fleet updates working when the firmware release repository is private.
+
 ## 0.36.0
 
 - Add model-aware X3/X4 e-paper calibration to dashboards, photo frames, and
