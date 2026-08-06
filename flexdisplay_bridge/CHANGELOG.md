@@ -5,6 +5,8 @@
 - Bundle the verified `1.5.0-flexdisplay.0.36.0` OTA image directly in the
   Home Assistant App and align the runtime manifest checksum and size. This
   keeps fleet updates working when the firmware release repository is private.
+- Publish the same verified OTA image on the public Home Assistant release as
+  a network fallback, while migrating saved private v0.36 manifests safely.
 
 ## 0.36.0
 

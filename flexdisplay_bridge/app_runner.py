@@ -14,13 +14,22 @@ CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
     "firmware_version": "1.5.0-flexdisplay.0.36.0",
     "firmware_url": (
-        "https://github.com/clintonmarshall/xteink-flexdisplay/"
-        "releases/download/v0.36.0/firmware.bin"
+        "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+        "releases/download/v0.36.1/firmware.bin"
     ),
     "firmware_sha256": "039a2d04325a8dadab911322abf10e4a2b098ac8b95af7662a015c4db15d98eb",
     "firmware_size": 5_909_328,
 }
 LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.5.0-flexdisplay.0.36.0",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay/"
+            "releases/download/v0.36.0/firmware.bin"
+        ),
+        "firmware_sha256": "039a2d04325a8dadab911322abf10e4a2b098ac8b95af7662a015c4db15d98eb",
+        "firmware_size": 5_909_328,
+    },
     {
         "firmware_version": "1.5.0-flexdisplay.0.34.0",
         "firmware_url": (

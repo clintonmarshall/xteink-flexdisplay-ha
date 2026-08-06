@@ -37,7 +37,7 @@ options:
   screen_history_limit: 5
   bridge_api_key: ""
   firmware_version: 1.5.0-flexdisplay.0.36.0
-  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay/releases/download/v0.36.0/firmware.bin
+  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/v0.36.1/firmware.bin
   firmware_sha256: 039a2d04325a8dadab911322abf10e4a2b098ac8b95af7662a015c4db15d98eb
   firmware_size: 5909328
   firmware_minimum_battery: 40
