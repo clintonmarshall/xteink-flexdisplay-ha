@@ -91,6 +91,7 @@ class DeviceConfig:
     unchanged_image_multiplier: int = 2
     stay_awake_on_usb: bool = True
     manual_wake_grace_seconds: int = 60
+    rendering_profile: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -112,6 +113,7 @@ class ProvisioningConfig:
     unchanged_image_multiplier: int = 2
     stay_awake_on_usb: bool = True
     manual_wake_grace_seconds: int = 60
+    rendering_profile: str = "standard"
 
 
 @dataclass(frozen=True)
@@ -219,6 +221,7 @@ class BridgeConfig:
             unchanged_image_multiplier=self.provisioning.unchanged_image_multiplier,
             stay_awake_on_usb=self.provisioning.stay_awake_on_usb,
             manual_wake_grace_seconds=self.provisioning.manual_wake_grace_seconds,
+            rendering_profile=self.provisioning.rendering_profile,
         )
 
     def profile(self, device: DeviceConfig) -> DashboardProfileConfig | None:
@@ -349,6 +352,7 @@ def _device(
         unchanged_image_multiplier=max(1, min(12, int(value.get("unchanged_image_multiplier", 2)))),
         stay_awake_on_usb=bool(value.get("stay_awake_on_usb", True)),
         manual_wake_grace_seconds=max(0, min(600, int(value.get("manual_wake_grace_seconds", 60)))),
+        rendering_profile=_choice(value.get("rendering_profile"), {"standard", "photo"}, "standard"),
     )
 
 
@@ -585,6 +589,11 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         stay_awake_on_usb=bool(provisioning_raw.get("stay_awake_on_usb", True)),
         manual_wake_grace_seconds=max(
             0, min(600, int(provisioning_raw.get("manual_wake_grace_seconds", 60)))
+        ),
+        rendering_profile=_choice(
+            provisioning_raw.get("rendering_profile"),
+            {"standard", "photo"},
+            "standard",
         ),
     )
 

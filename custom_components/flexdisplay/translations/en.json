@@ -265,6 +265,9 @@
       },
       "fleet_policy": {
         "name": "Fleet policy"
+      },
+      "rendering_profile": {
+        "name": "Display rendering"
       }
     },
     "number": {

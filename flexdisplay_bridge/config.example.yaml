@@ -23,6 +23,8 @@ provisioning:
   unchanged_image_multiplier: 2
   stay_awake_on_usb: true
   manual_wake_grace_seconds: 60
+  # standard is fastest; photo enables the experimental X4 full-refresh path.
+  rendering_profile: standard
 
 home_assistant:
   base_url: http://homeassistant.local:8123

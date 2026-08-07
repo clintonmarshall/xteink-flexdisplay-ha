@@ -1311,6 +1311,7 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
                 "active_end": "21:30",
                 "timezone": "Australia/Melbourne",
                 "low_battery_percent": 40,
+                "rendering_profile": "photo",
             },
         )
         assert provisioned.status_code == 200
@@ -1324,6 +1325,7 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert device["assigned_active_start"] == "07:00"
         assert device["assigned_active_end"] == "21:30"
         assert device["assigned_low_battery_percent"] == 40
+        assert device["assigned_rendering_profile"] == "photo"
 
         screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert screen.headers["x-flexdisplay-device-name"] == "Showroom Panel"
@@ -1331,7 +1333,15 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert screen.headers["x-flexdisplay-profile"] == "showroom"
         assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
         assert screen.headers["x-flexdisplay-live-mode"] == "true"
+        assert screen.headers["x-flexdisplay-rendering-profile"] == "photo"
         assert screen.headers["x-flexdisplay-sleep-reason"] == "live_mode"
+
+        invalid = client.put(
+            "/api/v1/devices/X4-DEMO01/provision",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+            json={"rendering_profile": "colour"},
+        )
+        assert invalid.status_code == 400
 
 
 def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) -> None:
@@ -1427,6 +1437,22 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
             headers={"X-FlexDisplay-Bridge-Key": "secret"},
         ).json()
         assert photo_library["assignments"]["X4-FLEET02"] == "default"
+
+        photo_quality = client.put(
+            "/api/v1/fleet/policy",
+            headers={"X-FlexDisplay-Bridge-Key": "secret"},
+            json={
+                "profile": "x4_photo",
+                "scope": "devices",
+                "device_ids": ["X4-FLEET02"],
+            },
+        )
+        assert photo_quality.status_code == 200
+        photo_screen = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": "X4-FLEET02"},
+        )
+        assert photo_screen.headers["x-flexdisplay-rendering-profile"] == "photo"
 
 
 def test_fleet_management_ui_exposes_complete_device_controls(tmp_path: Path) -> None:
