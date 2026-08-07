@@ -915,6 +915,7 @@
             <div class="field-grid"><label>Low battery at<input id="policyLowBattery" type="number" min="10" max="80" value="30"></label><label>Low-battery slowdown<input id="policyLowMultiplier" type="number" min="1" max="12" value="4"></label></div>
             <div class="field-grid"><label>Unchanged slowdown<input id="policyUnchangedMultiplier" type="number" min="1" max="12" value="2"></label><label>Wake grace seconds<input id="policyWakeGrace" type="number" min="0" max="600" value="60"></label></div>
             <div class="field-grid"><label>Active from<input id="policyActiveStart" type="time" value="00:00"></label><label>Active until<input id="policyActiveEnd" type="time" value="00:00"></label></div>
+            <label>Display rendering<select id="policyRenderingProfile"><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 full refresh and richer shading</option></select></label>
             <label>Timezone<input id="policyTimezone" maxlength="64" value="Australia/Melbourne"></label>
             <div class="button-row"><button id="saveFleetPolicyProfile" class="primary">Save profile</button><button id="deleteFleetPolicyProfile" class="danger">Delete</button><button id="cancelFleetPolicyEdit">Cancel</button></div>
           </div>
@@ -926,6 +927,7 @@
           <label>Default application<select id="fleetPolicyMode"><option value="unchanged">Keep current default</option><option value="home_assistant">Home Assistant dashboard</option><option value="photo_frame">Photo Frame</option><option value="reader">CrossPoint Reader</option><option value="trmnl">TRMNL</option><option value="opendisplay">OpenDisplay</option></select></label>
           <label>Dashboard profile<select id="fleetPolicyDashboard"><option value="">Keep current dashboard</option></select></label>
           <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
+          <label>Display rendering<select id="fleetPolicyRendering"><option value="unchanged">Keep current rendering</option><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 experimental quality</option></select></label>
           <label>Delivery<select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
           <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
           <p class="small muted" style="margin:0">A policy is applied after the display wakes, saves the new revision, and confirms it on its following check-in. Studio now distinguishes waiting-for-wake from waiting-for-confirmation.</p>
@@ -1380,6 +1382,7 @@
       $("#policyWakeGrace").value = settings.manual_wake_grace_seconds ?? 60;
       $("#policyActiveStart").value = settings.active_start || "00:00";
       $("#policyActiveEnd").value = settings.active_end || "00:00";
+      $("#policyRenderingProfile").value = settings.rendering_profile || "standard";
       $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
       $("#deleteFleetPolicyProfile").hidden = false;
     }
@@ -1403,6 +1406,7 @@
       $("#policyWakeGrace").value = settings.manual_wake_grace_seconds ?? 60;
       $("#policyActiveStart").value = settings.active_start || "00:00";
       $("#policyActiveEnd").value = settings.active_end || "00:00";
+      $("#policyRenderingProfile").value = settings.rendering_profile || "standard";
       $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
       $("#deleteFleetPolicyProfile").hidden = true;
       $("#fleetPolicyId").focus();
@@ -1427,6 +1431,7 @@
             manual_wake_grace_seconds: Number($("#policyWakeGrace").value),
             active_start: $("#policyActiveStart").value,
             active_end: $("#policyActiveEnd").value,
+            rendering_profile: $("#policyRenderingProfile").value,
             timezone: $("#policyTimezone").value,
           },
         }});
@@ -1533,6 +1538,7 @@
           mode: $("#fleetPolicyMode").value,
           dashboard_profile: $("#fleetPolicyDashboard").value,
           photo_album: $("#fleetPolicyAlbum").value,
+          overrides: $("#fleetPolicyRendering").value === "unchanged" ? {} : {rendering_profile: $("#fleetPolicyRendering").value},
           delivery: $("#fleetPolicyDelivery").value,
         }});
         const result = await response.json();

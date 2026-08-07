@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.36.1"
+version: "0.37.0"
 slug: flexdisplay_bridge
 description: Render Home Assistant dashboards and manage XTEINK X3/X4 FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay
@@ -36,10 +36,10 @@ options:
   screen_history_enabled: true
   screen_history_limit: 5
   bridge_api_key: ""
-  firmware_version: 1.5.0-flexdisplay.0.36.0
-  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/v0.36.1/firmware.bin
-  firmware_sha256: 039a2d04325a8dadab911322abf10e4a2b098ac8b95af7662a015c4db15d98eb
-  firmware_size: 5909328
+  firmware_version: 1.5.0-flexdisplay.0.37.0
+  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/v0.37.0/firmware.bin
+  firmware_sha256: 6c1d7e028e45f1c7e26dd80539e7207b1bbc4bca485d8104da250391f83126d5
+  firmware_size: 5917888
   firmware_minimum_battery: 40
   firmware_canary_required: true
   firmware_require_usb_for_canary: true

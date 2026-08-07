@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.37.0
+
+- Isolate FlexDisplay-owned settings in `/.flexdisplay/settings.json`, with
+  automatic migration from legacy CrossPoint settings and recovery from a
+  damaged settings file.
+- Harden OpenDisplay BLE/LAN ownership, stale-session handling, connected idle
+  timeouts, and adaptive ESP32-C3 memory pressure while retaining BLE fallback.
+- Add experimental X4 photo rendering with full refresh, a Fleet policy preset,
+  Studio policy controls, and a per-device Home Assistant rendering selector.
+- Incorporate newer FreeInk display/sleep/memory handling plus CrossPoint Wi-Fi
+  credential integrity, thread-safety, watchdog, and BiDi RAM improvements.
+- Improve SenseCAP FlexHub reliability with bounded Meshtastic stream writes,
+  BLE logging back-pressure, safe partial AES-CCM output, PSRAM TLS allocation,
+  fine-grained shared SPI locking, and RP2040/SD link recovery telemetry.
+
 ## 0.36.1
 
 - Bundle the verified `1.5.0-flexdisplay.0.36.0` OTA image directly in the

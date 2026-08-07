@@ -106,6 +106,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "manual_wake_grace_seconds": 30,
             "low_battery_multiplier": 6,
             "unchanged_image_multiplier": 4,
+            "rendering_profile": "standard",
         },
     },
     "balanced": {
@@ -120,6 +121,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "manual_wake_grace_seconds": 60,
             "low_battery_multiplier": 4,
             "unchanged_image_multiplier": 2,
+            "rendering_profile": "standard",
         },
     },
     "usb_kiosk": {
@@ -134,6 +136,22 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "manual_wake_grace_seconds": 120,
             "low_battery_multiplier": 2,
             "unchanged_image_multiplier": 1,
+            "rendering_profile": "standard",
+        },
+    },
+    "x4_photo": {
+        "label": "X4 Photo Quality",
+        "description": "Experimental full-refresh rendering tuned for X4 photographs and shaded artwork.",
+        "settings": {
+            "live_mode": False,
+            "intelligent_sleep": True,
+            "stay_awake_on_usb": True,
+            "refresh_interval_seconds": 1800,
+            "manual_sleep_seconds": 900,
+            "manual_wake_grace_seconds": 60,
+            "low_battery_multiplier": 4,
+            "unchanged_image_multiplier": 2,
+            "rendering_profile": "photo",
         },
     },
 }
@@ -631,6 +649,7 @@ def _decorate_device(
     result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
     result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
+    result["assigned_rendering_profile"] = profile.rendering_profile
     desired_revision = int(result.get("assigned_policy_revision") or 0)
     reported_revision = int(result.get("reported_policy_revision") or 0)
     result["assigned_policy_name"] = str(result.get("assigned_policy_name") or "custom")
@@ -821,6 +840,12 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             0,
             600,
         ),
+        rendering_profile=(
+            str(record.get("assigned_rendering_profile") or base.rendering_profile)
+            if str(record.get("assigned_rendering_profile") or base.rendering_profile)
+            in {"standard", "photo"}
+            else "standard"
+        ),
     )
 
 
@@ -959,6 +984,11 @@ def _provisioning_assignment(
             )
     if "stay_awake_on_usb" in payload:
         assignment["assigned_stay_awake_on_usb"] = bool(payload["stay_awake_on_usb"])
+    if "rendering_profile" in payload:
+        rendering_profile = str(payload["rendering_profile"]).strip().lower()
+        if rendering_profile not in {"standard", "photo"}:
+            raise HTTPException(status_code=400, detail="Unsupported rendering profile")
+        assignment["assigned_rendering_profile"] = rendering_profile
     return assignment
 
 
@@ -3251,6 +3281,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "policy_revision": record.get("policy_revision"),
                     "reported_policy_revision": record.get("reported_policy_revision"),
                     "policy_sync_state": record.get("policy_sync_state"),
+                    "rendering_profile": record.get("assigned_rendering_profile")
+                    or "standard",
                     "last_seen": record.get("last_seen"),
                     "provisioning_updated_at": record.get("provisioning_updated_at"),
                     "update_available": record.get("update_available"),
@@ -3305,6 +3337,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "active_start",
             "active_end",
             "timezone",
+            "rendering_profile",
         }
         unknown = set(raw_settings) - allowed
         if unknown:
@@ -3754,6 +3787,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_unchanged_image_multiplier": configured.unchanged_image_multiplier,
                     "assigned_stay_awake_on_usb": configured.stay_awake_on_usb,
                     "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
+                    "assigned_rendering_profile": configured.rendering_profile,
                 },
             )
         button_events = _button_events(
@@ -3881,6 +3915,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     )
                     response.headers["X-FlexDisplay-Live-Mode"] = (
                         "true" if profile.live_mode else "false"
+                    )
+                    response.headers["X-FlexDisplay-Rendering-Profile"] = (
+                        profile.rendering_profile
                     )
                     response.headers["X-FlexDisplay-Policy-Revision"] = str(
                         int(record.get("assigned_policy_revision") or 0)
@@ -4069,6 +4106,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
                 response.headers["X-FlexDisplay-Live-Mode"] = (
                     "true" if profile.live_mode else "false"
+                )
+                response.headers["X-FlexDisplay-Rendering-Profile"] = (
+                    profile.rendering_profile
                 )
                 response.headers["X-FlexDisplay-Policy-Revision"] = str(
                     int(record.get("assigned_policy_revision") or 0)
@@ -4362,6 +4402,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             response.headers["X-FlexDisplay-Live-Mode"] = (
                 "true" if profile.live_mode else "false"
+            )
+            response.headers["X-FlexDisplay-Rendering-Profile"] = (
+                profile.rendering_profile
             )
             response.headers["X-FlexDisplay-Policy-Revision"] = str(
                 int(record.get("assigned_policy_revision") or 0)

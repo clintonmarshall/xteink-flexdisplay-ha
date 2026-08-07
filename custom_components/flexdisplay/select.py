@@ -125,6 +125,31 @@ class FlexDisplayPolicySelect(FlexDisplayEntity, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayRenderingProfileSelect(FlexDisplayEntity, SelectEntity):
+    """Choose the panel refresh/rendering strategy for this display."""
+
+    _attr_translation_key = "rendering_profile"
+    _attr_options = ["standard", "photo"]
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_rendering_profile_select"
+
+    @property
+    def current_option(self) -> str | None:
+        current = str(self.record.get("assigned_rendering_profile") or "standard")
+        return current if current in self.options else "standard"
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unknown FlexDisplay rendering profile: {option}")
+        await self.coordinator.client.provision(
+            self.device_id,
+            {"rendering_profile": option},
+        )
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -140,5 +165,6 @@ async def async_setup_entry(
             FlexDisplayProfileSelect(coordinator, device_id),
             FlexDisplayModeSelect(coordinator, device_id),
             FlexDisplayPolicySelect(coordinator, device_id),
+            FlexDisplayRenderingProfileSelect(coordinator, device_id),
         ),
     )
