@@ -192,6 +192,37 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("min_free_heap"),
     ),
     FlexDisplaySensorDescription(
+        key="open_display_last_transport",
+        translation_key="open_display_last_transport",
+        value_fn=lambda record: record.get("open_display_last_transport") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="open_display_fallback",
+        translation_key="open_display_fallback",
+        value_fn=lambda record: record.get("open_display_fallback") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="open_display_min_free_heap",
+        translation_key="open_display_min_free_heap",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement="B",
+        value_fn=lambda record: record.get("open_display_min_free_heap"),
+    ),
+    FlexDisplaySensorDescription(
+        key="open_display_min_largest_block",
+        translation_key="open_display_min_largest_block",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement="B",
+        value_fn=lambda record: record.get("open_display_min_largest_block"),
+    ),
+    FlexDisplaySensorDescription(
+        key="open_display_lan_memory_blocked",
+        translation_key="open_display_lan_memory_blocked",
+        value_fn=lambda record: str(
+            bool(record.get("open_display_lan_memory_blocked"))
+        ).lower(),
+    ),
+    FlexDisplaySensorDescription(
         key="wake_reason",
         translation_key="wake_reason",
         value_fn=lambda record: record.get("wake_reason") or "unknown",

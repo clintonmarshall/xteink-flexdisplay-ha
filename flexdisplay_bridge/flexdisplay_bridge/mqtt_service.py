@@ -359,6 +359,30 @@ class MqttService:
                 "value_template": "{{ value_json.free_heap }}",
                 "entity_category": "diagnostic",
             },
+            "open_display_transport": {
+                "name": "OpenDisplay last transport",
+                "value_template": "{{ value_json.open_display_last_transport }}",
+                "entity_category": "diagnostic",
+            },
+            "open_display_fallback": {
+                "name": "OpenDisplay fallback reason",
+                "value_template": "{{ value_json.open_display_fallback }}",
+                "entity_category": "diagnostic",
+            },
+            "open_display_min_heap": {
+                "name": "OpenDisplay minimum free memory",
+                "device_class": "data_size",
+                "unit_of_measurement": "B",
+                "value_template": "{{ value_json.open_display_min_free_heap }}",
+                "entity_category": "diagnostic",
+            },
+            "open_display_min_block": {
+                "name": "OpenDisplay minimum largest memory block",
+                "device_class": "data_size",
+                "unit_of_measurement": "B",
+                "value_template": "{{ value_json.open_display_min_largest_block }}",
+                "entity_category": "diagnostic",
+            },
             "transfer_encoding": {
                 "name": "Last screen transfer",
                 "value_template": "{{ value_json.last_transfer_encoding }}",
@@ -711,6 +735,12 @@ class MqttService:
                 "set-policy",
                 state.get("available_policy_profiles")
                 or ["battery_saver", "balanced", "usb_kiosk"],
+            ),
+            "open_display_transport": (
+                "OpenDisplay transport",
+                "assigned_open_display_transport_policy",
+                "set-opendisplay-transport",
+                ["auto", "lan_preferred", "ble_only"],
             ),
         }
         for key, (name, field, command, options) in selects.items():

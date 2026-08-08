@@ -150,6 +150,33 @@ class FlexDisplayRenderingProfileSelect(FlexDisplayEntity, SelectEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayOpenDisplayTransportSelect(FlexDisplayEntity, SelectEntity):
+    """Choose the memory-safe OpenDisplay receiver transport policy."""
+
+    _attr_translation_key = "open_display_transport"
+    _attr_options = ["auto", "lan_preferred", "ble_only"]
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_open_display_transport_select"
+
+    @property
+    def current_option(self) -> str | None:
+        current = str(
+            self.record.get("assigned_open_display_transport_policy") or "auto"
+        )
+        return current if current in self.options else "auto"
+
+    async def async_select_option(self, option: str) -> None:
+        if option not in self.options:
+            raise ValueError(f"Unknown OpenDisplay transport policy: {option}")
+        await self.coordinator.client.provision(
+            self.device_id,
+            {"open_display_transport_policy": option},
+        )
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -166,5 +193,6 @@ async def async_setup_entry(
             FlexDisplayModeSelect(coordinator, device_id),
             FlexDisplayPolicySelect(coordinator, device_id),
             FlexDisplayRenderingProfileSelect(coordinator, device_id),
+            FlexDisplayOpenDisplayTransportSelect(coordinator, device_id),
         ),
     )
