@@ -916,6 +916,7 @@
             <div class="field-grid"><label>Unchanged slowdown<input id="policyUnchangedMultiplier" type="number" min="1" max="12" value="2"></label><label>Wake grace seconds<input id="policyWakeGrace" type="number" min="0" max="600" value="60"></label></div>
             <div class="field-grid"><label>Active from<input id="policyActiveStart" type="time" value="00:00"></label><label>Active until<input id="policyActiveEnd" type="time" value="00:00"></label></div>
             <label>Display rendering<select id="policyRenderingProfile"><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 full refresh and richer shading</option></select></label>
+            <label>OpenDisplay transport<select id="policyOpenDisplayTransport"><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred · fastest fleet delivery</option><option value="ble_only">BLE only · lowest memory use</option></select></label>
             <label>Timezone<input id="policyTimezone" maxlength="64" value="Australia/Melbourne"></label>
             <div class="button-row"><button id="saveFleetPolicyProfile" class="primary">Save profile</button><button id="deleteFleetPolicyProfile" class="danger">Delete</button><button id="cancelFleetPolicyEdit">Cancel</button></div>
           </div>
@@ -928,6 +929,7 @@
           <label>Dashboard profile<select id="fleetPolicyDashboard"><option value="">Keep current dashboard</option></select></label>
           <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
           <label>Display rendering<select id="fleetPolicyRendering"><option value="unchanged">Keep current rendering</option><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 experimental quality</option></select></label>
+          <label>OpenDisplay transport<select id="fleetPolicyOpenDisplayTransport"><option value="unchanged">Keep current transport policy</option><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred</option><option value="ble_only">BLE only</option></select></label>
           <label>Delivery<select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
           <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
           <p class="small muted" style="margin:0">A policy is applied after the display wakes, saves the new revision, and confirms it on its following check-in. Studio now distinguishes waiting-for-wake from waiting-for-confirmation.</p>
@@ -1383,6 +1385,7 @@
       $("#policyActiveStart").value = settings.active_start || "00:00";
       $("#policyActiveEnd").value = settings.active_end || "00:00";
       $("#policyRenderingProfile").value = settings.rendering_profile || "standard";
+      $("#policyOpenDisplayTransport").value = settings.open_display_transport_policy || "auto";
       $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
       $("#deleteFleetPolicyProfile").hidden = false;
     }
@@ -1407,6 +1410,7 @@
       $("#policyActiveStart").value = settings.active_start || "00:00";
       $("#policyActiveEnd").value = settings.active_end || "00:00";
       $("#policyRenderingProfile").value = settings.rendering_profile || "standard";
+      $("#policyOpenDisplayTransport").value = settings.open_display_transport_policy || "auto";
       $("#policyTimezone").value = settings.timezone || "Australia/Melbourne";
       $("#deleteFleetPolicyProfile").hidden = true;
       $("#fleetPolicyId").focus();
@@ -1432,6 +1436,7 @@
             active_start: $("#policyActiveStart").value,
             active_end: $("#policyActiveEnd").value,
             rendering_profile: $("#policyRenderingProfile").value,
+            open_display_transport_policy: $("#policyOpenDisplayTransport").value,
             timezone: $("#policyTimezone").value,
           },
         }});
@@ -1499,7 +1504,7 @@
         return `
         <div class="policy-device">
           <input type="checkbox" data-policy-device value="${escapeHtml(device.device_id)}" ${selectable ? "" : "disabled"} ${selectedDeviceIds.has(device.device_id) ? "checked" : ""}>
-          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"} · ${escapeHtml(battery)}<br>${escapeHtml(device.policy_name || "custom")} · ${escapeHtml(syncDetail)} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateActive ? updateStatus : updateStatus === "verified" ? "complete" : updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div>${updateActive ? `<div class="firmware-progress"><span style="width:${progress}%"></span></div>` : ""}<div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${updateActive ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}<button type="button" class="danger" data-remove-device="${escapeHtml(device.device_id)}">Remove</button></div></span>
+          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"} · ${escapeHtml(battery)}<br>${escapeHtml(device.policy_name || "custom")} · ${escapeHtml(syncDetail)} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}<br>OpenDisplay ${escapeHtml(device.open_display_transport_policy || "auto")} · last ${escapeHtml(device.open_display_last_transport || "none")}${device.open_display_fallback ? ` · fallback ${escapeHtml(device.open_display_fallback)}` : ""}${device.open_display_lan_memory_blocked ? " · LAN memory guard active" : ""}${device.open_display_min_free_heap ? ` · min heap ${escapeHtml(device.open_display_min_free_heap)} B` : ""}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateActive ? updateStatus : updateStatus === "verified" ? "complete" : updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div>${updateActive ? `<div class="firmware-progress"><span style="width:${progress}%"></span></div>` : ""}<div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${updateActive ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}<button type="button" class="danger" data-remove-device="${escapeHtml(device.device_id)}">Remove</button></div></span>
           <span class="sync-badge ${escapeHtml(syncState)}" title="${escapeHtml(syncDetail)}">${escapeHtml(syncLabel)}</span>
         </div>`;
       }).join("") : '<div class="empty">No FlexDisplay device has checked in yet.</div>';
@@ -1538,7 +1543,10 @@
           mode: $("#fleetPolicyMode").value,
           dashboard_profile: $("#fleetPolicyDashboard").value,
           photo_album: $("#fleetPolicyAlbum").value,
-          overrides: $("#fleetPolicyRendering").value === "unchanged" ? {} : {rendering_profile: $("#fleetPolicyRendering").value},
+          overrides: {
+            ...($("#fleetPolicyRendering").value === "unchanged" ? {} : {rendering_profile: $("#fleetPolicyRendering").value}),
+            ...($("#fleetPolicyOpenDisplayTransport").value === "unchanged" ? {} : {open_display_transport_policy: $("#fleetPolicyOpenDisplayTransport").value}),
+          },
           delivery: $("#fleetPolicyDelivery").value,
         }});
         const result = await response.json();

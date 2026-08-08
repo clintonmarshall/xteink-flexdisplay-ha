@@ -25,6 +25,8 @@ provisioning:
   manual_wake_grace_seconds: 60
   # standard is fastest; photo enables the experimental X4 full-refresh path.
   rendering_profile: standard
+  # auto uses LAN on USB and BLE on battery; alternatives are lan_preferred and ble_only.
+  open_display_transport_policy: auto
 
 home_assistant:
   base_url: http://homeassistant.local:8123

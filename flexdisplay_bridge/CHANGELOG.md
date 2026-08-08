@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.38.1
+
+- Add adaptive OpenDisplay transport policies: Auto uses LAN while USB powered
+  and memory-safe, LAN preferred requests the fastest local transfer, and BLE
+  only avoids the Wi-Fi memory cost.
+- Keep LAN and BLE mutually exclusive on X3/X4, with an automatic Wi-Fi teardown
+  and BLE fallback when ESP32-C3 heap pressure or fragmentation becomes unsafe.
+- Report the selected transport, fallback reason, minimum free heap, minimum
+  largest block, and LAN memory-guard state through the Bridge and Home
+  Assistant diagnostic entities.
+- Add per-device, fleet-policy, MQTT Discovery, and Dashboard Studio transport
+  controls with safe Battery Saver, Balanced, USB Kiosk, and X4 Photo defaults.
+- Keep self-hosted Terminus as a content-only source, ignore incompatible stock
+  firmware directives, resolve relative image paths, and reject unsupported
+  image URL schemes.
+
 ## 0.37.0
 
 - Isolate FlexDisplay-owned settings in `/.flexdisplay/settings.json`, with

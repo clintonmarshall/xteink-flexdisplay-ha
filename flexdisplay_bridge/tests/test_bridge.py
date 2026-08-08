@@ -958,6 +958,9 @@ def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> 
         app.state.mqtt.on_command("X3-APPMQTT", "set-mode", "photo_frame")
         app.state.mqtt.on_command("X3-APPMQTT", "set-policy", "battery_saver")
         app.state.mqtt.on_command("X3-APPMQTT", "set-active-start", "07:30")
+        app.state.mqtt.on_command(
+            "X3-APPMQTT", "set-opendisplay-transport", "lan_preferred"
+        )
 
         device = client.get("/api/v1/devices/X3-APPMQTT").json()
         assert device["assigned_refresh_interval_seconds"] == 3600
@@ -966,7 +969,8 @@ def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> 
         assert device["policy_revision"] > 0
         assert device["policy_sync_state"] == "pending"
         assert device["assigned_active_start"] == "07:30"
-        assert device["last_management_action"] == "set-active-start"
+        assert device["assigned_open_display_transport_policy"] == "lan_preferred"
+        assert device["last_management_action"] == "set-opendisplay-transport"
         assert device["last_management_action_success"] is True
 
 
@@ -1270,6 +1274,7 @@ def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) 
         assert screen.status_code == 200
         assert screen.headers["x-flexdisplay-profile"] == "wall"
         assert screen.headers["x-flexdisplay-assigned-mode"] == "home_assistant"
+        assert screen.headers["x-flexdisplay-opendisplay-transport-policy"] == "auto"
         record = client.get("/api/v1/devices/X3-NEW001").json()
         assert record["name"] == "X3-NEW001"
         assert record["assigned_profile"] == "wall"
@@ -1312,6 +1317,7 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
                 "timezone": "Australia/Melbourne",
                 "low_battery_percent": 40,
                 "rendering_profile": "photo",
+                "open_display_transport_policy": "lan_preferred",
             },
         )
         assert provisioned.status_code == 200
@@ -1326,6 +1332,7 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert device["assigned_active_end"] == "21:30"
         assert device["assigned_low_battery_percent"] == 40
         assert device["assigned_rendering_profile"] == "photo"
+        assert device["assigned_open_display_transport_policy"] == "lan_preferred"
 
         screen = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert screen.headers["x-flexdisplay-device-name"] == "Showroom Panel"
@@ -1334,6 +1341,10 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
         assert screen.headers["x-flexdisplay-refresh-interval"] == "300"
         assert screen.headers["x-flexdisplay-live-mode"] == "true"
         assert screen.headers["x-flexdisplay-rendering-profile"] == "photo"
+        assert (
+            screen.headers["x-flexdisplay-opendisplay-transport-policy"]
+            == "lan_preferred"
+        )
         assert screen.headers["x-flexdisplay-sleep-reason"] == "live_mode"
 
         invalid = client.put(
@@ -1342,6 +1353,26 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
             json={"rendering_profile": "colour"},
         )
         assert invalid.status_code == 400
+
+        telemetry = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-DEMO01",
+                "X-FlexDisplay-OpenDisplay-Transport-Policy": "lan_preferred",
+                "X-FlexDisplay-OpenDisplay-Last-Transport": "ble",
+                "X-FlexDisplay-OpenDisplay-Fallback": "memory_pressure",
+                "X-FlexDisplay-OpenDisplay-Min-Free-Heap": "22144",
+                "X-FlexDisplay-OpenDisplay-Min-Largest-Block": "7168",
+                "X-FlexDisplay-OpenDisplay-LAN-Memory-Blocked": "true",
+            },
+        )
+        assert telemetry.status_code == 200
+        device = client.get("/api/v1/devices/X4-DEMO01").json()
+        assert device["open_display_last_transport"] == "ble"
+        assert device["open_display_fallback"] == "memory_pressure"
+        assert device["open_display_min_free_heap"] == 22144
+        assert device["open_display_min_largest_block"] == 7168
+        assert device["open_display_lan_memory_blocked"] is True
 
 
 def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) -> None:
@@ -1432,6 +1463,7 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
         assert photo_policy.json()["photo_album"] == "default"
         x4 = client.get("/api/v1/devices/X4-FLEET02").json()
         assert x4["assigned_mode"] == "photo_frame"
+        assert x4["assigned_open_display_transport_policy"] == "ble_only"
         photo_library = client.get(
             "/api/v1/photo-frame",
             headers={"X-FlexDisplay-Bridge-Key": "secret"},
@@ -1461,6 +1493,8 @@ def test_fleet_management_ui_exposes_complete_device_controls(tmp_path: Path) ->
         html = client.get("/studio/").text
         assert "Waiting for wake" in html
         assert "% battery" in html
+        assert "OpenDisplay transport" in html
+        assert "policyOpenDisplayTransport" in html
         assert "data-remove-device" in html
         assert '$("#fleetPolicyScope").value = "devices";' in html
         assert "max-height: 390px" not in html

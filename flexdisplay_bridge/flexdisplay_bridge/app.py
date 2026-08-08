@@ -107,6 +107,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "low_battery_multiplier": 6,
             "unchanged_image_multiplier": 4,
             "rendering_profile": "standard",
+            "open_display_transport_policy": "ble_only",
         },
     },
     "balanced": {
@@ -122,6 +123,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "low_battery_multiplier": 4,
             "unchanged_image_multiplier": 2,
             "rendering_profile": "standard",
+            "open_display_transport_policy": "auto",
         },
     },
     "usb_kiosk": {
@@ -137,6 +139,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "low_battery_multiplier": 2,
             "unchanged_image_multiplier": 1,
             "rendering_profile": "standard",
+            "open_display_transport_policy": "lan_preferred",
         },
     },
     "x4_photo": {
@@ -152,6 +155,7 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "low_battery_multiplier": 4,
             "unchanged_image_multiplier": 2,
             "rendering_profile": "photo",
+            "open_display_transport_policy": "auto",
         },
     },
 }
@@ -650,6 +654,9 @@ def _decorate_device(
     result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
     result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
     result["assigned_rendering_profile"] = profile.rendering_profile
+    result["assigned_open_display_transport_policy"] = (
+        profile.open_display_transport_policy
+    )
     desired_revision = int(result.get("assigned_policy_revision") or 0)
     reported_revision = int(result.get("reported_policy_revision") or 0)
     result["assigned_policy_name"] = str(result.get("assigned_policy_name") or "custom")
@@ -846,6 +853,18 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             in {"standard", "photo"}
             else "standard"
         ),
+        open_display_transport_policy=(
+            str(
+                record.get("assigned_open_display_transport_policy")
+                or base.open_display_transport_policy
+            )
+            if str(
+                record.get("assigned_open_display_transport_policy")
+                or base.open_display_transport_policy
+            )
+            in {"auto", "lan_preferred", "ble_only"}
+            else "auto"
+        ),
     )
 
 
@@ -989,6 +1008,13 @@ def _provisioning_assignment(
         if rendering_profile not in {"standard", "photo"}:
             raise HTTPException(status_code=400, detail="Unsupported rendering profile")
         assignment["assigned_rendering_profile"] = rendering_profile
+    if "open_display_transport_policy" in payload:
+        transport_policy = str(payload["open_display_transport_policy"]).strip().lower()
+        if transport_policy not in {"auto", "lan_preferred", "ble_only"}:
+            raise HTTPException(
+                status_code=400, detail="Unsupported OpenDisplay transport policy"
+            )
+        assignment["assigned_open_display_transport_policy"] = transport_policy
     return assignment
 
 
@@ -1619,6 +1645,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 assignment["assigned_policy_name"] = payload
                 assignment["assigned_policy_revision"] = store.next_policy_revision()
                 store.provision(device_id, assignment)
+                store.queue_command(device_id, "refresh")
+            elif command == "set-opendisplay-transport":
+                selected_transport = payload.strip().lower()
+                if selected_transport not in {"auto", "lan_preferred", "ble_only"}:
+                    raise ValueError("Unsupported OpenDisplay transport policy")
+                store.provision(
+                    device_id,
+                    {
+                        "assigned_open_display_transport_policy": selected_transport
+                    },
+                )
                 store.queue_command(device_id, "refresh")
             elif command in {"set-name", "set-area"}:
                 field = "assigned_name" if command == "set-name" else "assigned_area"
@@ -3283,6 +3320,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "policy_sync_state": record.get("policy_sync_state"),
                     "rendering_profile": record.get("assigned_rendering_profile")
                     or "standard",
+                    "open_display_transport_policy": record.get(
+                        "assigned_open_display_transport_policy"
+                    )
+                    or "auto",
+                    "open_display_last_transport": record.get(
+                        "open_display_last_transport"
+                    )
+                    or "none",
+                    "open_display_fallback": record.get("open_display_fallback") or "",
+                    "open_display_min_free_heap": record.get(
+                        "open_display_min_free_heap"
+                    ),
+                    "open_display_min_largest_block": record.get(
+                        "open_display_min_largest_block"
+                    ),
+                    "open_display_lan_memory_blocked": record.get(
+                        "open_display_lan_memory_blocked"
+                    ),
                     "last_seen": record.get("last_seen"),
                     "provisioning_updated_at": record.get("provisioning_updated_at"),
                     "update_available": record.get("update_available"),
@@ -3338,6 +3393,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "active_end",
             "timezone",
             "rendering_profile",
+            "open_display_transport_policy",
         }
         unknown = set(raw_settings) - allowed
         if unknown:
@@ -3695,6 +3751,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_content_error: str | None = Header(default=None),
         x_flexdisplay_policy_revision: str | None = Header(default=None),
         x_flexdisplay_quick_action: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_transport_policy: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_last_transport: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_fallback: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_min_free_heap: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_min_largest_block: str | None = Header(default=None),
+        x_flexdisplay_opendisplay_lan_memory_blocked: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
@@ -3733,6 +3795,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "image_cached": image_cached,
             "reported_policy_revision": _optional_integer(
                 x_flexdisplay_policy_revision, 0, 2_147_483_647
+            ),
+            "reported_open_display_transport_policy": (
+                str(x_flexdisplay_opendisplay_transport_policy or "auto").lower()
+            ),
+            "open_display_last_transport": (
+                str(x_flexdisplay_opendisplay_last_transport or "none").lower()
+            ),
+            "open_display_fallback": _header_value(
+                x_flexdisplay_opendisplay_fallback
+            ),
+            "open_display_min_free_heap": _optional_integer(
+                x_flexdisplay_opendisplay_min_free_heap, 0, 1_000_000
+            ),
+            "open_display_min_largest_block": _optional_integer(
+                x_flexdisplay_opendisplay_min_largest_block, 0, 1_000_000
+            ),
+            "open_display_lan_memory_blocked": _boolean(
+                x_flexdisplay_opendisplay_lan_memory_blocked
             ),
         }
         if last_image_error is not None:
@@ -3788,6 +3868,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "assigned_stay_awake_on_usb": configured.stay_awake_on_usb,
                     "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
                     "assigned_rendering_profile": configured.rendering_profile,
+                    "assigned_open_display_transport_policy": (
+                        configured.open_display_transport_policy
+                    ),
                 },
             )
         button_events = _button_events(
@@ -3919,6 +4002,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Rendering-Profile"] = (
                         profile.rendering_profile
                     )
+                    response.headers[
+                        "X-FlexDisplay-OpenDisplay-Transport-Policy"
+                    ] = profile.open_display_transport_policy
                     response.headers["X-FlexDisplay-Policy-Revision"] = str(
                         int(record.get("assigned_policy_revision") or 0)
                     )
@@ -4110,6 +4196,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Rendering-Profile"] = (
                     profile.rendering_profile
                 )
+                response.headers[
+                    "X-FlexDisplay-OpenDisplay-Transport-Policy"
+                ] = profile.open_display_transport_policy
                 response.headers["X-FlexDisplay-Policy-Revision"] = str(
                     int(record.get("assigned_policy_revision") or 0)
                 )
@@ -4406,6 +4495,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Rendering-Profile"] = (
                 profile.rendering_profile
             )
+            response.headers[
+                "X-FlexDisplay-OpenDisplay-Transport-Policy"
+            ] = profile.open_display_transport_policy
             response.headers["X-FlexDisplay-Policy-Revision"] = str(
                 int(record.get("assigned_policy_revision") or 0)
             )

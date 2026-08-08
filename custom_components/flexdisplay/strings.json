@@ -91,6 +91,21 @@
       "minimum_free_heap": {
         "name": "Minimum free memory"
       },
+      "open_display_last_transport": {
+        "name": "OpenDisplay last transport"
+      },
+      "open_display_fallback": {
+        "name": "OpenDisplay fallback reason"
+      },
+      "open_display_min_free_heap": {
+        "name": "OpenDisplay minimum free memory"
+      },
+      "open_display_min_largest_block": {
+        "name": "OpenDisplay minimum largest memory block"
+      },
+      "open_display_lan_memory_blocked": {
+        "name": "OpenDisplay LAN memory guard"
+      },
       "wake_reason": {
         "name": "Wake reason"
       },
@@ -268,6 +283,9 @@
       },
       "rendering_profile": {
         "name": "Display rendering"
+      },
+      "open_display_transport": {
+        "name": "OpenDisplay transport"
       }
     },
     "number": {

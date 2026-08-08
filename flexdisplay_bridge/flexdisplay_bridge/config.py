@@ -92,6 +92,7 @@ class DeviceConfig:
     stay_awake_on_usb: bool = True
     manual_wake_grace_seconds: int = 60
     rendering_profile: str = "standard"
+    open_display_transport_policy: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -114,6 +115,7 @@ class ProvisioningConfig:
     stay_awake_on_usb: bool = True
     manual_wake_grace_seconds: int = 60
     rendering_profile: str = "standard"
+    open_display_transport_policy: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -222,6 +224,7 @@ class BridgeConfig:
             stay_awake_on_usb=self.provisioning.stay_awake_on_usb,
             manual_wake_grace_seconds=self.provisioning.manual_wake_grace_seconds,
             rendering_profile=self.provisioning.rendering_profile,
+            open_display_transport_policy=self.provisioning.open_display_transport_policy,
         )
 
     def profile(self, device: DeviceConfig) -> DashboardProfileConfig | None:
@@ -353,6 +356,11 @@ def _device(
         stay_awake_on_usb=bool(value.get("stay_awake_on_usb", True)),
         manual_wake_grace_seconds=max(0, min(600, int(value.get("manual_wake_grace_seconds", 60)))),
         rendering_profile=_choice(value.get("rendering_profile"), {"standard", "photo"}, "standard"),
+        open_display_transport_policy=_choice(
+            value.get("open_display_transport_policy"),
+            {"auto", "lan_preferred", "ble_only"},
+            "auto",
+        ),
     )
 
 
@@ -594,6 +602,11 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
             provisioning_raw.get("rendering_profile"),
             {"standard", "photo"},
             "standard",
+        ),
+        open_display_transport_policy=_choice(
+            provisioning_raw.get("open_display_transport_policy"),
+            {"auto", "lan_preferred", "ble_only"},
+            "auto",
         ),
     )
 
