@@ -262,6 +262,21 @@ def main() -> None:
     os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_USB_OVERRIDE"] = option(
         options, "firmware_maintenance_usb_override", True
     )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_VERSION"] = option(
+        options, "note4_firmware_version"
+    )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_URL"] = option(
+        options, "note4_firmware_url", "packaged"
+    )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SHA256"] = option(
+        options, "note4_firmware_sha256"
+    )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SIZE"] = option(
+        options, "note4_firmware_size", 0
+    )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_MINIMUM_BATTERY"] = option(
+        options, "note4_firmware_minimum_battery", 40
+    )
 
     if not CONFIG_PATH.exists():
         CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)

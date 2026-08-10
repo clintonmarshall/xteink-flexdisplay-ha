@@ -89,6 +89,50 @@ class FlexDisplayPolicySwitch(FlexDisplayEntity, SwitchEntity):
         await self._set(False)
 
 
+class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
+    """Mute the Note4 speaker without losing its selected volume."""
+
+    _attr_translation_key = "voice_mute"
+    _attr_entity_category = EntityCategory.CONFIG
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_voice_mute"
+
+    @property
+    def is_on(self) -> bool:
+        return bool(self.record.get("desired_voice_muted", self.record.get("voice_muted")))
+
+    async def _set(self, enabled: bool) -> None:
+        await self.coordinator.client.voice_settings(
+            self.device_id, {"muted": enabled}
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_on(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(False)
+
+
+def _entities_for_device(
+    coordinator: FlexDisplayCoordinator, device_id: str
+) -> tuple[SwitchEntity, ...]:
+    entities: list[SwitchEntity] = [
+        FlexDisplayPolicySwitch(coordinator, device_id, description)
+        for description in DESCRIPTIONS
+    ]
+    record = next(
+        (item for item in coordinator.data if item.get("device_id") == device_id), {}
+    )
+    if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
+        entities.append(FlexDisplayVoiceMute(coordinator, device_id))
+    return tuple(entities)
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -99,8 +143,5 @@ async def async_setup_entry(
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplayPolicySwitch(coordinator, device_id, description)
-            for description in DESCRIPTIONS
-        ),
+        _entities_for_device,
     )

@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.40.0"
+version: "0.41.0"
 slug: flexdisplay_bridge
 description: Render Home Assistant dashboards and manage XTEINK X3/X4 FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay
@@ -54,6 +54,11 @@ options:
   firmware_maintenance_end: "05:00"
   firmware_maintenance_timezone: Australia/Melbourne
   firmware_maintenance_usb_override: true
+  note4_firmware_version: 1.2.1-voice-remote
+  note4_firmware_url: packaged
+  note4_firmware_sha256: 16bc0a2b1bf9458805c6b63e28ed07b466e6893b59bc7a95056811abc4e367e8
+  note4_firmware_size: 2730384
+  note4_firmware_minimum_battery: 40
 schema:
   dashboard_title: str
   mqtt_enabled: bool
@@ -86,3 +91,8 @@ schema:
   firmware_maintenance_end: str
   firmware_maintenance_timezone: str
   firmware_maintenance_usb_override: bool
+  note4_firmware_version: str
+  note4_firmware_url: str
+  note4_firmware_sha256: str
+  note4_firmware_size: int
+  note4_firmware_minimum_battery: int(20,100)

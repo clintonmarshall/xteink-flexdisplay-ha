@@ -6,5 +6,6 @@ __pycache__/
 *.pyc
 *.bin
 !flexdisplay_bridge/firmware/firmware.bin
+!flexdisplay_bridge/firmware/note4.bin
 config.yaml.local
 data/

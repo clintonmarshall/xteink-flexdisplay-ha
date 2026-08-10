@@ -79,6 +79,8 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
                 "Update failed: "
                 + str(self.record.get("firmware_update_error") or "unknown error")
             )
+        if self.record.get("firmware_update_role") == "device":
+            return "Note4 update: checksum verified, rollback protected, and delivered over your local network."
         return "The first eligible device becomes the USB-powered canary."
 
     @property
