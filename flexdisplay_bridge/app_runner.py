@@ -20,6 +20,14 @@ DEFAULT_FIRMWARE = {
     "firmware_sha256": "068060b3780267d51ba7c8ea3de08da5c773361fda01b10641a9ecf35c264724",
     "firmware_size": 5_967_968,
 }
+DEFAULT_NOTE4_FIRMWARE = {
+    "note4_firmware_version": "1.2.1-voice-remote",
+    "note4_firmware_url": "packaged",
+    "note4_firmware_sha256": (
+        "16bc0a2b1bf9458805c6b63e28ed07b466e6893b59bc7a95056811abc4e367e8"
+    ),
+    "note4_firmware_size": 2_730_384,
+}
 LEGACY_PACKAGED_FIRMWARE = (
     {
         "firmware_version": "1.5.0-flexdisplay.0.37.0",
@@ -190,6 +198,19 @@ def firmware_options(options: dict) -> dict[str, str]:
     return {name: firmware_option(options, name) for name in DEFAULT_FIRMWARE}
 
 
+def note4_firmware_options(options: dict) -> dict[str, str]:
+    """Backfill Note4 release metadata for existing App installations."""
+    resolved: dict[str, str] = {}
+    for name, default in DEFAULT_NOTE4_FIRMWARE.items():
+        value = options.get(name)
+        if value is None or value == "" or (
+            name == "note4_firmware_size" and int(value) <= 0
+        ):
+            value = default
+        resolved[name] = str(value)
+    return resolved
+
+
 def main() -> None:
     """Configure and launch the bridge."""
     options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
@@ -262,18 +283,19 @@ def main() -> None:
     os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_USB_OVERRIDE"] = option(
         options, "firmware_maintenance_usb_override", True
     )
-    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_VERSION"] = option(
-        options, "note4_firmware_version"
-    )
-    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_URL"] = option(
-        options, "note4_firmware_url", "packaged"
-    )
-    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SHA256"] = option(
-        options, "note4_firmware_sha256"
-    )
-    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SIZE"] = option(
-        options, "note4_firmware_size", 0
-    )
+    note4_firmware = note4_firmware_options(options)
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_VERSION"] = note4_firmware[
+        "note4_firmware_version"
+    ]
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_URL"] = note4_firmware[
+        "note4_firmware_url"
+    ]
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SHA256"] = note4_firmware[
+        "note4_firmware_sha256"
+    ]
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_SIZE"] = note4_firmware[
+        "note4_firmware_size"
+    ]
     os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_MINIMUM_BATTERY"] = option(
         options, "note4_firmware_minimum_battery", 40
     )

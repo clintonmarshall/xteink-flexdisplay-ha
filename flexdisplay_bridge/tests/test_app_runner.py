@@ -3,9 +3,11 @@ from pathlib import Path
 
 from app_runner import (
     DEFAULT_FIRMWARE,
+    DEFAULT_NOTE4_FIRMWARE,
     LEGACY_PACKAGED_FIRMWARE,
     firmware_option,
     firmware_options,
+    note4_firmware_options,
 )
 
 
@@ -15,6 +17,43 @@ def test_bundled_firmware_matches_default_manifest() -> None:
 
     assert len(payload) == DEFAULT_FIRMWARE["firmware_size"]
     assert hashlib.sha256(payload).hexdigest() == DEFAULT_FIRMWARE["firmware_sha256"]
+
+
+def test_bundled_note4_firmware_matches_default_manifest() -> None:
+    firmware_path = Path(__file__).resolve().parents[1] / "firmware" / "note4.bin"
+    payload = firmware_path.read_bytes()
+
+    assert len(payload) == DEFAULT_NOTE4_FIRMWARE["note4_firmware_size"]
+    assert (
+        hashlib.sha256(payload).hexdigest()
+        == DEFAULT_NOTE4_FIRMWARE["note4_firmware_sha256"]
+    )
+
+
+def test_note4_firmware_options_backfills_existing_install() -> None:
+    options = {
+        "note4_firmware_version": "",
+        "note4_firmware_url": "",
+        "note4_firmware_sha256": "",
+        "note4_firmware_size": 0,
+    }
+
+    assert note4_firmware_options(options) == {
+        name: str(value) for name, value in DEFAULT_NOTE4_FIRMWARE.items()
+    }
+
+
+def test_note4_firmware_options_preserves_custom_manifest() -> None:
+    options = {
+        "note4_firmware_version": "9.9.9",
+        "note4_firmware_url": "https://example.test/note4.bin",
+        "note4_firmware_sha256": "b" * 64,
+        "note4_firmware_size": 4321,
+    }
+
+    assert note4_firmware_options(options) == {
+        name: str(value) for name, value in options.items()
+    }
 
 
 def test_firmware_option_uses_packaged_release_for_missing_values() -> None:
