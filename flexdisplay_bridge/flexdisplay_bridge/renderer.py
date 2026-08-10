@@ -925,6 +925,191 @@ def _draw_button_action_indicators(
             )
 
 
+def _elapsed_label(changed: datetime | None) -> str:
+    if changed is None:
+        return "--"
+    if changed.tzinfo is None:
+        changed = changed.astimezone()
+    seconds = max(0, int((datetime.now().astimezone() - changed.astimezone()).total_seconds()))
+    if seconds < 60:
+        return "NOW"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes} min"
+    hours, remainder = divmod(minutes, 60)
+    if hours < 24:
+        return f"{hours}h {remainder:02d}m" if remainder else f"{hours}h"
+    return f"{hours // 24}d"
+
+
+def _draw_house_pulse_garage(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    *,
+    open_state: bool,
+) -> None:
+    left, top, right, bottom = box
+    width = right - left
+    height = bottom - top
+    stroke = max(3, width // 28)
+    roof_y = top + height // 4
+    center_x = (left + right) // 2
+    draw.line((left, roof_y, center_x, top, right, roof_y), fill=0, width=stroke)
+    body_left = left + width // 10
+    body_right = right - width // 10
+    body_top = roof_y + stroke
+    body_bottom = bottom
+    draw.rectangle((body_left, body_top, body_right, body_bottom), outline=0, width=stroke)
+    door_left = body_left + width // 10
+    door_right = body_right - width // 10
+    door_top = body_top + height // 7
+    door_bottom = body_bottom - stroke
+    draw.rectangle((door_left, door_top, door_right, door_bottom), outline=0, width=stroke)
+    if open_state:
+        opening_top = door_top + height // 3
+        draw.rectangle((door_left + stroke, opening_top, door_right - stroke, door_bottom), fill=255)
+        draw.line((door_left, opening_top, door_right, opening_top), fill=0, width=stroke)
+    else:
+        for divider in range(1, 4):
+            y = door_top + (door_bottom - door_top) * divider // 4
+            draw.line((door_left, y, door_right, y), fill=0, width=max(2, stroke // 2))
+
+
+def _draw_house_pulse_speaker(
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+) -> None:
+    left, top, right, bottom = box
+    width = right - left
+    center_y = (top + bottom) // 2
+    stroke = max(2, width // 10)
+    draw.polygon(
+        [
+            (left, center_y - width // 7),
+            (left + width // 4, center_y - width // 7),
+            (left + width // 2, top),
+            (left + width // 2, bottom),
+            (left + width // 4, center_y + width // 7),
+            (left, center_y + width // 7),
+        ],
+        fill=255,
+    )
+    draw.arc((left + width // 3, top, right - width // 6, bottom), -48, 48, fill=255, width=stroke)
+    draw.arc((left + width // 4, top - width // 8, right, bottom + width // 8), -45, 45, fill=255, width=stroke)
+
+
+def _draw_house_pulse_footer_icon(
+    draw: ImageDraw.ImageDraw,
+    center_x: int,
+    top: int,
+    kind: str,
+) -> None:
+    stroke = 4
+    if kind == "up":
+        draw.line((center_x - 10, top + 16, center_x, top + 6, center_x + 10, top + 16), fill=0, width=stroke, joint="curve")
+    elif kind == "down":
+        draw.line((center_x - 10, top + 7, center_x, top + 17, center_x + 10, top + 7), fill=0, width=stroke, joint="curve")
+    else:
+        draw.ellipse((center_x - 12, top + 3, center_x + 12, top + 27), outline=0, width=stroke)
+
+
+def _render_house_pulse(
+    *,
+    title: str,
+    device: dict[str, Any],
+    width: int,
+    height: int,
+    entities: Iterable[EntityState],
+    ha_error: str,
+) -> bytes:
+    """Render the landscape, single-alert House Pulse surface for Note 4."""
+    image = Image.new("L", (width, height), 255)
+    draw = ImageDraw.Draw(image)
+    values = list(entities)
+    primary = values[0] if values else None
+    motion = values[1] if len(values) > 1 else None
+
+    state = str(primary.state if primary else "unknown").strip().casefold()
+    open_state = state in {"on", "open", "opening", "active", "detected", "true", "1"}
+    available = bool(primary and primary.available and state not in {"unknown", "unavailable"})
+    subject = str(primary.label if primary else "Garage").strip() or "Garage"
+    subject = subject.removesuffix(" door").removesuffix(" Door").upper()
+    headline = f"{subject} {'OPEN' if open_state else 'CLOSED'}" if available else f"{subject} UNKNOWN"
+    elapsed = _elapsed_label(primary.last_changed if primary else None)
+
+    header_height = max(26, height * 9 // 100)
+    footer_height = max(62, height * 21 // 100)
+    footer_top = height - footer_height
+    draw.rectangle((0, 0, width, header_height), fill=0)
+    header_font = _fit(draw, title or "HOME", width * 2 // 3, max(18, width // 19), True, 15)
+    draw.text((12, max(1, (header_height - header_font.size) // 2 - 1)), title or "HOME", fill=255, font=header_font)
+    _draw_house_pulse_speaker(draw, (width - 39, 5, width - 9, header_height - 4))
+
+    content_height = footer_top - header_height
+    split_x = width * 46 // 100
+    garage_margin = max(14, width // 30)
+    garage_top = header_height + max(24, content_height // 10)
+    garage_bottom = footer_top - max(24, content_height // 10)
+    _draw_house_pulse_garage(
+        draw,
+        (garage_margin, garage_top, split_x - garage_margin, garage_bottom),
+        open_state=open_state,
+    )
+
+    right_left = split_x + max(8, width // 45)
+    right_right = width - max(14, width // 28)
+    headline_font = _fit(draw, headline, right_right - right_left, max(28, width // 11), True, 18)
+    headline_y = header_height + max(13, content_height // 16)
+    draw.text((right_left, headline_y), headline, fill=0, font=headline_font)
+
+    elapsed_font = _fit(draw, elapsed, (right_right - right_left) * 2 // 3, max(55, width // 5), True, 34)
+    elapsed_y = headline_y + headline_font.size + 4
+    draw.text((right_left, elapsed_y), elapsed, fill=0, font=elapsed_font)
+
+    facts_top = min(footer_top - 65, elapsed_y + elapsed_font.size + 5)
+    draw.line((right_left, facts_top, right_right, facts_top), fill=0, width=1)
+    fact_font = _fit(draw, "No motion", right_right - right_left - 38, max(17, width // 20), True, 13)
+    motion_state = str(motion.state if motion else "unknown").strip().casefold()
+    motion_active = bool(
+        motion
+        and motion.available
+        and motion_state in {"on", "active", "detected", "true", "1"}
+    )
+    motion_text = "Motion detected" if motion_active else "No motion"
+    icon_size = max(24, min(31, content_height // 7))
+    _draw_icon(draw, "alert" if motion_active else "home", (right_left, facts_top + 7, right_left + icon_size, facts_top + 7 + icon_size))
+    draw.text((right_left + icon_size + 8, facts_top + 9), motion_text, fill=0, font=fact_font)
+    second_line = facts_top + max(37, icon_size + 12)
+    draw.line((right_left, second_line, right_right, second_line), fill=0, width=1)
+    _draw_icon(draw, "clock", (right_left, second_line + 6, right_left + icon_size, second_line + 6 + icon_size))
+    time_text = datetime.now().astimezone().strftime("%-I:%M %p").lower()
+    draw.text((right_left + icon_size + 8, second_line + 8), time_text, fill=0, font=fact_font)
+
+    draw.line((0, footer_top, width, footer_top), fill=0, width=2)
+    footer_font = _font(max(14, width // 25), True)
+    footer_labels = ("DETAILS", "CLOSE" if open_state else "CHECK", "SNOOZE")
+    footer_icons = ("up", "ok", "down")
+    slot_width = width // 3
+    for index, (label, kind) in enumerate(zip(footer_labels, footer_icons, strict=True)):
+        center_x = slot_width * index + slot_width // 2
+        _draw_house_pulse_footer_icon(draw, center_x, footer_top + 5, kind)
+        label_width = draw.textbbox((0, 0), label, font=footer_font)[2]
+        draw.text((center_x - label_width // 2, footer_top + 34), label, fill=0, font=footer_font)
+
+    if ha_error:
+        error_font = _font(max(11, width // 34), True)
+        label = "HOME ASSISTANT OFFLINE"
+        label_width = draw.textbbox((0, 0), label, font=error_font)[2]
+        draw.rectangle((width - label_width - 16, 0, width, header_height), fill=0)
+        draw.text((width - label_width - 8, 6), label, fill=255, font=error_font)
+
+    output = BytesIO()
+    calibrate_monochrome(image, model=str(device.get("model") or ""), photo=False).save(
+        output, format="PNG", optimize=True
+    )
+    return output.getvalue()
+
+
 class DashboardRenderer:
     def render(
         self,
@@ -943,6 +1128,15 @@ class DashboardRenderer:
     ) -> bytes:
         width = max(240, min(1200, width))
         height = max(240, min(1600, height))
+        if layout == "house_pulse":
+            return _render_house_pulse(
+                title=title,
+                device=device,
+                width=width,
+                height=height,
+                entities=entities,
+                ha_error=ha_error,
+            )
         image = Image.new("L", (width, height), 255)
         draw = ImageDraw.Draw(image)
         margin = max(14, width // 26)

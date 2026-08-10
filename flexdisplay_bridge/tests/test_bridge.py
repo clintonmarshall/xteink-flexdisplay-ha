@@ -45,6 +45,114 @@ from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
 
 
+def test_note4_house_pulse_renderer_and_bmp_delivery(tmp_path: Path) -> None:
+    renderer = DashboardRenderer()
+    rendered = renderer.render(
+        title="HOME",
+        device={"device_id": "N4-226290", "model": "ZECTRIX_NOTE4"},
+        width=400,
+        height=300,
+        entities=(
+            EntityState(
+                "binary_sensor.garage",
+                "Garage",
+                "on",
+                "",
+                True,
+                last_changed=datetime.now(UTC) - timedelta(minutes=12),
+            ),
+            EntityState("binary_sensor.garage_motion", "Garage motion", "off", "", True),
+        ),
+        layout="house_pulse",
+    )
+    with Image.open(io.BytesIO(rendered)) as image:
+        assert image.size == (400, 300)
+        assert image.mode == "1"
+        assert image.getpixel((5, 5)) == 0
+
+    profile = DashboardProfileConfig(
+        name="house-pulse",
+        pages=(
+            DashboardPageConfig(
+                title="HOME",
+                layout="house_pulse",
+                entities=(
+                    EntityConfig(
+                        "static.garage",
+                        "Garage",
+                        source="static",
+                        value="on",
+                    ),
+                    EntityConfig(
+                        "static.garage_motion",
+                        "Garage motion",
+                        source="static",
+                        value="off",
+                    ),
+                ),
+            ),
+        ),
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        profiles={"house-pulse": profile},
+        default_profile="house-pulse",
+    )
+    with TestClient(create_app(config)) as client:
+        preview = client.post(
+            "/api/v1/studio/preview",
+            json={
+                "model": "N4",
+                "profile": {
+                    "name": "house-pulse",
+                    "pages": [
+                        {
+                            "title": "HOME",
+                            "layout": "house_pulse",
+                            "entities": [
+                                {
+                                    "entity_id": "static.garage",
+                                    "label": "Garage",
+                                    "source": "static",
+                                    "value": "on",
+                                },
+                                {
+                                    "entity_id": "static.garage_motion",
+                                    "label": "Garage motion",
+                                    "source": "static",
+                                    "value": "off",
+                                },
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+        assert preview.status_code == 200
+        with Image.open(io.BytesIO(preview.content)) as image:
+            assert image.size == (400, 300)
+
+        studio = client.get("/studio/")
+        assert studio.status_code == 200
+        assert 'data-model="N4"' in studio.text
+        assert '<option value="house_pulse">House Pulse</option>' in studio.text
+
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "N4-226290",
+                "X-FlexDisplay-Model": "ZECTRIX_NOTE4",
+                "X-FlexDisplay-Width": "400",
+                "X-FlexDisplay-Height": "300",
+            },
+        )
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/bmp"
+        with Image.open(io.BytesIO(response.content)) as image:
+            assert image.size == (400, 300)
+            assert image.mode == "1"
+
+
 def test_awake_sleep_plan_stays_awake_between_checkins(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",

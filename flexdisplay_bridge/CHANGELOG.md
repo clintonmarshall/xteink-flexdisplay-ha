@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.38.2
+
+- Add Zectrix Note 4 as a native 400 × 300 FlexDisplay model with 1-bit BMP
+  delivery, fleet telemetry, physical-button events, and exact Studio preview.
+- Add the House Pulse dashboard layout: a quiet household-state screen with a
+  large garage condition, elapsed time, motion state, clock, and three actions.
+- Keep the bundled X3/X4 firmware at `1.5.0-flexdisplay.0.38.1`; this release
+  changes only the Home Assistant Bridge and Dashboard Studio.
+
 ## 0.38.1
 
 - Add adaptive OpenDisplay transport policies: Auto uses LAN while USB powered

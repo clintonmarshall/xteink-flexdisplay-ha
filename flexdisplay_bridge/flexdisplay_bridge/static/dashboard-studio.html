@@ -144,6 +144,7 @@
       transition: width .2s ease;
     }
     .device-frame.x3 { width: min(100%, 444px); }
+    .device-frame.n4 { width: min(100%, 520px); }
     .device-frame::after {
       content: "";
       position: absolute;
@@ -535,6 +536,7 @@
           <div class="segment" aria-label="Device model">
             <button data-model="X3">X3</button>
             <button data-model="X4" class="active">X4</button>
+            <button data-model="N4">N4</button>
           </div>
         </div>
       </div>
@@ -572,6 +574,7 @@
             <option value="rows">Two stacked</option>
             <option value="columns">Two side-by-side</option>
             <option value="grid">Four-tile grid</option>
+            <option value="house_pulse">House Pulse</option>
           </select>
         </label>
       </div>
@@ -608,6 +611,7 @@
               <option value="weather_alert">Weather alert</option>
               <option value="name_card">Name card / ID pass</option>
               <option value="qr_code">QR code page</option>
+              <option value="house_pulse">House Pulse</option>
             </select>
           </label>
         </div>
@@ -4031,8 +4035,9 @@
       document.querySelectorAll("[data-model]").forEach((button) =>
         button.classList.toggle("active", button.dataset.model === model)
       );
-      const specs = model === "X3" ? [528, 792] : [480, 800];
+      const specs = model === "X3" ? [528, 792] : model === "N4" ? [400, 300] : [480, 800];
       $("#deviceFrame").classList.toggle("x3", model === "X3");
+      $("#deviceFrame").classList.toggle("n4", model === "N4");
       $("#previewWrap").style.setProperty("--ratio", `${specs[0]}/${specs[1]}`);
       $("#modelLabel").textContent = `${model} · ${specs[0]} × ${specs[1]}`;
       schedulePreview();
@@ -4156,6 +4161,14 @@
           activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.weather_alert", operator:"on", priority:90, expires_after_seconds:3600},
           entities: [{entity_id:"binary_sensor.weather_alert", label:"Weather Alert", unit:"", icon:"weather", style:"value", minimum:0, maximum:100}],
         },
+        house_pulse: {
+          title: "HOME", layout: "house_pulse",
+          activation: defaultActivation(),
+          entities: [
+            {entity_id:"binary_sensor.garage", label:"Garage", unit:"", icon:"home", style:"value", minimum:0, maximum:100},
+            {entity_id:"binary_sensor.garage_motion", label:"Garage motion", unit:"", icon:"home", style:"value", minimum:0, maximum:100},
+          ],
+        },
         name_card: {
           title: "ID PASS", layout: "rows",
           activation: defaultActivation(),
@@ -4203,7 +4216,7 @@
     }
     const titleCase = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
     const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code", name_card:"Name card / ID pass", image:"Image"})[value] || titleCase(value);
-    const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid"})[value] || "Automatic";
+    const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid", house_pulse:"House Pulse"})[value] || "Automatic";
     const options = (values, selected, labeler) => values.map((value) =>
       `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
     ).join("");
@@ -4529,7 +4542,10 @@
     $("#photoModel").addEventListener("change", renderPhotoGallery);
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
-      if (selected?.model) setModel(selected.model.toUpperCase().includes("4") ? "X4" : "X3");
+      if (selected?.model) {
+        const model = selected.model.toUpperCase();
+        setModel(model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
+      }
       else schedulePreview();
     });
     document.querySelectorAll("[data-model]").forEach((button) =>

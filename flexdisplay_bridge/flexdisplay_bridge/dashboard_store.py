@@ -16,7 +16,7 @@ from .config import (
 )
 
 PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
-LAYOUTS = {"auto", "single", "rows", "columns", "grid"}
+LAYOUTS = {"auto", "single", "rows", "columns", "grid", "house_pulse"}
 TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image", "name_card"}
 TILE_SOURCES = {"home_assistant", "static"}
 IMAGE_FITS = {"cover", "contain"}
