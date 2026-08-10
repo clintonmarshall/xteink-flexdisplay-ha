@@ -119,6 +119,12 @@ class FlexDisplayApiClient:
             "PUT", f"/api/v1/devices/{device_id}/provision", json=assignment
         )
 
+    async def voice_settings(self, device_id: str, settings: dict[str, Any]) -> None:
+        """Update Note4 speaker controls."""
+        await self._request(
+            "PUT", f"/api/v1/devices/{device_id}/voice", json=settings
+        )
+
     async def apply_policy(
         self,
         profile: str,

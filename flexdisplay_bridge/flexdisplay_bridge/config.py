@@ -184,6 +184,12 @@ class BridgeConfig:
     flexhub: FlexHubConfig = FlexHubConfig()
     screen_history: ScreenHistoryConfig = ScreenHistoryConfig()
     firmware: FirmwareConfig = FirmwareConfig()
+    note4_firmware: FirmwareConfig = FirmwareConfig(
+        minimum_battery_percent=40,
+        canary_required=False,
+        require_usb_for_canary=False,
+        mirror_enabled=False,
+    )
     provisioning: ProvisioningConfig = ProvisioningConfig()
     default_entities: tuple[EntityConfig, ...] = ()
     default_profile: str = "default"
@@ -563,6 +569,50 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         ),
     )
 
+    note4_firmware_raw = raw.get("note4_firmware") or {}
+    note4_firmware = FirmwareConfig(
+        version=os.getenv(
+            "FLEXDISPLAY_NOTE4_FIRMWARE_VERSION",
+            str(note4_firmware_raw.get("version") or ""),
+        ),
+        url=os.getenv(
+            "FLEXDISPLAY_NOTE4_FIRMWARE_URL",
+            str(note4_firmware_raw.get("url") or ""),
+        ),
+        sha256=os.getenv(
+            "FLEXDISPLAY_NOTE4_FIRMWARE_SHA256",
+            str(note4_firmware_raw.get("sha256") or ""),
+        ).lower(),
+        size=max(
+            0,
+            int(
+                os.getenv(
+                    "FLEXDISPLAY_NOTE4_FIRMWARE_SIZE",
+                    note4_firmware_raw.get("size", 0),
+                )
+            ),
+        ),
+        minimum_battery_percent=max(
+            20,
+            min(
+                100,
+                int(
+                    os.getenv(
+                        "FLEXDISPLAY_NOTE4_FIRMWARE_MINIMUM_BATTERY",
+                        note4_firmware_raw.get("minimum_battery_percent", 40),
+                    )
+                ),
+            ),
+        ),
+        canary_required=False,
+        require_usb_for_canary=False,
+        max_parallel=1,
+        retry_limit=3,
+        retry_backoff_seconds=300,
+        mirror_enabled=False,
+        maintenance_window_enabled=False,
+    )
+
     provisioning_raw = raw.get("provisioning") or {}
     provisioning = ProvisioningConfig(
         enabled=bool(provisioning_raw.get("enabled", True)),
@@ -643,6 +693,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         flexhub=flexhub,
         screen_history=screen_history,
         firmware=firmware,
+        note4_firmware=note4_firmware,
         provisioning=provisioning,
         default_entities=defaults,
         default_profile=default_profile,

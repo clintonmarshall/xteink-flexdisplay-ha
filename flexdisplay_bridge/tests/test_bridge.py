@@ -3400,6 +3400,70 @@ def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
         assert screen.headers["x-flexdisplay-firmware-min-battery"] == "45"
 
 
+def test_note4_controls_and_firmware_are_isolated_from_x4_rollout(tmp_path: Path) -> None:
+    x4_firmware = FirmwareConfig(
+        version="1.5.0-flexdisplay.0.40.0",
+        url="https://example.test/x4.bin",
+        sha256="ab" * 32,
+        size=3_000_000,
+    )
+    note4_firmware = FirmwareConfig(
+        version="1.2.1-voice-remote",
+        url="https://example.test/note4.bin",
+        sha256="cd" * 32,
+        size=2_700_000,
+        canary_required=False,
+        require_usb_for_canary=False,
+        mirror_enabled=False,
+    )
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        firmware=x4_firmware,
+        note4_firmware=note4_firmware,
+    )
+    with TestClient(create_app(config)) as client:
+        checkin = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "N4-226290",
+                "X-FlexDisplay-Model": "ZECTRIX_NOTE4",
+                "X-FlexDisplay-Firmware": "1.2.0-voice-remote",
+                "X-FlexDisplay-Battery-Percent": "90",
+                "X-FlexDisplay-Volume": "45",
+                "X-FlexDisplay-Muted": "false",
+            },
+        )
+        assert checkin.headers["x-flexdisplay-latest-firmware"] == note4_firmware.version
+        record = client.get("/api/v1/devices/N4-226290").json()
+        assert record["latest_firmware"] == note4_firmware.version
+        assert "Device SD card is not ready" not in record["firmware_install_blockers"]
+
+        controls = client.put(
+            "/api/v1/devices/N4-226290/voice",
+            json={"volume": 70, "muted": True},
+        )
+        assert controls.status_code == 200
+        queued = client.post("/api/v1/devices/N4-226290/commands/install")
+        assert queued.status_code == 200
+        assert client.app.state.store.firmware_rollout().get("target_version") != (
+            note4_firmware.version
+        )
+
+        delivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "N4-226290",
+                "X-FlexDisplay-Model": "ZECTRIX_NOTE4",
+                "X-FlexDisplay-Firmware": "1.2.0-voice-remote",
+            },
+        )
+        assert delivery.headers["x-flexdisplay-commands"] == "install"
+        assert delivery.headers["x-flexdisplay-firmware-url"] == note4_firmware.url
+        assert delivery.headers["x-flexdisplay-firmware-sha256"] == note4_firmware.sha256
+        assert delivery.headers["x-flexdisplay-desired-volume"] == "70"
+        assert delivery.headers["x-flexdisplay-desired-muted"] == "true"
+
+
 def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
     firmware = FirmwareConfig(
         version="1.4.1-flexdisplay.0.13.0",

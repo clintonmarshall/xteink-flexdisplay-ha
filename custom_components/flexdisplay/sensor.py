@@ -318,6 +318,40 @@ DESCRIPTIONS = (
     ),
 )
 
+VOICE_DESCRIPTIONS = (
+    FlexDisplaySensorDescription(
+        key="last_voice_transcript",
+        translation_key="last_voice_transcript",
+        value_fn=lambda record: record.get("last_voice_transcript") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_voice_response",
+        translation_key="last_voice_response",
+        value_fn=lambda record: record.get("last_voice_response") or "none",
+    ),
+    FlexDisplaySensorDescription(
+        key="last_voice_at",
+        translation_key="last_voice_at",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        value_fn=lambda record: parse_datetime(record.get("last_voice_at", "")),
+    ),
+)
+
+
+def _device_sensors(
+    coordinator: FlexDisplayCoordinator, device_id: str
+) -> tuple[FlexDisplaySensor, ...]:
+    descriptions = list(DESCRIPTIONS)
+    record = next(
+        (item for item in coordinator.data if item.get("device_id") == device_id), {}
+    )
+    if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
+        descriptions.extend(VOICE_DESCRIPTIONS)
+    return tuple(
+        FlexDisplaySensor(coordinator, device_id, description)
+        for description in descriptions
+    )
+
 
 class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
     """Representation of one FlexDisplay value."""
@@ -433,10 +467,7 @@ async def async_setup_entry(
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplaySensor(coordinator, device_id, description)
-            for description in DESCRIPTIONS
-        ),
+        _device_sensors,
     )
     setup_flexhub_entities(
         entry,

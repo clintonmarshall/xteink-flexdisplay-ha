@@ -154,6 +154,15 @@
       "firmware_install_blockers": {
         "name": "Firmware install blockers"
       },
+      "last_voice_transcript": {
+        "name": "Last voice command"
+      },
+      "last_voice_response": {
+        "name": "Last voice response"
+      },
+      "last_voice_at": {
+        "name": "Last voice interaction"
+      },
       "policy_sync_state": {
         "name": "Fleet policy status"
       },
@@ -309,6 +318,9 @@
       },
       "unchanged_image_multiplier": {
         "name": "Unchanged image interval multiplier"
+      },
+      "voice_volume": {
+        "name": "Speaker volume"
       }
     },
     "switch": {
@@ -323,6 +335,9 @@
       },
       "stay_awake_on_usb": {
         "name": "Stay awake on USB"
+      },
+      "voice_mute": {
+        "name": "Mute speaker"
       }
     },
     "time": {

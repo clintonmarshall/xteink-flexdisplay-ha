@@ -1144,6 +1144,36 @@ class DeviceStore:
             del queued
             return deepcopy(record)
 
+    def queue_device_firmware_install(
+        self,
+        device_id: str,
+        target_version: str,
+    ) -> dict[str, Any]:
+        """Queue a model-specific OTA without changing the X3/X4 fleet rollout."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                raise ValueError("Device has not checked in")
+            already_active = (
+                "install" in (record.get("pending_commands") or [])
+                or "install" in (record.get("dispatched_commands") or [])
+            )
+            if already_active:
+                return deepcopy(record)
+            self.queue_command(device_id, "install")
+            record = self._state["devices"][device_id]
+            record["firmware_update_role"] = "device"
+            record["firmware_update_target"] = target_version
+            record["firmware_update_status"] = "queued"
+            record["firmware_update_stage"] = "queued"
+            record["firmware_update_percent"] = 0
+            record["firmware_update_stage_at"] = utc_now()
+            record.pop("firmware_update_error", None)
+            record.pop("firmware_update_error_at", None)
+            record.pop("firmware_update_detail", None)
+            self._save()
+            return deepcopy(record)
+
     def _update_firmware_rollout(self, record: dict[str, Any], result: str) -> None:
         if not result.startswith("install:"):
             return

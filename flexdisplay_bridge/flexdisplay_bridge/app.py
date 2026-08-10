@@ -32,7 +32,7 @@ from .button_actions import (
 from .button_actions import (
     MODE as BUTTON_ACTION_MODE,
 )
-from .config import BridgeConfig, DeviceConfig, EntityConfig, load_config
+from .config import BridgeConfig, DeviceConfig, EntityConfig, FirmwareConfig, load_config
 from .content_channels import (
     ContentChannelStore,
     ContentChannelValidationError,
@@ -211,11 +211,23 @@ def _firmware_version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
 
 
-def _firmware_metadata_error(settings: BridgeConfig) -> str:
-    firmware = settings.firmware
+def _is_note4(record: dict[str, Any] | str) -> bool:
+    model = record if isinstance(record, str) else str(record.get("model") or "")
+    return model.upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+
+
+def _device_firmware(settings: BridgeConfig, record: dict[str, Any] | str) -> FirmwareConfig:
+    return settings.note4_firmware if _is_note4(record) else settings.firmware
+
+
+def _firmware_metadata_error(
+    settings: BridgeConfig,
+    firmware: FirmwareConfig | None = None,
+) -> str:
+    firmware = firmware or settings.firmware
     if not firmware.version or not firmware.url:
         return "No firmware release is configured"
-    if not firmware.url.startswith(("https://", "http://")):
+    if firmware.url != "packaged" and not firmware.url.startswith(("https://", "http://")):
         return "Firmware URL must use HTTP or HTTPS"
     if not re.fullmatch(r"[0-9a-f]{64}", firmware.sha256):
         return "Firmware SHA-256 must contain 64 lowercase hexadecimal characters"
@@ -279,8 +291,8 @@ def _firmware_install_blockers(
     settings: BridgeConfig,
     store: DeviceStore,
 ) -> list[str]:
-    firmware = settings.firmware
-    error = _firmware_metadata_error(settings)
+    firmware = _device_firmware(settings, record)
+    error = _firmware_metadata_error(settings, firmware)
     blockers = [error] if error else []
     if error:
         return blockers
@@ -288,7 +300,8 @@ def _firmware_install_blockers(
         str(record.get("firmware") or "")
     ):
         blockers.append("Device already runs this release or a newer release")
-    if record.get("sd_ready") is not True:
+    note4 = _is_note4(record)
+    if not note4 and record.get("sd_ready") is not True:
         blockers.append("Device SD card is not ready")
     usb_connected = record.get("usb_connected") is True
     battery = record.get("battery_percent")
@@ -312,6 +325,16 @@ def _firmware_install_blockers(
             f"{maintenance['start']}-{maintenance['end']} "
             f"{maintenance['timezone']}"
         )
+
+    if note4:
+        already_active = "install" in (
+            record.get("pending_commands") or []
+        ) or "install" in (record.get("dispatched_commands") or [])
+        if not already_active and store.active_firmware_installs() >= firmware.max_parallel:
+            blockers.append(
+                f"Maximum of {firmware.max_parallel} concurrent firmware install(s) reached"
+            )
+        return blockers
 
     rollout = store.firmware_rollout()
     if rollout.get("target_version") == firmware.version:
@@ -631,7 +654,8 @@ def _decorate_device(
             pass
     result["online"] = online
     result["power_state"] = power_state
-    result["latest_firmware"] = settings.firmware.version or result.get("firmware", "")
+    device_firmware = _device_firmware(settings, result)
+    result["latest_firmware"] = device_firmware.version or result.get("firmware", "")
     profile = _effective_device(
         settings.device(
             str(result.get("device_id") or ""),
@@ -692,9 +716,9 @@ def _decorate_device(
     result["available_profiles"] = available_profiles or list(settings.profiles)
     result["available_modes"] = sorted(SUPPORTED_MODES)
     result["update_available"] = bool(
-        settings.firmware.version
-        and settings.firmware.url
-        and _firmware_version(settings.firmware.version)
+        device_firmware.version
+        and device_firmware.url
+        and _firmware_version(device_firmware.version)
         > _firmware_version(str(result.get("firmware") or ""))
     )
     if store:
@@ -705,7 +729,7 @@ def _decorate_device(
         result["firmware_rollout_status"] = rollout.get("status") or "not_started"
         result["firmware_canary_device_id"] = rollout.get("canary_device_id")
         result["firmware_canary_verified"] = (
-            rollout.get("target_version") == settings.firmware.version
+            rollout.get("target_version") == device_firmware.version
             and rollout.get("status") == "canary_verified"
         )
         retry_blockers = _firmware_retry_blockers(result, settings, store)
@@ -715,9 +739,9 @@ def _decorate_device(
             and result.get("firmware_update_status") in {"failed", "cancelled"}
             and not retry_blockers
         )
-        result["firmware_retry_limit"] = settings.firmware.retry_limit
+        result["firmware_retry_limit"] = device_firmware.retry_limit
         result["firmware_retry_backoff_seconds"] = (
-            settings.firmware.retry_backoff_seconds
+            device_firmware.retry_backoff_seconds
         )
         result["firmware_rollout_reset_ready"] = rollout.get(
             "target_version"
@@ -1915,7 +1939,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.mqtt = mqtt
     app.state.voice_assistant = voice_assistant
 
-    def firmware_delivery_url(request: Request) -> str:
+    def firmware_delivery_url(request: Request, model: str = "") -> str:
+        if _is_note4(model):
+            if settings.note4_firmware.url == "packaged":
+                return str(request.url_for("note4_firmware_binary"))
+            return settings.note4_firmware.url
         if settings.firmware.mirror_enabled:
             return str(request.url_for("firmware_binary"))
         return settings.firmware.url
@@ -2029,6 +2057,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             message = str(exc)
             status = 400 if message.startswith(("Hold", "Voice command", "PCM")) else 502
             raise HTTPException(status_code=status, detail=message) from exc
+        store.touch(
+            selected,
+            {
+                "last_voice_transcript": result.transcript[:512],
+                "last_voice_response": result.response_text[:512],
+                "last_voice_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            },
+        )
         return Response(
             encode_voice_response(result),
             media_type="application/octet-stream",
@@ -2041,6 +2077,29 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 ),
             },
         )
+
+    @app.put("/api/v1/devices/{device_id}/voice")
+    def configure_device_voice(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        if not _is_note4(current):
+            raise HTTPException(status_code=409, detail="Voice controls require a Note4")
+        changes: dict[str, Any] = {}
+        if "volume" in payload:
+            changes["desired_voice_volume"] = max(0, min(100, int(payload["volume"])))
+        if "muted" in payload:
+            changes["desired_voice_muted"] = bool(payload["muted"])
+        if not changes:
+            raise HTTPException(status_code=400, detail="Volume or mute state is required")
+        record = store.touch(selected, changes)
+        return {"updated": True, "device": record}
 
     @app.get("/api/v1/flexhub")
     def flexhub_status(request: Request, refresh: bool = False) -> dict[str, Any]:
@@ -2181,6 +2240,33 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             headers={
                 "X-FlexDisplay-Firmware-Version": settings.firmware.version,
                 "X-FlexDisplay-Firmware-SHA256": settings.firmware.sha256,
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    @app.get("/api/v1/firmware/note4/current.bin", name="note4_firmware_binary")
+    def note4_firmware_binary() -> FileResponse:
+        firmware = settings.note4_firmware
+        path = Path(
+            os.getenv(
+                "FLEXDISPLAY_PACKAGED_NOTE4_FIRMWARE",
+                "/app/firmware/note4.bin",
+            )
+        )
+        if not path.is_file():
+            raise HTTPException(status_code=503, detail="Note4 firmware is not packaged")
+        if path.stat().st_size != firmware.size:
+            raise HTTPException(status_code=503, detail="Note4 firmware size mismatch")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != firmware.sha256:
+            raise HTTPException(status_code=503, detail="Note4 firmware checksum mismatch")
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            filename=f"note4-{firmware.version}.bin",
+            headers={
+                "X-FlexDisplay-Firmware-Version": firmware.version,
+                "X-FlexDisplay-Firmware-SHA256": firmware.sha256,
                 "Cache-Control": "private, max-age=300",
             },
         )
@@ -3134,12 +3220,19 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if blockers:
                 raise HTTPException(status_code=409, detail="; ".join(blockers))
             try:
-                record = store.queue_firmware_install(
-                    selected,
-                    settings.firmware.version,
-                    canary_required=settings.firmware.canary_required,
-                    max_parallel=settings.firmware.max_parallel,
-                )
+                firmware = _device_firmware(settings, current)
+                if _is_note4(current):
+                    record = store.queue_device_firmware_install(
+                        selected,
+                        firmware.version,
+                    )
+                else:
+                    record = store.queue_firmware_install(
+                        selected,
+                        firmware.version,
+                        canary_required=firmware.canary_required,
+                        max_parallel=firmware.max_parallel,
+                    )
             except ValueError as err:
                 raise HTTPException(status_code=409, detail=str(err)) from err
         else:
@@ -3786,6 +3879,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_height: str | None = Header(default=None),
         x_flexdisplay_model: str | None = Header(default=None),
         x_flexdisplay_firmware: str | None = Header(default=None),
+        x_flexdisplay_volume: str | None = Header(default=None),
+        x_flexdisplay_muted: str | None = Header(default=None),
         x_flexdisplay_battery_percent: str | None = Header(default=None),
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
@@ -3821,6 +3916,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
         height = _integer(x_flexdisplay_height, 800, 240, 1600)
         model = x_flexdisplay_model or ("X4" if device_id.startswith("X4-") else "X3")
+        device_firmware = _device_firmware(settings, model)
         capabilities = _capabilities(x_flexdisplay_capabilities)
         image_cached = bool(_boolean(x_flexdisplay_image_cached))
         last_image_error = (
@@ -3834,6 +3930,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "width": width,
             "height": height,
             "firmware": x_flexdisplay_firmware or "0.4.0",
+            "voice_volume": _optional_integer(x_flexdisplay_volume, 0, 100),
+            "voice_muted": _boolean(x_flexdisplay_muted),
             "battery_percent": _number(x_flexdisplay_battery_percent),
             "battery_voltage": _number(x_flexdisplay_battery_voltage),
             "rssi": _number(x_flexdisplay_rssi),
@@ -3953,9 +4051,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = (
             store.reconcile_running_firmware(
                 device_id,
-                settings.firmware.version,
-                canary_required=settings.firmware.canary_required,
-                require_usb_for_canary=settings.firmware.require_usb_for_canary,
+                device_firmware.version,
+                canary_required=device_firmware.canary_required,
+                require_usb_for_canary=device_firmware.require_usb_for_canary,
             )
             or record
         )
@@ -4067,22 +4165,29 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Policy-Revision"] = str(
                         int(record.get("assigned_policy_revision") or 0)
                     )
-                if settings.firmware.version:
+                if _is_note4(model):
+                    response.headers["X-FlexDisplay-Desired-Volume"] = str(
+                        int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
+                    )
+                    response.headers["X-FlexDisplay-Desired-Muted"] = (
+                        "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+                    )
+                if device_firmware.version:
                     response.headers["X-FlexDisplay-Latest-Firmware"] = (
-                        settings.firmware.version
+                        device_firmware.version
                     )
                 if "install" in commands:
                     response.headers["X-FlexDisplay-Firmware-URL"] = (
-                        firmware_delivery_url(request)
+                        firmware_delivery_url(request, model)
                     )
                     response.headers["X-FlexDisplay-Firmware-SHA256"] = (
-                        settings.firmware.sha256
+                        device_firmware.sha256
                     )
                     response.headers["X-FlexDisplay-Firmware-Size"] = str(
-                        settings.firmware.size
+                        device_firmware.size
                     )
                     response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
-                        settings.firmware.minimum_battery_percent
+                        device_firmware.minimum_battery_percent
                     )
                 apply_loading_screen_headers(
                     response,
@@ -4268,22 +4373,29 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Command-Acknowledged"] = (
                     "true" if command_acknowledged else "false"
                 )
-            if settings.firmware.version:
+            if _is_note4(model):
+                response.headers["X-FlexDisplay-Desired-Volume"] = str(
+                    int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
+                )
+                response.headers["X-FlexDisplay-Desired-Muted"] = (
+                    "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+                )
+            if device_firmware.version:
                 response.headers["X-FlexDisplay-Latest-Firmware"] = (
-                    settings.firmware.version
+                    device_firmware.version
                 )
             if "install" in commands:
                 response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
-                    request
+                    request, model
                 )
                 response.headers["X-FlexDisplay-Firmware-SHA256"] = (
-                    settings.firmware.sha256
+                    device_firmware.sha256
                 )
                 response.headers["X-FlexDisplay-Firmware-Size"] = str(
-                    settings.firmware.size
+                    device_firmware.size
                 )
                 response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
-                    settings.firmware.minimum_battery_percent
+                    device_firmware.minimum_battery_percent
                 )
             apply_loading_screen_headers(
                 response,
@@ -4574,20 +4686,27 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "content_channel" if mixed_pages else page_selection
         )
         response.headers["X-FlexDisplay-Content-Type"] = page_kind
-        if settings.firmware.version:
+        if _is_note4(model):
+            response.headers["X-FlexDisplay-Desired-Volume"] = str(
+                int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
+            )
+            response.headers["X-FlexDisplay-Desired-Muted"] = (
+                "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+            )
+        if device_firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = (
-                settings.firmware.version
+                device_firmware.version
             )
         if "install" in commands:
             response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
-                request
+                request, model
             )
-            response.headers["X-FlexDisplay-Firmware-SHA256"] = settings.firmware.sha256
+            response.headers["X-FlexDisplay-Firmware-SHA256"] = device_firmware.sha256
             response.headers["X-FlexDisplay-Firmware-Size"] = str(
-                settings.firmware.size
+                device_firmware.size
             )
             response.headers["X-FlexDisplay-Firmware-Min-Battery"] = str(
-                settings.firmware.minimum_battery_percent
+                device_firmware.minimum_battery_percent
             )
         apply_loading_screen_headers(
             response,
