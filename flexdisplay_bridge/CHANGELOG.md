@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.40.0
+
+- Add Note 4 Voice Remote v2 responses with separate recognized-speech and
+  Home Assistant answer text for a clearer e-paper review screen.
+- Keep a short per-device Home Assistant conversation session so follow-up
+  commands can refer to the previous request, with an explicit new-session
+  control and five-minute idle expiry.
+- Preserve decoding compatibility with the original `FVA1` Note 4 response
+  frame while delivering the richer `FVA2` frame to updated devices.
+
 ## 0.39.0
 
 - Add private push-to-talk Home Assistant Assist brokering for the Zectrix

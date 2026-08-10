@@ -59,6 +59,8 @@ def assist_messages() -> list[dict[str, Any]]:
                 "type": "intent-end",
                 "data": {
                     "intent_output": {
+                        "conversation_id": "conversation-1",
+                        "continue_conversation": True,
                         "response": {"speech": {"plain": {"speech": "Garage lights turned off"}}}
                     }
                 },
@@ -89,6 +91,8 @@ def test_assist_streams_pcm_and_returns_spoken_response() -> None:
     assert result.transcript == "turn off garage lights"
     assert result.response_text == "Garage lights turned off"
     assert result.audio_pcm == b"\x01\x02" * 400
+    assert result.conversation_id == "conversation-1"
+    assert result.continue_conversation is True
     assert client._websocket_url() == "ws://supervisor/core/api/websocket"
     binary = [payload for payload in socket.sent if isinstance(payload, bytes)]
     assert binary[0][0] == 7
@@ -99,17 +103,49 @@ def test_assist_streams_pcm_and_returns_spoken_response() -> None:
 def test_voice_response_wire_format_and_ascii_display_text() -> None:
     encoded = encode_voice_response(
         VoiceAssistantResult(
-            transcript="ignored",
+            transcript="Turn off the garage lights",
             response_text="Garage lights — turned off…",
             audio_pcm=b"\x00\x01\x02\x03",
         )
     )
     decoded = decode_voice_response(encoded)
 
+    assert decoded.transcript == "Turn off the garage lights"
     assert decoded.response_text == "Garage lights - turned off..."
     assert decoded.audio_pcm == b"\x00\x01\x02\x03"
     assert decoded.sample_rate == 16_000
     assert display_text("It’s done") == "It's done"
+
+
+def test_assist_reuses_and_resets_device_conversation() -> None:
+    first_socket = FakeSocket(assist_messages())
+    second_socket = FakeSocket(assist_messages())
+    third_socket = FakeSocket(assist_messages())
+    sockets = [first_socket, second_socket, third_socket]
+    client = HomeAssistantVoiceClient(
+        HomeAssistantConfig(base_url="http://supervisor/core", token="token", verify_tls=False),
+        websocket_connect=lambda *args, **kwargs: sockets.pop(0),
+    )
+    client._download_and_convert_tts = lambda url, mime: b"\x00\x00"  # type: ignore[method-assign]
+    audio = b"\x10\x00" * (MIN_AUDIO_BYTES // 2)
+
+    client.run(audio, "N4-226290")
+    client.run(audio, "N4-226290")
+    client.reset_conversation("N4-226290")
+    client.run(audio, "N4-226290")
+
+    second_command = next(
+        json.loads(payload)
+        for payload in second_socket.sent
+        if isinstance(payload, str) and json.loads(payload).get("type") == "assist_pipeline/run"
+    )
+    third_command = next(
+        json.loads(payload)
+        for payload in third_socket.sent
+        if isinstance(payload, str) and json.loads(payload).get("type") == "assist_pipeline/run"
+    )
+    assert second_command["conversation_id"] == "conversation-1"
+    assert "conversation_id" not in third_command
 
 
 def test_assist_rejects_a_tap_and_surfaces_pipeline_errors() -> None:
@@ -146,12 +182,17 @@ def test_device_assist_endpoint_returns_framed_pcm(tmp_path: Path) -> None:
         response_text="Hall light turned on",
         audio_pcm=b"\x34\x12" * 100,
     )
+    reset_devices: list[str] = []
+    app.state.voice_assistant.reset_conversation = reset_devices.append  # type: ignore[method-assign]
 
     with TestClient(app) as client:
         response = client.post(
             "/api/v1/devices/N4-226290/assist",
             content=b"\x00\x00" * (MIN_AUDIO_BYTES // 2),
-            headers={"Content-Type": "application/octet-stream"},
+            headers={
+                "Content-Type": "application/octet-stream",
+                "X-FlexDisplay-New-Conversation": "true",
+            },
         )
 
     assert response.status_code == 200
@@ -159,3 +200,4 @@ def test_device_assist_endpoint_returns_framed_pcm(tmp_path: Path) -> None:
     decoded = decode_voice_response(response.content)
     assert decoded.response_text == "Hall light turned on"
     assert decoded.audio_pcm == b"\x34\x12" * 100
+    assert reset_devices == ["N4-226290"]
