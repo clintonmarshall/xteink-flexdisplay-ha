@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import struct
 import subprocess
+import threading
+import time
 from dataclasses import dataclass
 from typing import Any, Callable
 from urllib.parse import urlparse
@@ -16,8 +18,11 @@ SAMPLE_RATE = 16_000
 MIN_AUDIO_BYTES = SAMPLE_RATE * 2 * 4 // 10
 MAX_AUDIO_BYTES = SAMPLE_RATE * 2 * 15
 MAX_TTS_BYTES = 8 * 1024 * 1024
-RESPONSE_HEADER = struct.Struct("<4sIII")
-RESPONSE_MAGIC = b"FVA1"
+CONVERSATION_TTL_SECONDS = 5 * 60
+RESPONSE_V1_HEADER = struct.Struct("<4sIII")
+RESPONSE_V2_HEADER = struct.Struct("<4sIIII")
+RESPONSE_V1_MAGIC = b"FVA1"
+RESPONSE_V2_MAGIC = b"FVA2"
 
 
 class VoiceAssistantError(RuntimeError):
@@ -30,6 +35,14 @@ class VoiceAssistantResult:
     response_text: str
     audio_pcm: bytes
     sample_rate: int = SAMPLE_RATE
+    conversation_id: str = ""
+    continue_conversation: bool = False
+
+
+@dataclass(frozen=True)
+class _ConversationSession:
+    conversation_id: str
+    updated_at: float
 
 
 def display_text(value: str, limit: int = 220) -> str:
@@ -48,33 +61,59 @@ def display_text(value: str, limit: int = 220) -> str:
 
 
 def encode_voice_response(result: VoiceAssistantResult) -> bytes:
-    text = display_text(result.response_text or result.transcript).encode("utf-8")
+    transcript = display_text(result.transcript).encode("utf-8")
+    response = display_text(result.response_text or result.transcript).encode("utf-8")
     audio = bytes(result.audio_pcm)
-    return RESPONSE_HEADER.pack(
-        RESPONSE_MAGIC,
+    return RESPONSE_V2_HEADER.pack(
+        RESPONSE_V2_MAGIC,
         int(result.sample_rate),
-        len(text),
+        len(transcript),
+        len(response),
         len(audio),
-    ) + text + audio
+    ) + transcript + response + audio
 
 
 def decode_voice_response(payload: bytes) -> VoiceAssistantResult:
-    if len(payload) < RESPONSE_HEADER.size:
+    if len(payload) < RESPONSE_V1_HEADER.size:
         raise VoiceAssistantError("voice response is truncated")
-    magic, sample_rate, text_length, audio_length = RESPONSE_HEADER.unpack_from(payload)
-    if magic != RESPONSE_MAGIC:
-        raise VoiceAssistantError("voice response has an invalid signature")
-    expected = RESPONSE_HEADER.size + text_length + audio_length
-    if expected != len(payload):
-        raise VoiceAssistantError("voice response length does not match its header")
-    text_start = RESPONSE_HEADER.size
-    text_end = text_start + text_length
-    return VoiceAssistantResult(
-        transcript="",
-        response_text=payload[text_start:text_end].decode("utf-8"),
-        audio_pcm=payload[text_end:],
-        sample_rate=sample_rate,
-    )
+    magic = payload[:4]
+    if magic == RESPONSE_V2_MAGIC:
+        if len(payload) < RESPONSE_V2_HEADER.size:
+            raise VoiceAssistantError("voice response is truncated")
+        _, sample_rate, transcript_length, response_length, audio_length = (
+            RESPONSE_V2_HEADER.unpack_from(payload)
+        )
+        expected = (
+            RESPONSE_V2_HEADER.size
+            + transcript_length
+            + response_length
+            + audio_length
+        )
+        if expected != len(payload):
+            raise VoiceAssistantError("voice response length does not match its header")
+        transcript_start = RESPONSE_V2_HEADER.size
+        transcript_end = transcript_start + transcript_length
+        response_end = transcript_end + response_length
+        return VoiceAssistantResult(
+            transcript=payload[transcript_start:transcript_end].decode("utf-8"),
+            response_text=payload[transcript_end:response_end].decode("utf-8"),
+            audio_pcm=payload[response_end:],
+            sample_rate=sample_rate,
+        )
+    if magic == RESPONSE_V1_MAGIC:
+        _, sample_rate, text_length, audio_length = RESPONSE_V1_HEADER.unpack_from(payload)
+        expected = RESPONSE_V1_HEADER.size + text_length + audio_length
+        if expected != len(payload):
+            raise VoiceAssistantError("voice response length does not match its header")
+        text_start = RESPONSE_V1_HEADER.size
+        text_end = text_start + text_length
+        return VoiceAssistantResult(
+            transcript="",
+            response_text=payload[text_start:text_end].decode("utf-8"),
+            audio_pcm=payload[text_end:],
+            sample_rate=sample_rate,
+        )
+    raise VoiceAssistantError("voice response has an invalid signature")
 
 
 class HomeAssistantVoiceClient:
@@ -86,10 +125,40 @@ class HomeAssistantVoiceClient:
     ):
         self.config = config
         self.websocket_connect = websocket_connect
+        self._conversation_sessions: dict[str, _ConversationSession] = {}
+        self._conversation_lock = threading.Lock()
 
     @property
     def configured(self) -> bool:
         return bool(self.config.token)
+
+    def reset_conversation(self, device_id: str) -> None:
+        if not device_id:
+            return
+        with self._conversation_lock:
+            self._conversation_sessions.pop(device_id, None)
+
+    def _conversation_for_device(self, device_id: str) -> str:
+        if not device_id:
+            return ""
+        now = time.monotonic()
+        with self._conversation_lock:
+            session = self._conversation_sessions.get(device_id)
+            if session is None:
+                return ""
+            if now - session.updated_at > CONVERSATION_TTL_SECONDS:
+                self._conversation_sessions.pop(device_id, None)
+                return ""
+            return session.conversation_id
+
+    def _remember_conversation(self, device_id: str, conversation_id: str) -> None:
+        if not device_id or not conversation_id:
+            return
+        with self._conversation_lock:
+            self._conversation_sessions[device_id] = _ConversationSession(
+                conversation_id=conversation_id,
+                updated_at=time.monotonic(),
+            )
 
     def run(self, audio_pcm: bytes, device_id: str = "") -> VoiceAssistantResult:
         if not self.config.token:
@@ -107,6 +176,9 @@ class HomeAssistantVoiceClient:
         tts_mime = ""
         handler_id: int | None = None
         command_id = 1
+        conversation_id = self._conversation_for_device(device_id)
+        returned_conversation_id = ""
+        continue_conversation = False
 
         try:
             with self.websocket_connect(
@@ -130,6 +202,8 @@ class HomeAssistantVoiceClient:
                     "end_stage": "tts",
                     "input": {"sample_rate": SAMPLE_RATE},
                 }
+                if conversation_id:
+                    command["conversation_id"] = conversation_id
                 socket.send(json.dumps(command))
 
                 while handler_id is None:
@@ -150,6 +224,13 @@ class HomeAssistantVoiceClient:
                         transcript = str((data.get("stt_output") or {}).get("text") or "")
                     elif event_type == "intent-end":
                         response_text = self._intent_speech(data)
+                        intent_output = data.get("intent_output") or {}
+                        returned_conversation_id = str(
+                            intent_output.get("conversation_id") or ""
+                        )
+                        continue_conversation = bool(
+                            intent_output.get("continue_conversation", False)
+                        )
                     elif event_type == "tts-end":
                         output = data.get("tts_output") or data
                         tts_url = str(output.get("url") or "")
@@ -163,11 +244,14 @@ class HomeAssistantVoiceClient:
 
         if not transcript:
             raise VoiceAssistantError("Home Assistant did not recognize speech")
+        self._remember_conversation(device_id, returned_conversation_id)
         audio = self._download_and_convert_tts(tts_url, tts_mime) if tts_url else b""
         return VoiceAssistantResult(
             transcript=transcript,
             response_text=response_text or transcript,
             audio_pcm=audio,
+            conversation_id=returned_conversation_id,
+            continue_conversation=continue_conversation,
         )
 
     def _websocket_url(self) -> str:

@@ -2017,6 +2017,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ) -> Response:
         authorize(request)
         selected = _device_id(device_id)
+        if request.headers.get("X-FlexDisplay-New-Conversation", "").lower() in {
+            "1",
+            "true",
+            "yes",
+        }:
+            voice_assistant.reset_conversation(selected)
         try:
             result = voice_assistant.run(audio, selected)
         except VoiceAssistantError as exc:
@@ -2030,6 +2036,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "X-FlexDisplay-Assist-Transcript": display_text(result.transcript),
                 "X-FlexDisplay-Assist-Response": display_text(result.response_text),
                 "X-FlexDisplay-Audio-Format": "pcm-s16le-16000-mono",
+                "X-FlexDisplay-Conversation": (
+                    "continue" if result.continue_conversation else "active"
+                ),
             },
         )
 

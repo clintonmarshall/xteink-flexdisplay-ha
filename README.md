@@ -7,7 +7,9 @@ This repository provides:
 
 - the **FlexDisplay Bridge** Home Assistant App, which renders device-sized
   dashboard images, records fleet telemetry, and securely brokers Note 4
-  push-to-talk audio through the Home Assistant Assist pipeline;
+  push-to-talk audio through the Home Assistant Assist pipeline. Voice Remote
+  v2 shows what Home Assistant heard and answered, preserves short follow-up
+  conversations, and returns speaker-ready local audio;
 - the **FlexDisplay** HACS integration, which creates Home Assistant devices,
   sensors, queued controls, connectivity state, firmware-update entities, and
   physical-button events.
