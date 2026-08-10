@@ -21,12 +21,12 @@ DEFAULT_FIRMWARE = {
     "firmware_size": 5_967_968,
 }
 DEFAULT_NOTE4_FIRMWARE = {
-    "note4_firmware_version": "1.2.1-voice-remote",
+    "note4_firmware_version": "1.2.2-voice-remote",
     "note4_firmware_url": "packaged",
     "note4_firmware_sha256": (
-        "16bc0a2b1bf9458805c6b63e28ed07b466e6893b59bc7a95056811abc4e367e8"
+        "1619c9788c050038d28e0f927b19d830ce7de18694ae1b407a639bcbd013ef18"
     ),
-    "note4_firmware_size": 2_730_384,
+    "note4_firmware_size": 2_730_112,
 }
 LEGACY_PACKAGED_FIRMWARE = (
     {
