@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import FastAPI, Header, HTTPException, Request, Response
+from fastapi import Body, FastAPI, Header, HTTPException, Request, Response
 from fastapi.responses import FileResponse, RedirectResponse
 from PIL import Image
 
@@ -75,6 +75,12 @@ from .photo_frame import (
 from .renderer import DashboardRenderer
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
+from .voice_assistant import (
+    HomeAssistantVoiceClient,
+    VoiceAssistantError,
+    display_text,
+    encode_voice_response,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -1285,6 +1291,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.screen_history.limit,
     )
     ha = HomeAssistantClient(settings.home_assistant)
+    voice_assistant = HomeAssistantVoiceClient(settings.home_assistant)
     renderer = DashboardRenderer()
 
     def fleet_policy_profiles() -> dict[str, dict[str, Any]]:
@@ -1906,6 +1913,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.meshtastic_console = meshtastic_console
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
+    app.state.voice_assistant = voice_assistant
 
     def firmware_delivery_url(request: Request) -> str:
         if settings.firmware.mirror_enabled:
@@ -2000,6 +2008,30 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "error": flexhub_health.get("error") or "",
             },
         }
+
+    @app.post("/api/v1/devices/{device_id}/assist")
+    def run_device_assist(
+        device_id: str,
+        request: Request,
+        audio: bytes = Body(..., media_type="application/octet-stream"),
+    ) -> Response:
+        authorize(request)
+        selected = _device_id(device_id)
+        try:
+            result = voice_assistant.run(audio, selected)
+        except VoiceAssistantError as exc:
+            message = str(exc)
+            status = 400 if message.startswith(("Hold", "Voice command", "PCM")) else 502
+            raise HTTPException(status_code=status, detail=message) from exc
+        return Response(
+            encode_voice_response(result),
+            media_type="application/octet-stream",
+            headers={
+                "X-FlexDisplay-Assist-Transcript": display_text(result.transcript),
+                "X-FlexDisplay-Assist-Response": display_text(result.response_text),
+                "X-FlexDisplay-Audio-Format": "pcm-s16le-16000-mono",
+            },
+        )
 
     @app.get("/api/v1/flexhub")
     def flexhub_status(request: Request, refresh: bool = False) -> dict[str, Any]:

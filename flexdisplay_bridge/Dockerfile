@@ -16,7 +16,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     FLEXDISPLAY_HA_BASE_URL=http://supervisor/core \
     FLEXDISPLAY_HA_VERIFY_TLS=false
 
-RUN apk add --no-cache font-dejavu tzdata
+RUN apk add --no-cache ffmpeg font-dejavu tzdata
 
 WORKDIR /app
 COPY pyproject.toml ./
