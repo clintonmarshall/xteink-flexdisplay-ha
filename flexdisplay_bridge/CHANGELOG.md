@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.39.0
+
+- Add private push-to-talk Home Assistant Assist brokering for the Zectrix
+  Note 4. The device sends 16 kHz mono PCM without storing a Home Assistant
+  token, and the Bridge returns a concise response plus speaker-ready PCM.
+- Normalize Home Assistant TTS responses with FFmpeg so Piper, cloud, WAV,
+  MP3, and other configured Assist voices use one bounded device wire format.
+- Keep the bundled X3/X4 firmware at `1.5.0-flexdisplay.0.38.1`; this release
+  changes only the Bridge and the separately flashed Note 4 firmware.
+
 ## 0.38.2
 
 - Add Zectrix Note 4 as a native 400 × 300 FlexDisplay model with 1-bit BMP

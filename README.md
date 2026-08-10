@@ -6,7 +6,8 @@ plus the Zectrix Note 4 House Pulse e-paper surface.
 This repository provides:
 
 - the **FlexDisplay Bridge** Home Assistant App, which renders device-sized
-  dashboard images and records fleet telemetry;
+  dashboard images, records fleet telemetry, and securely brokers Note 4
+  push-to-talk audio through the Home Assistant Assist pipeline;
 - the **FlexDisplay** HACS integration, which creates Home Assistant devices,
   sensors, queued controls, connectivity state, firmware-update entities, and
   physical-button events.
