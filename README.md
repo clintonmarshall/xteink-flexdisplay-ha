@@ -1,7 +1,7 @@
 # XTEINK FlexDisplay for Home Assistant
 
-Public Home Assistant installer for FlexDisplay-enabled XTEINK X3 and X4
-e-paper devices.
+Public Home Assistant installer for FlexDisplay-enabled XTEINK X3 and X4,
+plus the Zectrix Note 4 House Pulse e-paper surface.
 
 This repository provides:
 

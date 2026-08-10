@@ -875,7 +875,11 @@ def _header_value(value: Any) -> str:
 
 def _is_x3_model(model: str) -> bool:
     normalized = re.sub(r"[^A-Z0-9]", "", str(model or "").upper())
-    return normalized == "X3" or normalized.endswith("XTEINKX3")
+    return (
+        normalized == "X3"
+        or normalized.endswith("XTEINKX3")
+        or normalized in {"N4", "NOTE4", "ZECTRIXNOTE4"}
+    )
 
 
 def _device_screen_payload(
@@ -2416,9 +2420,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "models": {
                 "X3": {"width": 528, "height": 792},
                 "X4": {"width": 480, "height": 800},
+                "N4": {"width": 400, "height": 300},
             },
             "capabilities": {
-                "layouts": ["auto", "single", "rows", "columns", "grid"],
+                "layouts": [
+                    "auto",
+                    "single",
+                    "rows",
+                    "columns",
+                    "grid",
+                    "house_pulse",
+                ],
                 "styles": [
                     "value",
                     "gauge",
@@ -3010,7 +3022,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         except DashboardValidationError as err:
             raise HTTPException(status_code=400, detail=str(err)) from err
         model = str(payload.get("model") or "X4").upper()
-        default_width, default_height = (528, 792) if model == "X3" else (480, 800)
+        default_width, default_height = (
+            (528, 792)
+            if model == "X3"
+            else (400, 300)
+            if model == "N4"
+            else (480, 800)
+        )
         width = _integer(
             str(payload.get("width") or default_width), default_width, 240, 1200
         )
