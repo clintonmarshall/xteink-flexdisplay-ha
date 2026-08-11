@@ -185,6 +185,7 @@ class RookBroker:
         self._interactions: dict[str, dict[str, Any]] = {}
         self._notifications: dict[str, dict[str, Any]] = {}
         self._sequence: dict[str, int] = {}
+        self._events: dict[str, dict[str, Any]] = {}
 
     def set_interactions(
         self,
@@ -255,14 +256,41 @@ class RookBroker:
                 "image": image,
                 "image_media_type": image_media_type,
             }
+            self._events[device_id] = {
+                "event": "notification",
+                "refresh": False,
+                "reason": "notification",
+            }
             self._condition.notify_all()
-            return {"sequence": sequence, "notification": deepcopy(public)}
+            return {
+                "sequence": sequence,
+                "notification": deepcopy(public),
+                **self._events[device_id],
+            }
+
+    def publish_refresh(self, device_id: str, reason: str = "refresh") -> dict[str, Any]:
+        """Wake a receiver's existing long poll so it fetches the latest screen."""
+        with self._condition:
+            sequence = self._next_sequence_locked(device_id)
+            self._sequence[device_id] = sequence
+            self._events[device_id] = {
+                "event": "screen_refresh",
+                "refresh": True,
+                "reason": str(reason or "refresh")[:80],
+            }
+            self._condition.notify_all()
+            return {"sequence": sequence, **self._events[device_id]}
 
     def _expire_locked(self, device_id: str) -> None:
         current = self._notifications.get(device_id)
         if current and time.monotonic() >= float(current["expires_at"]):
             self._notifications.pop(device_id, None)
             self._sequence[device_id] = self._next_sequence_locked(device_id)
+            self._events[device_id] = {
+                "event": "notification_dismissed",
+                "refresh": False,
+                "reason": "expired",
+            }
 
     def _next_sequence_locked(self, device_id: str) -> int:
         return max(self._sequence.get(device_id, 0) + 1, int(time.time() * 1000))
@@ -278,10 +306,20 @@ class RookBroker:
                     return {
                         "sequence": sequence,
                         "notification": deepcopy(current["public"]) if current else None,
+                        **deepcopy(
+                            self._events.get(device_id)
+                            or {"event": "state_changed", "refresh": False, "reason": ""}
+                        ),
                     }
                 remaining = deadline - time.monotonic()
                 if remaining <= 0:
-                    return {"sequence": sequence, "notification": None}
+                    return {
+                        "sequence": sequence,
+                        "notification": None,
+                        "event": "timeout",
+                        "refresh": False,
+                        "reason": "",
+                    }
                 self._condition.wait(remaining)
 
     def dismiss(self, device_id: str, notification_id: str) -> bool:
@@ -291,6 +329,11 @@ class RookBroker:
                 return False
             self._notifications.pop(device_id, None)
             self._sequence[device_id] = self._next_sequence_locked(device_id)
+            self._events[device_id] = {
+                "event": "notification_dismissed",
+                "refresh": False,
+                "reason": "dismissed",
+            }
             self._condition.notify_all()
             return True
 

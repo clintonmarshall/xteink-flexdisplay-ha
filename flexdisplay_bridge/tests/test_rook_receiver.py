@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -67,10 +68,73 @@ def test_rook_screen_is_round_safe_colour_png(tmp_path: Path) -> None:
         assert device["touch_available"] is True
         assert device["color_available"] is True
         assert device["client_platform"] == "android"
+        assert device["display_technology"] == "lcd"
+        assert device["power_class"] == "always_on_color"
+        assert device["refresh_delivery"] == "long_poll"
+        assert device["policy_overlay"] == "always_on_color"
+        assert device["assigned_refresh_interval_seconds"] == 60
+        assert device["assigned_live_mode"] is True
+        assert device["assigned_intelligent_sleep"] is False
         assert device["health_state"] == "healthy"
         assert device["health_issues"] == []
         assert device["consecutive_sd_failures"] == 0
         assert device["sd_failure_events"] == 0
+
+
+def test_rook_refresh_command_wakes_receiver_long_poll(tmp_path: Path) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="bridge-secret",
+        profiles={"spot": DashboardProfileConfig(name="spot")},
+        default_profile="spot",
+    )
+    receiver_headers = {
+        "X-FlexDisplay-ID": "ROOK-WAKE01",
+        "X-FlexDisplay-Model": "ROOK",
+        "X-FlexDisplay-Capabilities": "android,color,round-display,notifications",
+        "X-FlexDisplay-Receiver-Token": "receiver-secret",
+    }
+    with TestClient(create_app(config)) as client:
+        screen = client.get("/api/v1/screen", headers=receiver_headers)
+        assert screen.headers["x-flexdisplay-refresh-interval"] == "60"
+        assert screen.headers["x-flexdisplay-live-mode"] == "true"
+        assert screen.headers["x-flexdisplay-sleep-action"] == "awake"
+
+        queued = client.post(
+            "/api/v1/devices/ROOK-WAKE01/commands/refresh",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+        )
+        assert queued.status_code == 200
+        event = client.get(
+            "/api/v1/devices/ROOK-WAKE01/notifications/next?after=0&timeout=0",
+            headers={"X-FlexDisplay-Receiver-Token": "receiver-secret"},
+        ).json()
+
+        assert event["event"] == "screen_refresh"
+        assert event["refresh"] is True
+        assert event["reason"] == "command:refresh"
+        assert event["notification"] is None
+        assert event["sequence"] > 0
+
+        applied = client.put(
+            "/api/v1/fleet/policy",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+            json={
+                "profile": "battery_saver",
+                "scope": "devices",
+                "device_ids": ["ROOK-WAKE01"],
+                "delivery": "apply_now",
+            },
+        )
+        assert applied.status_code == 200
+        refreshed = client.get("/api/v1/screen", headers=receiver_headers)
+        assert refreshed.headers["x-flexdisplay-refresh-interval"] == "60"
+        assert refreshed.headers["x-flexdisplay-live-mode"] == "true"
+        assert refreshed.headers["x-flexdisplay-sleep-action"] == "awake"
+        device = client.get("/api/v1/devices/ROOK-WAKE01").json()
+        assert device["assigned_policy_name"] == "battery_saver"
+        assert device["policy_overlay"] == "always_on_color"
+        assert device["assigned_intelligent_sleep"] is False
 
 
 def test_rook_cannot_receive_esp32_firmware(tmp_path: Path) -> None:
@@ -164,6 +228,97 @@ def test_rook_mqtt_discovery_removes_embedded_firmware_update() -> None:
     assert retained["homeassistant/binary_sensor/rook_mqtt01/repeated_sd_failure/config"] == ""
     assert retained["homeassistant/binary_sensor/rook_mqtt01/sd_ready/config"] == ""
     assert "homeassistant/image/rook_mqtt01/current_screen/config" in retained
+
+
+def test_mqtt_screen_refresh_event_is_non_retained() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+    service = MqttService(
+        MqttConfig(enabled=True),
+        lambda device_id, command, payload: None,
+    )
+    client = FakeClient()
+    service.client = client
+    service.connected = True
+
+    assert service.publish_screen_refresh(
+        "LCD-KITCHEN",
+        reason="command:refresh",
+        command_id="LCD-KITCHEN-00000001",
+        queued_at="2026-08-11T12:00:00+00:00",
+    )
+    topic, raw_payload, retained = client.messages[-1]
+    payload = json.loads(str(raw_payload))
+    assert topic == "flexdisplay/LCD-KITCHEN/event/screen"
+    assert retained is False
+    assert payload == {
+        "event": "screen_refresh",
+        "device_id": "LCD-KITCHEN",
+        "reason": "command:refresh",
+        "command_id": "LCD-KITCHEN-00000001",
+        "queued_at": "2026-08-11T12:00:00+00:00",
+    }
+
+
+def test_mqtt_capable_color_display_gets_always_on_overlay_and_wake_event(
+    tmp_path: Path,
+) -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+        def disconnect(self) -> None:
+            pass
+
+        def loop_stop(self) -> None:
+            pass
+
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="bridge-secret",
+        mqtt=MqttConfig(enabled=False),
+    )
+    app = create_app(config)
+    with TestClient(app) as client:
+        screen = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "LCD-KITCHEN",
+                "X-FlexDisplay-Model": "ESP32-S3-LCD",
+                "X-FlexDisplay-Capabilities": (
+                    "color,lcd,always-on-color,mqtt-screen-refresh"
+                ),
+            },
+        )
+        assert screen.headers["x-flexdisplay-refresh-interval"] == "60"
+        assert screen.headers["x-flexdisplay-sleep-action"] == "awake"
+        device = client.get("/api/v1/devices/LCD-KITCHEN").json()
+        assert device["power_class"] == "always_on_color"
+        assert device["display_technology"] == "lcd"
+        assert device["refresh_delivery"] == "mqtt"
+
+        fake = FakeClient()
+        app.state.mqtt.client = fake
+        app.state.mqtt.connected = True
+        queued = client.post(
+            "/api/v1/devices/LCD-KITCHEN/commands/refresh",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+        )
+        assert queued.status_code == 200
+        assert any(
+            topic == "flexdisplay/LCD-KITCHEN/event/screen"
+            and json.loads(str(payload))["reason"] == "command:refresh"
+            and not retain
+            for topic, payload, retain in fake.messages
+        )
 
 
 def test_rook_dashboard_interactions_are_paired_and_bounded(

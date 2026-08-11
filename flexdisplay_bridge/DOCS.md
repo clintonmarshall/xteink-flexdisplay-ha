@@ -171,6 +171,37 @@ button events, a current-screen Image entity, and a native firmware update
 entity with live percentage progress. Commands remain durable in the Bridge
 while a display sleeps.
 
+## Always-on colour displays and push refresh
+
+The Bridge treats the Echo Spot receiver as an always-on colour display. It
+uses the receiver's authenticated long poll to invalidate the current screen
+as soon as a command is durably queued. The built-in **Always-on Colour** fleet
+policy is also available for mains-powered LCD/OLED panels. This runtime class
+stays awake, uses LAN-preferred delivery, disables battery and unchanged-image
+interval scaling, and keeps a 60-second safety poll.
+
+An ESP display can opt into the same runtime class by reporting these values in
+`X-FlexDisplay-Capabilities`:
+
+```text
+color,lcd,always-on-color,mqtt-screen-refresh
+```
+
+`oled` may replace `lcd`; `mains-powered` is accepted in place of
+`always-on-color`. With MQTT connected, every queued device command publishes
+a non-retained JSON wake event to:
+
+```text
+flexdisplay/<device_id>/event/screen
+```
+
+The device should subscribe to that topic and immediately GET
+`/api/v1/screen` when `event` is `screen_refresh`. The payload includes
+`reason`, `command_id`, and `queued_at`. MQTT is a best-effort wake transport:
+the command remains durable in the Bridge, and the safety poll still delivers
+it after broker or Wi-Fi recovery. Battery e-paper devices do not opt in and
+retain their existing scheduled-sleep behavior.
+
 ## Fleet health and screen history
 
 Open **Fleet health** in Dashboard Studio to see every display's current

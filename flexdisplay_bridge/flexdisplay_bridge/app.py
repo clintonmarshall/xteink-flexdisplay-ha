@@ -155,6 +155,22 @@ FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
             "open_display_transport_policy": "lan_preferred",
         },
     },
+    "always_on_color": {
+        "label": "Always-on Colour",
+        "description": "Mains-powered Android, LCD, and OLED dashboards with push refresh and no battery sleep scaling.",
+        "settings": {
+            "live_mode": True,
+            "intelligent_sleep": False,
+            "stay_awake_on_usb": True,
+            "refresh_interval_seconds": 60,
+            "manual_sleep_seconds": 900,
+            "manual_wake_grace_seconds": 120,
+            "low_battery_multiplier": 1,
+            "unchanged_image_multiplier": 1,
+            "rendering_profile": "standard",
+            "open_display_transport_policy": "lan_preferred",
+        },
+    },
     "x4_photo": {
         "label": "X4 Photo Quality",
         "description": "Experimental full-refresh rendering tuned for X4 photographs and shaded artwork.",
@@ -227,6 +243,54 @@ def _is_android_display(record: dict[str, Any] | str) -> bool:
     model = record if isinstance(record, str) else str(record.get("model") or "")
     normalized = re.sub(r"[^A-Z0-9]", "", model.upper())
     return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+
+
+def _transfer_capabilities(record: dict[str, Any]) -> set[str]:
+    return {
+        str(value).strip().lower()
+        for value in (record.get("transfer_capabilities") or [])
+        if str(value).strip()
+    }
+
+
+def _is_always_on_color_display(record: dict[str, Any]) -> bool:
+    capabilities = _transfer_capabilities(record)
+    color = bool(record.get("color_available")) or "color" in capabilities
+    explicitly_always_on = bool(
+        capabilities.intersection({"always-on-color", "always-on", "mains-powered"})
+    )
+    return color and (_is_android_display(record) or explicitly_always_on)
+
+
+def _supports_mqtt_screen_refresh(record: dict[str, Any]) -> bool:
+    return bool(
+        _transfer_capabilities(record).intersection(
+            {"mqtt-screen-refresh", "mqtt-refresh", "push-refresh-mqtt"}
+        )
+    )
+
+
+def _display_runtime(record: dict[str, Any]) -> dict[str, str]:
+    capabilities = _transfer_capabilities(record)
+    if _is_android_display(record):
+        technology = "lcd"
+        delivery = "long_poll"
+    else:
+        technology = (
+            "oled"
+            if "oled" in capabilities
+            else "lcd"
+            if capabilities.intersection({"lcd", "tft", "always-on-color"})
+            else "eink"
+        )
+        delivery = "mqtt" if _supports_mqtt_screen_refresh(record) else "poll"
+    always_on = _is_always_on_color_display(record)
+    return {
+        "display_technology": technology,
+        "power_class": "always_on_color" if always_on else "battery_managed",
+        "refresh_delivery": delivery,
+        "policy_overlay": "always_on_color" if always_on else "",
+    }
 
 
 def _device_firmware(settings: BridgeConfig, record: dict[str, Any] | str) -> FirmwareConfig:
@@ -615,6 +679,7 @@ def _decorate_device(
     available_policy_profiles: list[str] | None = None,
 ) -> dict[str, Any]:
     result = dict(record)
+    result.update(_display_runtime(result))
     last_seen = result.get("last_seen")
     online = False
     power_state = "offline"
@@ -825,7 +890,7 @@ def _decorate_device(
 
 
 def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfig:
-    return replace(
+    selected = replace(
         base,
         name=str(record.get("assigned_name") or base.name),
         area=str(record.get("assigned_area") or base.area),
@@ -917,6 +982,21 @@ def _effective_device(base: DeviceConfig, record: dict[str, Any]) -> DeviceConfi
             else "auto"
         ),
     )
+    if _is_always_on_color_display(record):
+        # Always-powered colour panels use push invalidation when available and
+        # a one-minute safety poll. Battery schedules and unchanged-image
+        # multipliers must not make an interactive wall dashboard appear stale.
+        return replace(
+            selected,
+            refresh_interval_seconds=min(selected.refresh_interval_seconds, 60),
+            live_mode=True,
+            intelligent_sleep=False,
+            stay_awake_on_usb=True,
+            low_battery_multiplier=1,
+            unchanged_image_multiplier=1,
+            open_display_transport_policy="lan_preferred",
+        )
+    return selected
 
 
 def _header_value(value: Any) -> str:
@@ -1756,6 +1836,28 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
 
     mqtt = MqttService(settings.mqtt, queue_from_mqtt)
 
+    def dispatch_queued_command(
+        device_id: str, command: str, record: dict[str, Any]
+    ) -> None:
+        """Wake push-capable displays after the command is safely persisted."""
+        try:
+            reason = f"command:{command}"
+            if _is_android_display(record):
+                rook.publish_refresh(device_id, reason)
+            if _supports_mqtt_screen_refresh(record):
+                mqtt.publish_screen_refresh(
+                    device_id,
+                    reason=reason,
+                    command_id=str(record.get("pending_command_id") or ""),
+                    queued_at=str(record.get("command_queued_at") or ""),
+                )
+        except Exception:
+            # The durable command remains queued and the device's safety poll
+            # will still deliver it if a best-effort wake transport is down.
+            LOGGER.exception("Could not publish refresh wake event for %s", device_id)
+
+    store.add_command_listener(dispatch_queued_command)
+
     def process_meshtastic_messages(
         messages: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
@@ -1959,6 +2061,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.meshtastic_console = meshtastic_console
     app.state.screen_history = screen_history
     app.state.mqtt = mqtt
+    app.state.rook = rook
     app.state.voice_assistant = voice_assistant
 
     def firmware_delivery_url(request: Request, model: str = "") -> str:
@@ -4183,6 +4286,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 x_flexdisplay_opendisplay_lan_memory_blocked
             ),
         }
+        telemetry.update(_display_runtime(telemetry))
         if last_image_error is not None:
             telemetry["image_conversion_error"] = bool(last_image_error)
             if last_image_error:
