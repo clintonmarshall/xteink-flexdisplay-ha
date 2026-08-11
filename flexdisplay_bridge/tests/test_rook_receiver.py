@@ -48,6 +48,7 @@ def test_rook_screen_is_round_safe_colour_png(tmp_path: Path) -> None:
                 "X-FlexDisplay-Width": "480",
                 "X-FlexDisplay-Height": "480",
                 "X-FlexDisplay-Capabilities": "android,color,touch,round-display,png,empty-unchanged",
+                "X-FlexDisplay-SD-Ready": "false",
             },
         )
 
@@ -65,6 +66,10 @@ def test_rook_screen_is_round_safe_colour_png(tmp_path: Path) -> None:
         assert device["touch_available"] is True
         assert device["color_available"] is True
         assert device["client_platform"] == "android"
+        assert device["health_state"] == "healthy"
+        assert device["health_issues"] == []
+        assert device["consecutive_sd_failures"] == 0
+        assert device["sd_failure_events"] == 0
 
 
 def test_rook_cannot_receive_esp32_firmware(tmp_path: Path) -> None:
@@ -154,4 +159,7 @@ def test_rook_mqtt_discovery_removes_embedded_firmware_update() -> None:
         if retain
     }
     assert retained["homeassistant/update/rook_mqtt01/firmware/config"] == ""
+    assert retained["homeassistant/sensor/rook_mqtt01/sd_failure_events/config"] == ""
+    assert retained["homeassistant/binary_sensor/rook_mqtt01/repeated_sd_failure/config"] == ""
+    assert retained["homeassistant/binary_sensor/rook_mqtt01/sd_ready/config"] == ""
     assert "homeassistant/image/rook_mqtt01/current_screen/config" in retained

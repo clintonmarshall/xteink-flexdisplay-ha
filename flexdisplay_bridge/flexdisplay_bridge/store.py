@@ -19,6 +19,12 @@ PROBLEM_RESET_REASONS = {
 }
 
 
+def _is_android_receiver(record: dict[str, Any]) -> bool:
+    model = str(record.get("model") or "").upper()
+    normalized = "".join(character for character in model if character.isalnum())
+    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+
+
 def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
@@ -170,7 +176,12 @@ class DeviceStore:
                 )
                 record["checkin_history"] = history[-CHECKIN_HISTORY_LIMIT:]
 
-                if telemetry.get("sd_ready") is False:
+                if _is_android_receiver(telemetry):
+                    # Android receivers intentionally report no SD card so an
+                    # older Bridge fails closed instead of offering ESP32 OTA.
+                    record["consecutive_sd_failures"] = 0
+                    record["sd_failure_events"] = 0
+                elif telemetry.get("sd_ready") is False:
                     record["consecutive_sd_failures"] = int(
                         record.get("consecutive_sd_failures") or 0
                     ) + 1
