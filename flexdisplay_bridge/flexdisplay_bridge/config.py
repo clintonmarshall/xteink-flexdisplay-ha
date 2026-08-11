@@ -128,14 +128,14 @@ class HomeAssistantConfig:
 
 @dataclass(frozen=True)
 class MqttConfig:
-    enabled: bool = False
+    enabled: bool = True
     host: str = "core-mosquitto"
     port: int = 1883
     username: str = ""
     password: str = ""
     discovery_prefix: str = "homeassistant"
     topic_prefix: str = "flexdisplay"
-    entity_source: str = "hacs"
+    entity_source: str = "mqtt"
 
 
 @dataclass(frozen=True)
@@ -393,7 +393,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
     mqtt_raw = raw.get("mqtt") or {}
     mqtt_password_env = str(mqtt_raw.get("password_env") or "FLEXDISPLAY_MQTT_PASSWORD")
     mqtt = MqttConfig(
-        enabled=_env_bool("FLEXDISPLAY_MQTT_ENABLED", bool(mqtt_raw.get("enabled", False))),
+        enabled=_env_bool("FLEXDISPLAY_MQTT_ENABLED", bool(mqtt_raw.get("enabled", True))),
         host=os.getenv("FLEXDISPLAY_MQTT_HOST", str(mqtt_raw.get("host") or "core-mosquitto")),
         port=int(os.getenv("FLEXDISPLAY_MQTT_PORT", mqtt_raw.get("port", 1883))),
         username=os.getenv("FLEXDISPLAY_MQTT_USERNAME", str(mqtt_raw.get("username") or "")),
@@ -403,10 +403,10 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         entity_source=_choice(
             os.getenv(
                 "FLEXDISPLAY_HA_ENTITY_SOURCE",
-                str(mqtt_raw.get("entity_source") or "hacs"),
+                str(mqtt_raw.get("entity_source") or "mqtt"),
             ),
             {"hacs", "mqtt", "both"},
-            "hacs",
+            "mqtt",
         ),
     )
 

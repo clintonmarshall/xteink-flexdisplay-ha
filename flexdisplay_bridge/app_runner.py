@@ -6,19 +6,17 @@ import json
 import os
 import shutil
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import uvicorn
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
-    "firmware_version": "1.5.0-flexdisplay.0.38.1",
-    "firmware_url": (
-        "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
-        "releases/download/v0.38.1/firmware.bin"
-    ),
-    "firmware_sha256": "068060b3780267d51ba7c8ea3de08da5c773361fda01b10641a9ecf35c264724",
-    "firmware_size": 5_967_968,
+    "firmware_version": "1.5.0-flexdisplay.0.39.0",
+    "firmware_url": "packaged",
+    "firmware_sha256": "154b524d806f738f1f706d87dbb3342ef810134101fffea1ef248c0c9fbc4533",
+    "firmware_size": 5_972_640,
 }
 DEFAULT_NOTE4_FIRMWARE = {
     "note4_firmware_version": "1.2.2-voice-remote",
@@ -29,6 +27,15 @@ DEFAULT_NOTE4_FIRMWARE = {
     "note4_firmware_size": 2_730_112,
 }
 LEGACY_PACKAGED_FIRMWARE = (
+    {
+        "firmware_version": "1.5.0-flexdisplay.0.38.1",
+        "firmware_url": (
+            "https://github.com/clintonmarshall/xteink-flexdisplay-ha/"
+            "releases/download/v0.38.1/firmware.bin"
+        ),
+        "firmware_sha256": "068060b3780267d51ba7c8ea3de08da5c773361fda01b10641a9ecf35c264724",
+        "firmware_size": 5_967_968,
+    },
     {
         "firmware_version": "1.5.0-flexdisplay.0.37.0",
         "firmware_url": (
@@ -211,19 +218,69 @@ def note4_firmware_options(options: dict) -> dict[str, str]:
     return resolved
 
 
+def supervisor_mqtt_service(token: str) -> dict[str, object]:
+    """Read the MQTT service credentials exposed to this Home Assistant App."""
+    if not token:
+        return {}
+    request = Request(
+        "http://supervisor/services/mqtt",
+        headers={"Authorization": f"Bearer {token}"},
+    )
+    try:
+        with urlopen(request, timeout=5) as response:
+            payload = json.loads(response.read())
+    except (OSError, ValueError):
+        return {}
+    if not isinstance(payload, dict):
+        return {}
+    data = payload.get("data", payload)
+    return data if isinstance(data, dict) else {}
+
+
+def mqtt_options(
+    options: dict,
+    supervisor_token: str,
+    service_reader=supervisor_mqtt_service,
+) -> dict[str, str]:
+    """Resolve fresh-install MQTT defaults without requiring the HACS integration."""
+    enabled = bool(options.get("mqtt_enabled", True))
+    host = str(options.get("mqtt_host") or "").strip()
+    port = int(options.get("mqtt_port") or 1883)
+    username = str(options.get("mqtt_username") or "")
+    password = str(options.get("mqtt_password") or "")
+
+    if enabled and not host:
+        service = service_reader(supervisor_token)
+        host = str(service.get("host") or "").strip()
+        port = int(service.get("port") or port)
+        username = str(service.get("username") or username)
+        password = str(service.get("password") or password)
+
+    return {
+        "enabled": "true" if enabled else "false",
+        "host": host or "core-mosquitto",
+        "port": str(port),
+        "username": username,
+        "password": password,
+        "entity_source": str(
+            options.get("home_assistant_entity_source") or "mqtt"
+        ),
+    }
+
+
 def main() -> None:
     """Configure and launch the bridge."""
     options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
-    os.environ["FLEXDISPLAY_HA_TOKEN"] = os.getenv("SUPERVISOR_TOKEN", "")
+    supervisor_token = os.getenv("SUPERVISOR_TOKEN", "")
+    os.environ["FLEXDISPLAY_HA_TOKEN"] = supervisor_token
     os.environ["FLEXDISPLAY_DASHBOARD_TITLE"] = option(options, "dashboard_title", "HOME ASSISTANT")
-    os.environ["FLEXDISPLAY_MQTT_ENABLED"] = option(options, "mqtt_enabled", False)
-    os.environ["FLEXDISPLAY_MQTT_HOST"] = option(options, "mqtt_host", "core-mosquitto")
-    os.environ["FLEXDISPLAY_MQTT_PORT"] = option(options, "mqtt_port", 1883)
-    os.environ["FLEXDISPLAY_MQTT_USERNAME"] = option(options, "mqtt_username", "flexdisplay")
-    os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = option(options, "mqtt_password")
-    os.environ["FLEXDISPLAY_HA_ENTITY_SOURCE"] = option(
-        options, "home_assistant_entity_source", "hacs"
-    )
+    mqtt = mqtt_options(options, supervisor_token)
+    os.environ["FLEXDISPLAY_MQTT_ENABLED"] = mqtt["enabled"]
+    os.environ["FLEXDISPLAY_MQTT_HOST"] = mqtt["host"]
+    os.environ["FLEXDISPLAY_MQTT_PORT"] = mqtt["port"]
+    os.environ["FLEXDISPLAY_MQTT_USERNAME"] = mqtt["username"]
+    os.environ["FLEXDISPLAY_MQTT_PASSWORD"] = mqtt["password"]
+    os.environ["FLEXDISPLAY_HA_ENTITY_SOURCE"] = mqtt["entity_source"]
     os.environ["FLEXDISPLAY_FLEXHUB_URL"] = option(options, "flexhub_url")
     os.environ["FLEXDISPLAY_FLEXHUB_ACCESS_PIN"] = option(options, "flexhub_access_pin")
     os.environ["FLEXDISPLAY_FLEXHUB_POLL_SECONDS"] = option(

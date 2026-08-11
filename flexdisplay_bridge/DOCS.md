@@ -114,14 +114,14 @@ long press. The indicator is included at the device's next screen render.
 Options:
 
 - `dashboard_title`: heading rendered on each e-paper screen.
-- `mqtt_enabled`: publish optional MQTT Discovery entities.
-- `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`: dedicated broker
-  connection.
-- `home_assistant_entity_source`: use `hacs` for the existing custom
-  integration, `mqtt` for the v0.20 App-only experience, or `both` only during
-  a short migration test. The default is `hacs`, which actively removes
-  retained FlexDisplay MQTT Discovery configurations to prevent duplicate
-  entities.
+- `mqtt_enabled`: publish MQTT Discovery entities. This is enabled for fresh
+  installs so FlexDisplay works without HACS.
+- `mqtt_host`, `mqtt_port`, `mqtt_username`, `mqtt_password`: leave the host and
+  credentials blank to use the MQTT service advertised by Home Assistant
+  Supervisor, or enter a dedicated broker explicitly.
+- `home_assistant_entity_source`: use `mqtt` for the default App-only
+  experience, `hacs` for an existing custom integration, or `both` only during
+  a short migration test.
 - `screen_history_enabled`: retain recent e-paper output in the App data
   volume.
 - `screen_history_limit`: number of rendered screens retained per device,
