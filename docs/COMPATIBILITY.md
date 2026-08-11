@@ -6,7 +6,7 @@ Update this table in every release that changes a protocol or minimum version.
 | --- | --- | --- |
 | FlexDisplay platform | 0.44.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.2.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11 |
-| X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | X3 USB canary passed; X4 USB canary remains mandatory |
+| X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | X3 and X4 USB canaries passed, including X4 LAN refresh acknowledgement and session recovery |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |
 
