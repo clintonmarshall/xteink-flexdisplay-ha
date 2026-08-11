@@ -27,7 +27,8 @@ The project's internal Forgejo repository is the source of truth for
 development, pull requests, tags, and releases. GitHub is an automatic,
 read-only compatibility mirror used by HACS and public release downloads.
 Contributors must open pull requests and publish tags in Forgejo only. See
-`docs/ARCHITECTURE.md` and `docs/RELEASE.md` for the durable workflow.
+`docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, and `docs/RELEASE.md` for the
+durable workflow.
 
 This is the Home Assistant component of the wider FlexDisplay Platform:
 
