@@ -7,7 +7,7 @@ on:
 
 jobs:
   bridge:
-    runs-on: flexdisplay-ci
+    runs-on: linux-amd64
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v6
       - name: Validate release metadata
