@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.44.0"
+version: "0.45.0"
 slug: flexdisplay_bridge
 description: Render dashboards and manage XTEINK, Note4, and Echo Spot FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay-ha
@@ -40,8 +40,8 @@ options:
   bridge_api_key: ""
   firmware_version: 1.5.0-flexdisplay.0.39.0
   firmware_url: packaged
-  firmware_sha256: 154b524d806f738f1f706d87dbb3342ef810134101fffea1ef248c0c9fbc4533
-  firmware_size: 5972640
+  firmware_sha256: eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7
+  firmware_size: 5976336
   firmware_minimum_battery: 40
   firmware_canary_required: true
   firmware_require_usb_for_canary: true

@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.45.0
+
+- Add immediate, durable screen refresh for the Echo Spot over its authenticated
+  long poll, with a one-minute safety poll when the push connection is
+  interrupted.
+- Add an Always-on Colour fleet policy and MQTT screen-refresh events for
+  mains-powered LCD and OLED displays without changing battery-managed e-paper
+  sleep behaviour.
+- Package X3/X4 firmware `1.5.0-flexdisplay.0.39.0` with official Home
+  Assistant OpenDisplay discovery, complete device configuration and firmware
+  metadata, bounded configuration framing, and reliable BLE image uploads.
+- Keep devices assigned to OpenDisplay available for on-demand Home Assistant
+  uploads and reconnects while retaining the battery-friendly timeout for
+  temporary Quick Menu receiver sessions.
+- Make fresh Home Assistant App installs HACS-free by discovering Supervisor
+  MQTT credentials and publishing MQTT entities by default, while preserving
+  existing HACS and mixed-source configurations.
+- Establish Forgejo as the authoritative release source with Proxmox-runner
+  validation and an automatic read-only GitHub compatibility mirror.
+- Validate the exact packaged firmware checksum with USB flash, byte
+  verification, and Home Assistant image-upload canaries on both X3 and X4.
+
 ## 0.44.0
 
 - Redesign Dashboard Studio around task-focused Studio, Content, Fleet,
