@@ -40,8 +40,8 @@ mirror is the only writer to GitHub.
 6. Delete the merged branch and remove its worktree.
 
 `main` is protected against direct pushes. Status-check enforcement must only
-be enabled after a repository-scoped Forgejo runner with the `flexdisplay-ci`
-label is continuously online.
+be enabled after a Forgejo runner with the `linux-amd64` label is continuously
+online and has completed the validation workflow successfully.
 
 ## Releases
 
