@@ -4,30 +4,37 @@ import android.app.Activity;
 import android.app.AlertDialog;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.media.AudioManager;
+import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.WindowManager;
+import android.widget.Button;
 import android.widget.EditText;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.util.Collections;
+import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
-    private static final long DEFAULT_REFRESH_MILLIS = 60_000L;
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService network = Executors.newSingleThreadExecutor();
+    private final ExecutorService notificationNetwork = Executors.newSingleThreadExecutor();
     private final Runnable scheduledRefresh = () -> refresh(false);
     private ReceiverConfig config;
     private FlexDisplayClient client;
+    private FrameLayout root;
     private ImageView imageView;
     private TextView statusView;
     private Bitmap currentBitmap;
@@ -36,6 +43,13 @@ public final class MainActivity extends Activity {
     private String pendingCommandId = "";
     private String pendingQuickAction = "";
     private boolean fetching;
+    private boolean destroyed;
+    private boolean notificationLoopStarted;
+    private long notificationSequence;
+    private List<FlexDisplayClient.Interaction> interactions = Collections.emptyList();
+    private FrameLayout notificationOverlay;
+    private FlexDisplayClient.Notification activeNotification;
+    private Runnable notificationDismissal;
     private float touchStartX;
     private float touchStartY;
     private long touchStartedAt;
@@ -43,7 +57,10 @@ public final class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON);
+        getWindow().addFlags(
+                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
         client = new FlexDisplayClient(this);
         config = ReceiverConfig.load(this);
         applyIntentConfiguration();
@@ -68,13 +85,15 @@ public final class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        destroyed = true;
         handler.removeCallbacksAndMessages(null);
         network.shutdownNow();
+        notificationNetwork.shutdownNow();
         super.onDestroy();
     }
 
     private void buildUi() {
-        FrameLayout root = new FrameLayout(this);
+        root = new FrameLayout(this);
         root.setBackgroundColor(Color.rgb(4, 10, 17));
         imageView = new ImageView(this);
         imageView.setScaleType(ImageView.ScaleType.FIT_XY);
@@ -82,7 +101,7 @@ public final class MainActivity extends Activity {
 
         statusView = new TextView(this);
         statusView.setTextColor(Color.WHITE);
-        statusView.setBackgroundColor(Color.argb(190, 4, 10, 17));
+        statusView.setBackgroundColor(Color.argb(220, 4, 10, 17));
         statusView.setTextSize(15);
         statusView.setGravity(Gravity.CENTER);
         statusView.setPadding(42, 14, 42, 14);
@@ -98,6 +117,7 @@ public final class MainActivity extends Activity {
     }
 
     private boolean onTouch(View view, MotionEvent event) {
+        if (notificationOverlay != null) return false;
         if (event.getAction() == MotionEvent.ACTION_DOWN) {
             touchStartX = event.getX();
             touchStartY = event.getY();
@@ -108,17 +128,63 @@ public final class MainActivity extends Activity {
         float dx = event.getX() - touchStartX;
         float dy = event.getY() - touchStartY;
         long duration = System.currentTimeMillis() - touchStartedAt;
+        FlexDisplayClient.Interaction interaction = interactionAt(touchStartX, touchStartY);
         if (duration > 850 && Math.abs(dx) < 45 && Math.abs(dy) < 45) {
-            showSettings();
+            if (interaction != null && interaction.confirmation) {
+                confirmInteraction(interaction);
+            } else {
+                showSettings();
+            }
         } else if (Math.abs(dx) > 85 && Math.abs(dx) > Math.abs(dy)) {
             pendingQuickAction = dx < 0 ? "next" : "previous";
             refresh(true);
+        } else if (interaction != null) {
+            view.performClick();
+            if (interaction.confirmation) {
+                showTransientStatus("Hold " + interaction.label + " to confirm");
+            } else {
+                performInteraction(interaction, false);
+            }
         } else {
             view.performClick();
             pendingQuickAction = "refresh";
             refresh(true);
         }
         return true;
+    }
+
+    private FlexDisplayClient.Interaction interactionAt(float viewX, float viewY) {
+        if (root.getWidth() <= 0 || root.getHeight() <= 0) return null;
+        float x = viewX * 480f / root.getWidth();
+        float y = viewY * 480f / root.getHeight();
+        for (FlexDisplayClient.Interaction interaction : interactions) {
+            if (interaction.contains(x, y)) return interaction;
+        }
+        return null;
+    }
+
+    private void confirmInteraction(FlexDisplayClient.Interaction interaction) {
+        new AlertDialog.Builder(this)
+                .setTitle(interaction.label)
+                .setMessage(interaction.confirmationText)
+                .setNegativeButton("Cancel", null)
+                .setPositiveButton("Confirm", (dialog, which) -> performInteraction(interaction, true))
+                .show();
+    }
+
+    private void performInteraction(FlexDisplayClient.Interaction interaction, boolean confirmed) {
+        showStatus("Running " + interaction.label + "…", true);
+        network.execute(() -> {
+            try {
+                String detail = client.performInteraction(config, interaction.id, confirmed);
+                handler.post(() -> {
+                    showTransientStatus(detail);
+                    handler.postDelayed(() -> refresh(true), 500L);
+                });
+            } catch (Exception error) {
+                handler.post(() -> showTransientStatus("Action failed\n" + error.getMessage()));
+            }
+        });
     }
 
     private void refresh(boolean immediate) {
@@ -156,7 +222,9 @@ public final class MainActivity extends Activity {
         }
         String digest = result.header("X-FlexDisplay-Image-SHA256");
         if (!digest.isEmpty()) imageSha256 = digest;
+        interactions = result.interactions;
         showStatus("", false);
+        startNotificationLoop();
 
         String commands = result.header("X-FlexDisplay-Commands");
         String commandId = result.header("X-FlexDisplay-Command-ID");
@@ -165,6 +233,170 @@ public final class MainActivity extends Activity {
         long refreshSeconds = parseLong(result.header("X-FlexDisplay-Refresh-Interval"), 60L);
         refreshSeconds = Math.max(15L, Math.min(3600L, refreshSeconds));
         handler.postDelayed(scheduledRefresh, refreshSeconds * 1000L);
+    }
+
+    private void startNotificationLoop() {
+        if (notificationLoopStarted || !config.isReady()) return;
+        notificationLoopStarted = true;
+        notificationNetwork.execute(() -> {
+            while (!destroyed && !Thread.currentThread().isInterrupted()) {
+                try {
+                    ReceiverConfig selectedConfig = config;
+                    long previousSequence = notificationSequence;
+                    FlexDisplayClient.NotificationEvent event =
+                            client.waitForNotification(selectedConfig, notificationSequence);
+                    notificationSequence = Math.max(notificationSequence, event.sequence);
+                    if (event.notification != null) {
+                        Bitmap image = event.notification.hasImage
+                                ? client.fetchNotificationImage(selectedConfig, event.notification.id)
+                                : null;
+                        handler.post(() -> showNotification(event.notification, image));
+                    } else if (event.sequence > previousSequence) {
+                        handler.post(() -> dismissNotification(false));
+                    }
+                } catch (Exception error) {
+                    if (!destroyed) SystemClock.sleep(2_000L);
+                }
+            }
+        });
+    }
+
+    private void showNotification(FlexDisplayClient.Notification notification, Bitmap image) {
+        dismissNotification(false);
+        activeNotification = notification;
+        notificationOverlay = new FrameLayout(this);
+        notificationOverlay.setBackgroundColor(Color.rgb(4, 10, 17));
+        notificationOverlay.setClickable(true);
+        notificationOverlay.setOnClickListener(view -> dismissNotification(true));
+
+        if (image != null) {
+            ImageView camera = new ImageView(this);
+            camera.setScaleType(ImageView.ScaleType.CENTER_CROP);
+            camera.setImageBitmap(image);
+            notificationOverlay.addView(camera, new FrameLayout.LayoutParams(-1, -1));
+        }
+
+        LinearLayout panel = new LinearLayout(this);
+        panel.setOrientation(LinearLayout.VERTICAL);
+        panel.setGravity(Gravity.CENTER);
+        panel.setPadding(16, 12, 16, 12);
+        panel.setBackgroundColor(Color.argb(230, 4, 10, 17));
+        panel.setOnClickListener(view -> { });
+
+        TextView title = new TextView(this);
+        title.setText(notification.title);
+        title.setTextColor(Color.rgb(54, 191, 255));
+        title.setTextSize(24);
+        title.setGravity(Gravity.CENTER);
+        panel.addView(title, new LinearLayout.LayoutParams(-1, -2));
+
+        if (!notification.message.isEmpty()) {
+            TextView message = new TextView(this);
+            message.setText(notification.message);
+            message.setTextColor(Color.WHITE);
+            message.setTextSize(15);
+            message.setGravity(Gravity.CENTER);
+            message.setMaxLines(3);
+            panel.addView(message, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        if (!notification.actions.isEmpty()) {
+            LinearLayout actions = new LinearLayout(this);
+            actions.setOrientation(LinearLayout.HORIZONTAL);
+            actions.setGravity(Gravity.CENTER);
+            for (FlexDisplayClient.NotificationAction action : notification.actions) {
+                Button button = new Button(this);
+                button.setText(action.label);
+                button.setTextSize(11);
+                button.setOnClickListener(view -> performNotificationAction(notification, action));
+                actions.addView(button, new LinearLayout.LayoutParams(0, -2, 1f));
+            }
+            panel.addView(actions, new LinearLayout.LayoutParams(-1, -2));
+        }
+
+        Button dismiss = new Button(this);
+        dismiss.setText("Dismiss");
+        dismiss.setTextSize(11);
+        dismiss.setOnClickListener(view -> dismissNotification(true));
+        panel.addView(dismiss, new LinearLayout.LayoutParams(-1, -2));
+
+        FrameLayout.LayoutParams panelParams = new FrameLayout.LayoutParams(-1, -2, Gravity.BOTTOM);
+        panelParams.leftMargin = 58;
+        panelParams.rightMargin = 58;
+        panelParams.bottomMargin = 46;
+        notificationOverlay.addView(panel, panelParams);
+        root.addView(notificationOverlay, new FrameLayout.LayoutParams(-1, -1));
+        playChime(notification.chime);
+        notificationDismissal = () -> dismissNotification(true);
+        handler.postDelayed(notificationDismissal, notification.duration * 1000L);
+        enterKioskMode();
+    }
+
+    private void performNotificationAction(
+            FlexDisplayClient.Notification notification,
+            FlexDisplayClient.NotificationAction action) {
+        if (action.confirmation) {
+            new AlertDialog.Builder(this)
+                    .setTitle(action.label)
+                    .setMessage(action.confirmationText)
+                    .setNegativeButton("Cancel", null)
+                    .setPositiveButton(
+                            "Confirm",
+                            (dialog, which) -> runNotificationAction(notification, action, true))
+                    .show();
+        } else {
+            runNotificationAction(notification, action, false);
+        }
+    }
+
+    private void runNotificationAction(
+            FlexDisplayClient.Notification notification,
+            FlexDisplayClient.NotificationAction action,
+            boolean confirmed) {
+        network.execute(() -> {
+            try {
+                String detail = client.performNotificationAction(
+                        config, notification.id, action.id, confirmed);
+                handler.post(() -> {
+                    dismissNotification(true);
+                    showTransientStatus(detail);
+                    handler.postDelayed(() -> refresh(true), 500L);
+                });
+            } catch (Exception error) {
+                handler.post(() -> showTransientStatus("Action failed\n" + error.getMessage()));
+            }
+        });
+    }
+
+    private void dismissNotification(boolean notifyBridge) {
+        if (notificationDismissal != null) handler.removeCallbacks(notificationDismissal);
+        notificationDismissal = null;
+        FlexDisplayClient.Notification dismissed = activeNotification;
+        activeNotification = null;
+        if (notificationOverlay != null) root.removeView(notificationOverlay);
+        notificationOverlay = null;
+        if (notifyBridge && dismissed != null) {
+            network.execute(() -> {
+                try {
+                    client.dismissNotification(config, dismissed.id);
+                } catch (Exception ignored) {
+                    // The alert still expires on the Bridge if acknowledgement is lost.
+                }
+            });
+        }
+    }
+
+    private void playChime(String chime) {
+        if ("none".equals(chime)) return;
+        ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90);
+        int selected = "alert".equals(chime)
+                ? ToneGenerator.TONE_PROP_ACK
+                : ToneGenerator.TONE_PROP_BEEP2;
+        tone.startTone(selected, 280);
+        if ("doorbell".equals(chime)) {
+            handler.postDelayed(() -> tone.startTone(ToneGenerator.TONE_PROP_BEEP2, 420), 430L);
+        }
+        handler.postDelayed(tone::release, 1_200L);
     }
 
     private void executeCommands(String commands, String commandId) {
@@ -226,12 +458,15 @@ public final class MainActivity extends Activity {
         form.addView(deviceId);
         new AlertDialog.Builder(this)
                 .setTitle("FlexDisplay Spot")
-                .setMessage("Enter the LAN address of FlexDisplay Bridge. Hold the display at any time to return here.")
+                .setMessage("Enter the LAN address of FlexDisplay Bridge. Hold outside an interactive tile to return here.")
                 .setView(form)
                 .setCancelable(config.isReady())
                 .setNegativeButton(config.isReady() ? "Cancel" : null, null)
                 .setPositiveButton("Connect", (dialog, which) -> {
-                    config = new ReceiverConfig(url.getText().toString(), deviceId.getText().toString());
+                    config = new ReceiverConfig(
+                            url.getText().toString(),
+                            deviceId.getText().toString(),
+                            config.receiverToken);
                     config.save(this);
                     imageSha256 = "";
                     refresh(true);
@@ -243,9 +478,19 @@ public final class MainActivity extends Activity {
         String url = getIntent().getStringExtra("bridge_url");
         String id = getIntent().getStringExtra("device_id");
         if (url != null || id != null) {
-            config = new ReceiverConfig(url == null ? config.bridgeUrl : url, id == null ? config.deviceId : id);
+            config = new ReceiverConfig(
+                    url == null ? config.bridgeUrl : url,
+                    id == null ? config.deviceId : id,
+                    config.receiverToken);
             config.save(this);
         }
+    }
+
+    private void showTransientStatus(String text) {
+        showStatus(text, true);
+        handler.postDelayed(() -> {
+            if (notificationOverlay == null) showStatus("", false);
+        }, 1_600L);
     }
 
     private void showStatus(String text, boolean visible) {

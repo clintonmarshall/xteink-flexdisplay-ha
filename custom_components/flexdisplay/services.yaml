@@ -48,3 +48,63 @@ clear_meshtastic_unread:
       selector:
         config_entry:
           integration: flexdisplay
+
+notify:
+  name: Send display notification
+  description: Show an interactive alert on an Android FlexDisplay receiver such as an Echo Spot.
+  fields:
+    device_id:
+      name: Display ID
+      description: FlexDisplay receiver ID, for example ROOK-SPOT01.
+      required: true
+      selector:
+        text:
+    title:
+      name: Title
+      required: true
+      selector:
+        text:
+    message:
+      name: Message
+      selector:
+        text:
+          multiline: true
+    camera_entity:
+      name: Camera
+      description: Optional Home Assistant camera snapshot to display.
+      selector:
+        entity:
+          domain: camera
+    chime:
+      name: Chime
+      default: default
+      selector:
+        select:
+          options:
+            - none
+            - default
+            - doorbell
+            - alert
+    duration:
+      name: Display duration
+      default: 20
+      selector:
+        number:
+          min: 5
+          max: 300
+          unit_of_measurement: s
+          mode: box
+    actions:
+      name: Action buttons
+      description: Up to three allowlisted Home Assistant action objects.
+      example:
+        - label: Porch light
+          service: light.turn_on
+          entity_id: light.porch
+      selector:
+        object:
+    config_entry_id:
+      name: Config entry ID
+      selector:
+        config_entry:
+          integration: flexdisplay

@@ -30,6 +30,12 @@ availability, current-page, navigation, refresh, clear, sleep, restart, and
 policy entities for the Spot. Android receivers never receive the X3/X4 OTA
 image; the Bridge rejects firmware installation for this model.
 
+Bridge 0.43 adds paired touch interactions and immediate notifications. Spot
+tiles automatically control supported Home Assistant lights, switches,
+input booleans, scenes, and covers. The `flexdisplay.notify` Home Assistant
+action can deliver a camera snapshot, chime, expiry, and up to three bounded
+action buttons to the receiver.
+
 The app automatically uses Home Assistant's internal Supervisor API token. It
 does not require a long-lived access token in its options.
 
