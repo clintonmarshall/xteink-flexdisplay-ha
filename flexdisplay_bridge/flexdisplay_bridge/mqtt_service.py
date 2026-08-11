@@ -969,6 +969,31 @@ class MqttService:
             retain=True,
         )
 
+    def publish_screen_refresh(
+        self,
+        device_id: str,
+        *,
+        reason: str = "refresh",
+        command_id: str = "",
+        queued_at: str = "",
+    ) -> bool:
+        """Publish a non-retained wake hint for MQTT-capable colour displays."""
+        if not self.client or not self.connected:
+            return False
+        payload = {
+            "event": "screen_refresh",
+            "device_id": device_id,
+            "reason": str(reason or "refresh")[:80],
+            "command_id": str(command_id or ""),
+            "queued_at": str(queued_at or ""),
+        }
+        self.client.publish(
+            f"{self.config.topic_prefix}/{device_id}/event/screen",
+            json.dumps(payload),
+            retain=False,
+        )
+        return True
+
     def publish_flexhub(self, summary: dict[str, Any]) -> None:
         """Publish the SenseCAP FlexHub as a Home Assistant MQTT device."""
         if not self.client or not self.connected:

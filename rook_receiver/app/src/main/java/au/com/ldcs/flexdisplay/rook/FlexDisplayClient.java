@@ -102,10 +102,21 @@ final class FlexDisplayClient {
     static final class NotificationEvent {
         final long sequence;
         final Notification notification;
+        final String event;
+        final boolean refresh;
+        final String reason;
 
-        NotificationEvent(long sequence, Notification notification) {
+        NotificationEvent(
+                long sequence,
+                Notification notification,
+                String event,
+                boolean refresh,
+                String reason) {
             this.sequence = sequence;
             this.notification = notification;
+            this.event = event;
+            this.refresh = refresh;
+            this.reason = reason;
         }
     }
 
@@ -150,7 +161,7 @@ final class FlexDisplayClient {
         connection.setRequestProperty("X-FlexDisplay-Firmware", "android-0.2.0");
         connection.setRequestProperty(
                 "X-FlexDisplay-Capabilities",
-                "android,color,touch,round-display,png,empty-unchanged,kiosk,interactions,notifications,audio");
+                "android,color,touch,round-display,png,empty-unchanged,kiosk,interactions,notifications,audio,always-on-color,long-poll-refresh");
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
                 Long.toString(SystemClock.elapsedRealtime() / 1000));
@@ -223,7 +234,12 @@ final class FlexDisplayClient {
             JSONObject payload = new JSONObject(readText(connection.getInputStream()));
             long sequence = payload.optLong("sequence", after);
             JSONObject value = payload.optJSONObject("notification");
-            return new NotificationEvent(sequence, value == null ? null : new Notification(value));
+            return new NotificationEvent(
+                    sequence,
+                    value == null ? null : new Notification(value),
+                    payload.optString("event", ""),
+                    payload.optBoolean("refresh", false),
+                    payload.optString("reason", ""));
         } catch (JSONException error) {
             throw new IOException("Bridge returned invalid notification data", error);
         } finally {

@@ -14,6 +14,8 @@ screen capabilities.
 - tap controls for lights, switches, input booleans, and scenes
 - hold-and-confirm safety for garage doors and other covers
 - immediate camera notifications, local chimes, dismissal, and action buttons
+- immediate screen invalidation over the notification long poll, with a
+  one-minute safety poll if the push connection is interrupted
 - long press for local Bridge URL and device ID settings
 - Home/launcher and boot-completed integration
 - remote refresh, page navigation, clear, sleep, restart, and power-off-style
@@ -87,6 +89,15 @@ Opening a cover always requires confirmation, even if an automation omits the
 confirmation flag. Notification actions are limited to lights, switches,
 input booleans, scenes, and cover open/close/stop services. The Spot uses a
 Google-free long-poll connection to receive notifications immediately.
+
+The same connection carries `screen_refresh` events. Saving and pushing a
+Studio page, changing a profile, or issuing a device command wakes the receiver
+immediately instead of waiting for its periodic screen request. If a refresh
+arrives while an image is already downloading, the receiver remembers it and
+fetches once more after the active request completes. The Bridge classifies the
+Spot as `always_on_color`, keeps its sleep plan awake, and ignores battery and
+unchanged-image interval multipliers; the 60-second interval remains only as a
+recovery fallback.
 
 The LineageOS rook build is experimental and SELinux-permissive. Keep ADB and
 the Bridge API on a trusted LAN; do not expose either directly to the internet.

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 import threading
+from collections.abc import Callable
 from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
@@ -35,7 +36,17 @@ class DeviceStore:
         self._lock = threading.RLock()
         self._state: dict[str, Any] = {"devices": {}}
         self._purged_device_ids: list[str] = []
+        self._command_listeners: list[
+            Callable[[str, str, dict[str, Any]], None]
+        ] = []
         self._load()
+
+    def add_command_listener(
+        self, listener: Callable[[str, str, dict[str, Any]], None]
+    ) -> None:
+        """Notify a transport after a durable device command has been queued."""
+        with self._lock:
+            self._command_listeners.append(listener)
 
     def _load(self) -> None:
         if not self.path.exists():
@@ -333,7 +344,13 @@ class DeviceStore:
                 pending.append(command)
             record["command_queued_at"] = utc_now()
             self._save()
-            return deepcopy(record)
+            queued = deepcopy(record)
+            listeners = list(self._command_listeners)
+        # Transport callbacks can acquire their own locks or publish over the
+        # network, so never invoke them while the state-file lock is held.
+        for listener in listeners:
+            listener(device_id, command, deepcopy(queued))
+        return queued
 
     def consume_commands(self, device_id: str) -> list[str]:
         with self._lock:
