@@ -463,6 +463,8 @@ class MqttService:
                 "entity_category": "diagnostic",
             },
         }
+        if _is_android_receiver(profile, state):
+            sensors.pop("sd_failure_events", None)
         for key, extra in sensors.items():
             payload = {
                 **self._base(
@@ -557,6 +559,9 @@ class MqttService:
                 ),
             },
         }
+        if _is_android_receiver(profile, state):
+            binary_sensors.pop("repeated_sd_failure", None)
+            binary_sensors.pop("sd_ready", None)
         for key, extra in binary_sensors.items():
             payload = {
                 **self._base(
@@ -864,13 +869,19 @@ class MqttService:
             return
         configs = self._configs(device_id, profile, state)
         if _is_android_receiver(profile, state):
-            # Clear a retained firmware entity published by an older Bridge.
+            # Clear retained embedded-device entities published by an older Bridge.
             slug = _slug(device_id)
-            self.client.publish(
-                f"{self.config.discovery_prefix}/update/{slug}/firmware/config",
-                "",
-                retain=True,
-            )
+            for topic_suffix in (
+                f"update/{slug}/firmware",
+                f"sensor/{slug}/sd_failure_events",
+                f"binary_sensor/{slug}/repeated_sd_failure",
+                f"binary_sensor/{slug}/sd_ready",
+            ):
+                self.client.publish(
+                    f"{self.config.discovery_prefix}/{topic_suffix}/config",
+                    "",
+                    retain=True,
+                )
         for topic_suffix, payload in configs:
             topic = f"{self.config.discovery_prefix}/{topic_suffix}/config"
             self.client.publish(

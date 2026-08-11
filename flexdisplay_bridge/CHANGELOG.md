@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.42.1
+
+- Treat the Echo Spot receiver's fail-closed SD status as an Android capability rather than an SD-card fault.
+- Remove stale SD-card diagnostic entities from Home Assistant MQTT discovery for Android receivers.
+
 ## 0.42.0
 
 - Add the original 2017 Echo Spot (`rook`) as a managed 480 × 480 Android

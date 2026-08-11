@@ -773,7 +773,7 @@ def _decorate_device(
     health_issues: list[str] = []
     if not online and power_state != "powered_off":
         health_issues.append("offline")
-    if result.get("sd_ready") is False:
+    if result.get("sd_ready") is False and not _is_android_display(result):
         health_issues.append("sd_card")
     if result.get("ha_error"):
         health_issues.append("home_assistant")
@@ -790,7 +790,10 @@ def _decorate_device(
         and result["wifi_average_rssi"] <= -80
     ):
         health_issues.append("weak_wifi")
-    if result.get("consecutive_sd_failures", 0) >= 2:
+    if (
+        result.get("consecutive_sd_failures", 0) >= 2
+        and not _is_android_display(result)
+    ):
         health_issues.append("repeated_sd_failure")
     if str(result.get("reset_reason") or "") in {
         "panic",
