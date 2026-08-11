@@ -1,0 +1,26 @@
+name: Validate
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  bridge:
+    runs-on: python-3.13
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@v6
+      - name: Validate release metadata
+        run: python3 scripts/check_release_metadata.py
+      - name: Install bridge
+        working-directory: flexdisplay_bridge
+        run: python3 -m pip install -e '.[test]'
+      - name: Test bridge
+        working-directory: flexdisplay_bridge
+        run: python3 -m pytest tests
+      - name: Compile Python sources
+        run: >-
+          python3 -m compileall -q
+          flexdisplay_bridge/flexdisplay_bridge
+          flexdisplay_bridge/app_runner.py
+          custom_components/flexdisplay

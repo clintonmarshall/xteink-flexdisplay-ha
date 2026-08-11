@@ -21,6 +21,14 @@ This repository provides:
   navigation, Bridge telemetry, Home-launcher startup, and safe exclusion from
   embedded-device firmware rollouts.
 
+## Source and release authority
+
+The project's internal Forgejo repository is the source of truth for
+development, pull requests, tags, and releases. GitHub is an automatic,
+read-only compatibility mirror used by HACS and public release downloads.
+Contributors must open pull requests and publish tags in Forgejo only. See
+`docs/ARCHITECTURE.md` and `docs/RELEASE.md` for the durable workflow.
+
 This is the Home Assistant component of the wider FlexDisplay Platform:
 
 - `xteink-flexdisplay` owns the common X3/X4 firmware;
