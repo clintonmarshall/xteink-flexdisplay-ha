@@ -43,6 +43,7 @@ public final class MainActivity extends Activity {
     private String pendingCommandId = "";
     private String pendingQuickAction = "";
     private boolean fetching;
+    private boolean refreshPending;
     private boolean destroyed;
     private boolean notificationLoopStarted;
     private long notificationSequence;
@@ -188,7 +189,11 @@ public final class MainActivity extends Activity {
     }
 
     private void refresh(boolean immediate) {
-        if (!config.isReady() || fetching) return;
+        if (!config.isReady()) return;
+        if (fetching) {
+            if (immediate) refreshPending = true;
+            return;
+        }
         handler.removeCallbacks(scheduledRefresh);
         fetching = true;
         if (currentBitmap == null) showStatus("Connecting to FlexDisplay…", true);
@@ -228,11 +233,21 @@ public final class MainActivity extends Activity {
 
         String commands = result.header("X-FlexDisplay-Commands");
         String commandId = result.header("X-FlexDisplay-Command-ID");
-        if (!commands.isEmpty()) executeCommands(commands, commandId);
+        boolean commandRefreshScheduled = !commands.isEmpty();
+        if (commandRefreshScheduled) executeCommands(commands, commandId);
 
         long refreshSeconds = parseLong(result.header("X-FlexDisplay-Refresh-Interval"), 60L);
         refreshSeconds = Math.max(15L, Math.min(3600L, refreshSeconds));
-        handler.postDelayed(scheduledRefresh, refreshSeconds * 1000L);
+        if (commandRefreshScheduled) {
+            // executeCommands schedules the acknowledgement fetch; the wake
+            // event that caused this fetch has already done its job.
+            refreshPending = false;
+        } else if (refreshPending) {
+            refreshPending = false;
+            handler.post(() -> refresh(true));
+        } else {
+            handler.postDelayed(scheduledRefresh, refreshSeconds * 1000L);
+        }
     }
 
     private void startNotificationLoop() {
@@ -246,14 +261,16 @@ public final class MainActivity extends Activity {
                     FlexDisplayClient.NotificationEvent event =
                             client.waitForNotification(selectedConfig, notificationSequence);
                     notificationSequence = Math.max(notificationSequence, event.sequence);
-                    if (event.notification != null) {
+                    if (event.notification != null
+                            && (event.event.isEmpty() || "notification".equals(event.event))) {
                         Bitmap image = event.notification.hasImage
                                 ? client.fetchNotificationImage(selectedConfig, event.notification.id)
                                 : null;
                         handler.post(() -> showNotification(event.notification, image));
-                    } else if (event.sequence > previousSequence) {
+                    } else if (event.sequence > previousSequence && !event.refresh) {
                         handler.post(() -> dismissNotification(false));
                     }
+                    if (event.refresh) handler.post(() -> refresh(true));
                 } catch (Exception error) {
                     if (!destroyed) SystemClock.sleep(2_000L);
                 }
@@ -437,6 +454,7 @@ public final class MainActivity extends Activity {
 
     private void applyError(Exception error) {
         fetching = false;
+        refreshPending = false;
         showStatus("FlexDisplay offline\n" + error.getMessage() + "\n\nTap to retry · hold for settings", true);
         handler.postDelayed(scheduledRefresh, 15_000L);
     }
