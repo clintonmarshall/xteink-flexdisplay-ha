@@ -1,7 +1,8 @@
 # XTEINK FlexDisplay for Home Assistant
 
 Public Home Assistant installer for FlexDisplay-enabled XTEINK X3 and X4,
-plus the Zectrix Note 4 House Pulse e-paper surface.
+the Zectrix Note 4 House Pulse e-paper surface, and the original 2017 Echo
+Spot (`rook`) running the FlexDisplay Android receiver.
 
 This repository provides:
 
@@ -16,6 +17,9 @@ This repository provides:
 - **Dashboard Studio**, a visual profile editor with live X3/X4 previews,
   readable e-ink layouts, state-aware alerts and schedules, and direct fleet
   assignment.
+- the **Echo Spot receiver**, a 480 × 480 circular colour kiosk with touch
+  navigation, Bridge telemetry, Home-launcher startup, and safe exclusion from
+  embedded-device firmware rollouts.
 
 This is the Home Assistant component of the wider FlexDisplay Platform:
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.42.0
+
+- Add the original 2017 Echo Spot (`rook`) as a managed 480 × 480 Android
+  FlexDisplay receiver with a circular-safe colour dashboard renderer.
+- Add a Spot target to Dashboard Studio plus a bootable kiosk client with tap,
+  swipe, cached-image, telemetry, launcher, and remote-command support.
+- Keep Android receivers outside the ESP32/Note4 firmware rollout and remove
+  stale MQTT/HACS firmware-update controls when a receiver reports `ROOK`.
+
 ## 0.40.0
 
 - Add Note 4 Voice Remote v2 responses with separate recognized-speech and

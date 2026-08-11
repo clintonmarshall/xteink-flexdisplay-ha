@@ -145,6 +145,10 @@
     }
     .device-frame.x3 { width: min(100%, 444px); }
     .device-frame.n4 { width: min(100%, 520px); }
+    .device-frame.round { width: min(100%, 420px); border-radius: 50%; padding: 14px; }
+    .device-frame.round .preview-wrap { border-radius: 50%; }
+    .device-frame.round .status-strip { display: none; }
+    .device-frame.round::after { display: none; }
     .device-frame::after {
       content: "";
       position: absolute;
@@ -537,6 +541,7 @@
             <button data-model="X3">X3</button>
             <button data-model="X4" class="active">X4</button>
             <button data-model="N4">N4</button>
+            <button data-model="ROOK">Spot</button>
           </div>
         </div>
       </div>
@@ -4035,9 +4040,10 @@
       document.querySelectorAll("[data-model]").forEach((button) =>
         button.classList.toggle("active", button.dataset.model === model)
       );
-      const specs = model === "X3" ? [528, 792] : model === "N4" ? [400, 300] : [480, 800];
+      const specs = model === "X3" ? [528, 792] : model === "N4" ? [400, 300] : model === "ROOK" ? [480, 480] : [480, 800];
       $("#deviceFrame").classList.toggle("x3", model === "X3");
       $("#deviceFrame").classList.toggle("n4", model === "N4");
+      $("#deviceFrame").classList.toggle("round", model === "ROOK");
       $("#previewWrap").style.setProperty("--ratio", `${specs[0]}/${specs[1]}`);
       $("#modelLabel").textContent = `${model} · ${specs[0]} × ${specs[1]}`;
       schedulePreview();
@@ -4544,7 +4550,7 @@
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       if (selected?.model) {
         const model = selected.model.toUpperCase();
-        setModel(model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
+        setModel(model.includes("ROOK") || model.includes("ECHO_SPOT") ? "ROOK" : model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
       }
       else schedulePreview();
     });

@@ -4,8 +4,8 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "flexdisplay-ha-bridge"
-version = "0.41.2"
-description = "Home Assistant renderer and fleet bridge for FlexDisplay X3/X4 devices"
+version = "0.42.0"
+description = "Home Assistant renderer and fleet bridge for FlexDisplay devices"
 requires-python = ">=3.11"
 dependencies = [
   "fastapi>=0.115,<1",

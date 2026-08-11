@@ -216,7 +216,17 @@ def _is_note4(record: dict[str, Any] | str) -> bool:
     return model.upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
 
 
+def _is_android_display(record: dict[str, Any] | str) -> bool:
+    model = record if isinstance(record, str) else str(record.get("model") or "")
+    normalized = re.sub(r"[^A-Z0-9]", "", model.upper())
+    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+
+
 def _device_firmware(settings: BridgeConfig, record: dict[str, Any] | str) -> FirmwareConfig:
+    # Android receivers are applications, not ESP32 firmware targets. Returning
+    # an empty release keeps X3/X4 OTA controls from ever being offered to them.
+    if _is_android_display(record):
+        return FirmwareConfig()
     return settings.note4_firmware if _is_note4(record) else settings.firmware
 
 
@@ -3154,6 +3164,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if model == "X3"
             else (400, 300)
             if model == "N4"
+            else (480, 480)
+            if model == "ROOK"
             else (480, 800)
         )
         width = _integer(
@@ -3949,6 +3961,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "reset_reason": x_flexdisplay_reset_reason or None,
             "boot_id": x_flexdisplay_boot_id or None,
             "transfer_capabilities": sorted(capabilities),
+            "display_shape": "round" if "round-display" in capabilities else "rectangular",
+            "touch_available": "touch" in capabilities,
+            "color_available": "color" in capabilities,
+            "client_platform": "android" if "android" in capabilities else "embedded",
             "image_cached": image_cached,
             "reported_policy_revision": _optional_integer(
                 x_flexdisplay_policy_revision, 0, 2_147_483_647
