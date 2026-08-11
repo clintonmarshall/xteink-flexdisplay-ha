@@ -87,6 +87,124 @@ def _number(value: str) -> float | None:
         return None
 
 
+def _is_round_display(device: dict[str, Any]) -> bool:
+    model = "".join(
+        character
+        for character in str(device.get("model") or "").upper()
+        if character.isalnum()
+    )
+    return model in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"} or (
+        str(device.get("display_shape") or "").lower() == "round"
+    )
+
+
+def _render_round_dashboard(
+    *,
+    title: str,
+    device: dict[str, Any],
+    width: int,
+    height: int,
+    entities: Iterable[EntityState],
+    page_index: int,
+    page_count: int,
+    ha_error: str,
+) -> bytes:
+    """Render a colour dashboard inside the Echo Spot's circular safe area."""
+    image = Image.new("RGB", (width, height), (4, 10, 17))
+    draw = ImageDraw.Draw(image)
+    accent = (54, 191, 255)
+    muted = (164, 180, 194)
+    card = (18, 31, 43)
+    card_outline = (42, 67, 84)
+    center = width // 2
+
+    now = datetime.now().astimezone()
+    time_font = _font(max(34, width // 11), True)
+    time_text = now.strftime("%H:%M")
+    time_width = draw.textbbox((0, 0), time_text, font=time_font)[2]
+    draw.text((center - time_width // 2, 27), time_text, fill=(244, 248, 251), font=time_font)
+
+    title_text = title.upper()[:40]
+    title_font = _fit(draw, title_text, width - 130, max(20, width // 20), True, 16)
+    title_width = draw.textbbox((0, 0), title_text, font=title_font)[2]
+    draw.text((center - title_width // 2, 79), title_text, fill=accent, font=title_font)
+
+    values = list(entities)[:4]
+    if not values:
+        values = [EntityState("device.bridge", "FlexDisplay", "Connected", "", True)]
+    columns = 1 if len(values) == 1 else 2
+    rows = math.ceil(len(values) / columns)
+    left = 58
+    right = width - 58
+    top = 118
+    bottom = height - 74
+    gap = 9
+    card_width = (right - left - gap * (columns - 1)) // columns
+    card_height = (bottom - top - gap * (rows - 1)) // rows
+
+    for index, entity in enumerate(values):
+        column = index % columns
+        row = index // columns
+        x0 = left + column * (card_width + gap)
+        y0 = top + row * (card_height + gap)
+        x1 = x0 + card_width
+        y1 = y0 + card_height
+        if len(values) == 3 and index == 2:
+            x0, x1 = left + card_width // 2, right - card_width // 2
+        draw.rounded_rectangle(
+            (x0, y0, x1, y1),
+            radius=16,
+            fill=card,
+            outline=card_outline,
+            width=2,
+        )
+        label = str(entity.label)[:36]
+        label_font = _fit(draw, label, x1 - x0 - 20, max(16, width // 29), False, 12)
+        label_width = draw.textbbox((0, 0), label, font=label_font)[2]
+        draw.text(
+            (x0 + (x1 - x0 - label_width) // 2, y0 + 15),
+            label,
+            fill=muted,
+            font=label_font,
+        )
+        value = str(entity.state)
+        if entity.unit and entity.unit not in value:
+            value = f"{value} {entity.unit}"
+        value_font = _fit(
+            draw,
+            value,
+            x1 - x0 - 18,
+            max(30, width // (9 if columns == 1 else 14)),
+            True,
+            18,
+        )
+        value_box = draw.textbbox((0, 0), value, font=value_font)
+        value_width = value_box[2] - value_box[0]
+        value_height = value_box[3] - value_box[1]
+        draw.text(
+            (
+                x0 + (x1 - x0 - value_width) // 2,
+                y0 + (y1 - y0 - value_height) // 2 + 12 - value_box[1],
+            ),
+            value,
+            fill=(244, 248, 251),
+            font=value_font,
+        )
+
+    footer = f"{page_index + 1}/{max(1, page_count)}"
+    if ha_error:
+        footer += "  ·  HA OFFLINE"
+    else:
+        footer += "  ·  FLEXDISPLAY"
+    footer_font = _font(max(13, width // 34), True)
+    footer_width = draw.textbbox((0, 0), footer, font=footer_font)[2]
+    draw.text((center - footer_width // 2, height - 52), footer, fill=muted, font=footer_font)
+
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def _scaled(size: int, percent: int, minimum: int, maximum: int = 160) -> int:
     selected = max(60, min(180, int(percent or 100)))
     return max(minimum, min(maximum, round(size * selected / 100)))
@@ -1128,6 +1246,17 @@ class DashboardRenderer:
     ) -> bytes:
         width = max(240, min(1200, width))
         height = max(240, min(1600, height))
+        if _is_round_display(device):
+            return _render_round_dashboard(
+                title=title,
+                device=device,
+                width=width,
+                height=height,
+                entities=entities,
+                page_index=page_index,
+                page_count=page_count,
+                ha_error=ha_error,
+            )
         if layout == "house_pulse":
             return _render_house_pulse(
                 title=title,

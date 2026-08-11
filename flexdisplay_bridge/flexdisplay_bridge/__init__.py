@@ -1,3 +1,3 @@
 """FlexDisplay Home Assistant bridge."""
 
-__version__ = "0.41.2"
+__version__ = "0.42.0"

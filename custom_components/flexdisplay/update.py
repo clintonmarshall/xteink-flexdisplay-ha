@@ -146,8 +146,20 @@ async def async_setup_entry(
 ) -> None:
     """Create update entities for registered devices."""
     del hass
-    setup_dynamic_entities(
-        entry,
-        async_add_entities,
-        lambda coordinator, device_id: (FlexDisplayFirmwareUpdate(coordinator, device_id),),
-    )
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[FlexDisplayFirmwareUpdate, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        model = "".join(
+            character
+            for character in str(record.get("model") or "").upper()
+            if character.isalnum()
+        )
+        if model in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}:
+            return ()
+        return (FlexDisplayFirmwareUpdate(coordinator, device_id),)
+
+    setup_dynamic_entities(entry, async_add_entities, entities_for_device)

@@ -1,7 +1,8 @@
 # FlexDisplay Bridge
 
 This Home Assistant App runs the local image renderer and fleet API used by
-FlexDisplay firmware on XTEINK X3 and X4 devices.
+FlexDisplay firmware on XTEINK X3 and X4 devices and by the Android receiver
+for the original 2017 Echo Spot (`rook`).
 
 After installation:
 
@@ -14,6 +15,20 @@ After installation:
 4. Either install the FlexDisplay custom integration through HACS, or enable
    MQTT and select the v0.20 **mqtt** entity source for an App-only
    installation.
+
+## Echo Spot Android receiver
+
+The companion project in `rook_receiver/` makes a LineageOS 18.1 Echo Spot a
+first-class LAN display. It registers through the normal `/api/v1/screen`
+endpoint as model `ROOK`, receives a 480 × 480 circular-safe colour render,
+and reports Android, colour, touch, and round-screen capabilities. Dashboard
+Studio includes a **Spot** preview target.
+
+Publish the App's TCP port 8099 and configure the receiver with
+`http://HOME_ASSISTANT_IP:8099`. Home Assistant then exposes the existing
+availability, current-page, navigation, refresh, clear, sleep, restart, and
+policy entities for the Spot. Android receivers never receive the X3/X4 OTA
+image; the Bridge rejects firmware installation for this model.
 
 The app automatically uses Home Assistant's internal Supervisor API token. It
 does not require a long-lived access token in its options.

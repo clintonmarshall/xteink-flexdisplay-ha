@@ -12,6 +12,14 @@ from . import __version__
 from .config import DeviceConfig, MqttConfig
 
 LOGGER = logging.getLogger(__name__)
+
+
+def _is_android_receiver(profile: DeviceConfig, state: dict[str, Any]) -> bool:
+    model = str(profile.model or state.get("model") or "").upper()
+    normalized = "".join(character for character in model if character.isalnum())
+    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+
+
 CommandHandler = Callable[[str, str, str], None]
 
 
@@ -799,31 +807,32 @@ class MqttService:
             }
             configs.append((f"text/{slug}/{key}", payload))
 
-        update = {
-            **self._base(
-                device=device,
-                unique_id=f"flexdisplay_{slug}_firmware_update",
-                state_topic=state_topic,
-            ),
-            "name": "Firmware",
-            "title": "FlexDisplay firmware",
-            "device_class": "firmware",
-            "value_template": (
-                "{{ {'installed_version': value_json.firmware, "
-                "'latest_version': value_json.latest_firmware, "
-                "'in_progress': value_json.firmware_update_stage in "
-                "['queued', 'dispatched', 'preflight', 'downloading', "
-                "'validating', 'flashing', 'rebooting'], "
-                "'update_percentage': value_json.firmware_update_percent "
-                "if value_json.firmware_update_stage in "
-                "['queued', 'dispatched', 'preflight', 'downloading', "
-                "'validating', 'flashing', 'rebooting'] else none} | to_json }}"
-            ),
-            "command_topic": f"{command_root}/install",
-            "payload_install": "PRESS",
-            "entity_category": "config",
-        }
-        configs.append((f"update/{slug}/firmware", update))
+        if not _is_android_receiver(profile, state):
+            update = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_{slug}_firmware_update",
+                    state_topic=state_topic,
+                ),
+                "name": "Firmware",
+                "title": "FlexDisplay firmware",
+                "device_class": "firmware",
+                "value_template": (
+                    "{{ {'installed_version': value_json.firmware, "
+                    "'latest_version': value_json.latest_firmware, "
+                    "'in_progress': value_json.firmware_update_stage in "
+                    "['queued', 'dispatched', 'preflight', 'downloading', "
+                    "'validating', 'flashing', 'rebooting'], "
+                    "'update_percentage': value_json.firmware_update_percent "
+                    "if value_json.firmware_update_stage in "
+                    "['queued', 'dispatched', 'preflight', 'downloading', "
+                    "'validating', 'flashing', 'rebooting'] else none} | to_json }}"
+                ),
+                "command_topic": f"{command_root}/install",
+                "payload_install": "PRESS",
+                "entity_category": "config",
+            }
+            configs.append((f"update/{slug}/firmware", update))
 
         event = {
             **self._base(
@@ -854,6 +863,14 @@ class MqttService:
         if not self.client or not self.connected:
             return
         configs = self._configs(device_id, profile, state)
+        if _is_android_receiver(profile, state):
+            # Clear a retained firmware entity published by an older Bridge.
+            slug = _slug(device_id)
+            self.client.publish(
+                f"{self.config.discovery_prefix}/update/{slug}/firmware/config",
+                "",
+                retain=True,
+            )
         for topic_suffix, payload in configs:
             topic = f"{self.config.discovery_prefix}/{topic_suffix}/config"
             self.client.publish(
