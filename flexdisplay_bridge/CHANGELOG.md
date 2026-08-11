@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.43.0
+
+- Add paired, server-owned touch maps for Echo Spot dashboard tiles. Lights,
+  switches, input booleans, and scenes use tap actions; covers require a hold
+  and confirmation before opening.
+- Add the `flexdisplay.notify` Home Assistant action and Bridge notification
+  API with authenticated camera snapshots, doorbell/alert chimes, automatic
+  dismissal, and up to three allowlisted action buttons.
+- Add a Google-free long-poll notification channel for immediate delivery to
+  LineageOS receivers and upgrade the Android client to `0.2.0`.
+- Restrict receiver actions to a small Home Assistant service allowlist and
+  pair action requests with a per-install receiver token.
+
 ## 0.42.1
 
 - Treat the Echo Spot receiver's fail-closed SD status as an Android capability rather than an SD-card fault.

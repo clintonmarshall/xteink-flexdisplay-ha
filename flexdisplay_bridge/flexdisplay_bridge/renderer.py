@@ -13,6 +13,7 @@ from qrcode.exceptions import DataOverflowError
 
 from .eink_calibration import calibrate_monochrome
 from .home_assistant import EntityState
+from .rook_interactions import default_entity_action, round_tile_bounds
 
 
 def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
@@ -133,24 +134,15 @@ def _render_round_dashboard(
     if not values:
         values = [EntityState("device.bridge", "FlexDisplay", "Connected", "", True)]
     columns = 1 if len(values) == 1 else 2
-    rows = math.ceil(len(values) / columns)
-    left = 58
-    right = width - 58
-    top = 118
-    bottom = height - 74
-    gap = 9
-    card_width = (right - left - gap * (columns - 1)) // columns
-    card_height = (bottom - top - gap * (rows - 1)) // rows
-
-    for index, entity in enumerate(values):
-        column = index % columns
-        row = index // columns
-        x0 = left + column * (card_width + gap)
-        y0 = top + row * (card_height + gap)
-        x1 = x0 + card_width
-        y1 = y0 + card_height
-        if len(values) == 3 and index == 2:
-            x0, x1 = left + card_width // 2, right - card_width // 2
+    for index, (entity, bounds) in enumerate(
+        zip(values, round_tile_bounds(width, height, len(values)), strict=True)
+    ):
+        x0, y0, x1, y1 = (
+            bounds["left"],
+            bounds["top"],
+            bounds["right"],
+            bounds["bottom"],
+        )
         draw.rounded_rectangle(
             (x0, y0, x1, y1),
             radius=16,
@@ -190,6 +182,17 @@ def _render_round_dashboard(
             fill=(244, 248, 251),
             font=value_font,
         )
+        action = default_entity_action(entity, index)
+        if action:
+            hint = "HOLD" if action["confirmation"] else "TAP"
+            hint_font = _font(max(10, width // 44), True)
+            hint_width = draw.textbbox((0, 0), hint, font=hint_font)[2]
+            draw.text(
+                (x0 + (x1 - x0 - hint_width) // 2, y1 - 24),
+                hint,
+                fill=accent,
+                font=hint_font,
+            )
 
     footer = f"{page_index + 1}/{max(1, page_count)}"
     if ha_error:

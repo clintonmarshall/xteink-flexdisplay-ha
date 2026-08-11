@@ -125,6 +125,31 @@ class FlexDisplayApiClient:
             "PUT", f"/api/v1/devices/{device_id}/voice", json=settings
         )
 
+    async def notify(
+        self,
+        device_id: str,
+        *,
+        title: str,
+        message: str = "",
+        camera_entity: str = "",
+        chime: str = "default",
+        duration: int = 20,
+        actions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Push an interactive notification to an Android FlexDisplay receiver."""
+        return await self._request(
+            "POST",
+            f"/api/v1/devices/{device_id}/notifications",
+            json={
+                "title": title,
+                "message": message,
+                "camera_entity": camera_entity,
+                "chime": chime,
+                "duration": duration,
+                "actions": actions or [],
+            },
+        )
+
     async def apply_policy(
         self,
         profile: str,

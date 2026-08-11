@@ -379,3 +379,22 @@ class HomeAssistantClient:
             return True, f"called {service}"
         except requests.RequestException as exc:
             return False, f"Home Assistant service failed: {exc}"
+
+    def camera_image(self, entity_id: str) -> tuple[bytes, str]:
+        """Fetch one authenticated Home Assistant camera proxy snapshot."""
+        selected = str(entity_id or "").strip().lower()
+        if not selected.startswith("camera."):
+            raise ValueError("Camera entity must start with camera.")
+        if not self.config.token:
+            raise ValueError("HA token not configured")
+        url = f"{self.config.base_url}/api/camera_proxy/{selected}"
+        try:
+            image = self._download_image(url, authenticated=True)
+        except requests.RequestException as exc:
+            raise ValueError(f"Camera snapshot failed: {exc}") from exc
+        try:
+            with Image.open(BytesIO(image)) as source:
+                media_type = Image.MIME.get(source.format or "", "image/jpeg")
+        except (UnidentifiedImageError, OSError):
+            media_type = "image/jpeg"
+        return image, media_type

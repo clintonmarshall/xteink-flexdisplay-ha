@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+import hmac
 import io
 import json
 import logging
@@ -73,6 +74,12 @@ from .photo_frame import (
     PhotoFrameValidationError,
 )
 from .renderer import DashboardRenderer
+from .rook_interactions import (
+    RookBroker,
+    RookInteractionError,
+    build_page_interactions,
+    normalize_notification_actions,
+)
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
 from .voice_assistant import (
@@ -813,6 +820,7 @@ def _decorate_device(
         result["health_state"] = "healthy"
     result["health_issues"] = health_issues
     result["health_detail"] = ", ".join(health_issues) if health_issues else "No issues"
+    result.pop("receiver_token_sha256", None)
     return result
 
 
@@ -1330,6 +1338,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ha = HomeAssistantClient(settings.home_assistant)
     voice_assistant = HomeAssistantVoiceClient(settings.home_assistant)
     renderer = DashboardRenderer()
+    rook = RookBroker()
 
     def fleet_policy_profiles() -> dict[str, dict[str, Any]]:
         profiles = {
@@ -2523,6 +2532,183 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key
         ):
             raise HTTPException(status_code=401, detail="Bridge API key required")
+
+    def authorize_receiver(request: Request, device_id: str) -> dict[str, Any]:
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record or not _is_android_display(record):
+            raise HTTPException(status_code=404, detail="Android receiver not found")
+        supplied = request.headers.get("X-FlexDisplay-Receiver-Token", "")
+        expected = str(record.get("receiver_token_sha256") or "")
+        observed = hashlib.sha256(supplied.encode("utf-8")).hexdigest() if supplied else ""
+        if not expected or not hmac.compare_digest(expected, observed):
+            raise HTTPException(status_code=401, detail="Receiver token required")
+        return record
+
+    def execute_rook_action(
+        device_id: str,
+        action: dict[str, Any],
+        confirmed: bool,
+        source: str,
+    ) -> dict[str, Any]:
+        if action.get("confirmation") and not confirmed:
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "confirmation_required": True,
+                    "message": action.get("confirmation_text") or "Confirm this action",
+                },
+            )
+        success, detail = ha.call_service(
+            str(action.get("service") or ""),
+            str(action.get("entity_id") or ""),
+            action.get("data") if isinstance(action.get("data"), dict) else None,
+        )
+        store.touch(
+            device_id,
+            {
+                "last_touch_action_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "last_touch_action_source": source,
+                "last_touch_action_label": action.get("label"),
+                "last_touch_action_result": detail,
+            },
+        )
+        publish_current(device_id)
+        if not success:
+            raise HTTPException(status_code=502, detail=detail)
+        return {"success": True, "detail": detail, "refresh": True}
+
+    @app.get("/api/v1/devices/{device_id}/interactions")
+    def receiver_interactions(device_id: str, request: Request) -> dict[str, Any]:
+        authorize_receiver(request, device_id)
+        return rook.interactions(_device_id(device_id))
+
+    @app.post("/api/v1/devices/{device_id}/interactions/{action_id}")
+    def receiver_interaction_action(
+        device_id: str,
+        action_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(default={}),
+    ) -> dict[str, Any]:
+        authorize_receiver(request, device_id)
+        selected = _device_id(device_id)
+        action = rook.interaction_action(selected, action_id)
+        if not action:
+            raise HTTPException(status_code=404, detail="Interaction is no longer active")
+        return execute_rook_action(
+            selected,
+            action,
+            bool(payload.get("confirmed")),
+            "dashboard",
+        )
+
+    @app.post("/api/v1/devices/{device_id}/notifications")
+    def create_receiver_notification(
+        device_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(...),
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record or not _is_android_display(record):
+            raise HTTPException(status_code=404, detail="Android receiver not found")
+        title = str(payload.get("title") or "Notification").replace("\n", " ").strip()[:80]
+        message = str(payload.get("message") or "").replace("\r", " ").strip()[:320]
+        chime = str(payload.get("chime") or "default").strip().lower()
+        if chime not in {"none", "default", "doorbell", "alert"}:
+            raise HTTPException(status_code=400, detail="Unsupported notification chime")
+        duration = _integer(str(payload.get("duration") or 20), 20, 5, 300)
+        try:
+            public_actions, private_actions = normalize_notification_actions(
+                payload.get("actions")
+            )
+        except RookInteractionError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        image = b""
+        image_media_type = "image/jpeg"
+        camera_entity = str(payload.get("camera_entity") or "").strip().lower()
+        if camera_entity:
+            try:
+                image, image_media_type = ha.camera_image(camera_entity)
+            except ValueError as err:
+                raise HTTPException(status_code=422, detail=str(err)) from err
+        result = rook.publish_notification(
+            selected,
+            title=title,
+            message=message,
+            chime=chime,
+            duration=duration,
+            image=image,
+            image_media_type=image_media_type,
+            public_actions=public_actions,
+            private_actions=private_actions,
+        )
+        store.touch(
+            selected,
+            {
+                "last_notification_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "last_notification_title": title,
+                "last_notification_camera": camera_entity,
+            },
+        )
+        publish_current(selected)
+        return {"queued": True, **result}
+
+    @app.get("/api/v1/devices/{device_id}/notifications/next")
+    def next_receiver_notification(
+        device_id: str,
+        request: Request,
+        after: int = 0,
+        timeout: float = 25.0,
+    ) -> dict[str, Any]:
+        authorize_receiver(request, device_id)
+        return rook.wait(_device_id(device_id), max(0, after), timeout)
+
+    @app.get("/api/v1/devices/{device_id}/notifications/{notification_id}/image")
+    def receiver_notification_image(
+        device_id: str,
+        notification_id: str,
+        request: Request,
+    ) -> Response:
+        authorize_receiver(request, device_id)
+        selected = rook.notification_image(_device_id(device_id), notification_id)
+        if not selected:
+            raise HTTPException(status_code=404, detail="Notification image not found")
+        image, media_type = selected
+        return Response(content=image, media_type=media_type)
+
+    @app.post("/api/v1/devices/{device_id}/notifications/{notification_id}/dismiss")
+    def dismiss_receiver_notification(
+        device_id: str,
+        notification_id: str,
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize_receiver(request, device_id)
+        dismissed = rook.dismiss(_device_id(device_id), notification_id)
+        return {"dismissed": dismissed}
+
+    @app.post(
+        "/api/v1/devices/{device_id}/notifications/{notification_id}/actions/{action_id}"
+    )
+    def receiver_notification_action(
+        device_id: str,
+        notification_id: str,
+        action_id: str,
+        request: Request,
+        payload: dict[str, Any] = Body(default={}),
+    ) -> dict[str, Any]:
+        authorize_receiver(request, device_id)
+        selected = _device_id(device_id)
+        action = rook.notification_action(selected, notification_id, action_id)
+        if not action:
+            raise HTTPException(status_code=404, detail="Notification action not found")
+        return execute_rook_action(
+            selected,
+            action,
+            bool(payload.get("confirmed")),
+            "notification",
+        )
 
     @app.get("/studio", include_in_schema=False)
     def studio_redirect() -> RedirectResponse:
@@ -3919,6 +4105,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_content_status: str | None = Header(default=None),
         x_flexdisplay_content_error: str | None = Header(default=None),
         x_flexdisplay_policy_revision: str | None = Header(default=None),
+        x_flexdisplay_receiver_token: str | None = Header(default=None),
         x_flexdisplay_quick_action: str | None = Header(default=None),
         x_flexdisplay_opendisplay_transport_policy: str | None = Header(default=None),
         x_flexdisplay_opendisplay_last_transport: str | None = Header(default=None),
@@ -3968,6 +4155,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "touch_available": "touch" in capabilities,
             "color_available": "color" in capabilities,
             "client_platform": "android" if "android" in capabilities else "embedded",
+            "receiver_token_sha256": (
+                hashlib.sha256(x_flexdisplay_receiver_token.encode("utf-8")).hexdigest()
+                if x_flexdisplay_receiver_token
+                else None
+            ),
             "image_cached": image_cached,
             "reported_policy_revision": _optional_integer(
                 x_flexdisplay_policy_revision, 0, 2_147_483_647
@@ -4545,6 +4737,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             or record
         )
+        if _is_android_display(model) and page is not None:
+            public_interactions, private_interactions = build_page_interactions(
+                page.entities,
+                width,
+                height,
+            )
+            rook.set_interactions(
+                device_id,
+                page.title,
+                public_interactions,
+                private_interactions,
+            )
+        elif _is_android_display(model):
+            rook.set_interactions(device_id, page_title, [], {})
         if page is not None:
             image = renderer.render(
                 title=page.title,
@@ -4705,6 +4911,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "content_channel" if mixed_pages else page_selection
         )
         response.headers["X-FlexDisplay-Content-Type"] = page_kind
+        if _is_android_display(model):
+            response.headers["X-FlexDisplay-Interaction-Revision"] = str(
+                rook.interactions(device_id)["revision"]
+            )
         if _is_note4(model):
             response.headers["X-FlexDisplay-Desired-Volume"] = str(
                 int(record.get("desired_voice_volume", record.get("voice_volume") or 45))

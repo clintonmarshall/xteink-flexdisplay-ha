@@ -5,15 +5,24 @@ import android.content.SharedPreferences;
 import android.provider.Settings;
 
 import java.util.Locale;
+import java.util.UUID;
 
 final class ReceiverConfig {
     private static final String PREFS = "flexdisplay_rook";
     final String bridgeUrl;
     final String deviceId;
+    final String receiverToken;
 
     ReceiverConfig(String bridgeUrl, String deviceId) {
+        this(bridgeUrl, deviceId, UUID.randomUUID().toString());
+    }
+
+    ReceiverConfig(String bridgeUrl, String deviceId, String receiverToken) {
         this.bridgeUrl = normalizeUrl(bridgeUrl);
         this.deviceId = deviceId == null ? "" : deviceId.trim().toUpperCase(Locale.ROOT);
+        this.receiverToken = receiverToken == null || receiverToken.length() < 20
+                ? UUID.randomUUID().toString()
+                : receiverToken;
     }
 
     static ReceiverConfig load(Context context) {
@@ -22,9 +31,12 @@ final class ReceiverConfig {
                 context.getContentResolver(), Settings.Secure.ANDROID_ID);
         if (androidId == null || androidId.length() < 8) androidId = "00000000";
         String generatedId = "ROOK-" + androidId.substring(androidId.length() - 8).toUpperCase(Locale.ROOT);
-        return new ReceiverConfig(
+        ReceiverConfig selected = new ReceiverConfig(
                 preferences.getString("bridge_url", ""),
-                preferences.getString("device_id", generatedId));
+                preferences.getString("device_id", generatedId),
+                preferences.getString("receiver_token", ""));
+        selected.save(context);
+        return selected;
     }
 
     void save(Context context) {
@@ -32,6 +44,7 @@ final class ReceiverConfig {
                 .edit()
                 .putString("bridge_url", bridgeUrl)
                 .putString("device_id", deviceId)
+                .putString("receiver_token", receiverToken)
                 .apply();
     }
 

@@ -18,6 +18,7 @@ from .const import (
     DOMAIN,
     PLATFORMS,
     SERVICE_CLEAR_MESHTASTIC_UNREAD,
+    SERVICE_NOTIFY,
     SERVICE_SEND_MESHTASTIC_MESSAGE,
 )
 from .coordinator import FlexDisplayCoordinator
@@ -70,6 +71,42 @@ SEND_MESHTASTIC_SCHEMA = vol.Schema(
 )
 
 CLEAR_UNREAD_SCHEMA = vol.Schema({vol.Optional("config_entry_id"): cv.string})
+
+NOTIFICATION_ACTION_SCHEMA = vol.Schema(
+    {
+        vol.Required("label"): cv.string,
+        vol.Required("service"): cv.string,
+        vol.Required("entity_id"): cv.entity_id,
+        vol.Optional("data", default={}): dict,
+        vol.Optional("confirmation", default=False): cv.boolean,
+        vol.Optional("confirmation_text", default=""): cv.string,
+    }
+)
+
+
+def _notification_actions(value: object) -> list[dict[str, object]]:
+    actions = cv.ensure_list(value)
+    if len(actions) > 3:
+        raise vol.Invalid("A FlexDisplay notification may contain at most three actions")
+    return [NOTIFICATION_ACTION_SCHEMA(action) for action in actions]
+
+
+NOTIFY_SCHEMA = vol.Schema(
+    {
+        vol.Required("device_id"): cv.string,
+        vol.Required("title"): cv.string,
+        vol.Optional("message", default=""): cv.string,
+        vol.Optional("camera_entity", default=""): vol.Any("", cv.entity_id),
+        vol.Optional("chime", default="default"): vol.In(
+            {"none", "default", "doorbell", "alert"}
+        ),
+        vol.Optional("duration", default=20): vol.All(
+            vol.Coerce(int), vol.Range(min=5, max=300)
+        ),
+        vol.Optional("actions", default=[]): _notification_actions,
+        vol.Optional("config_entry_id"): cv.string,
+    }
+)
 
 
 def _coordinator_for_call(
@@ -139,6 +176,31 @@ def _register_services(hass: HomeAssistant) -> None:
             schema=CLEAR_UNREAD_SCHEMA,
         )
 
+    if not hass.services.has_service(DOMAIN, SERVICE_NOTIFY):
+
+        async def notify(call: ServiceCall) -> None:
+            coordinator = _coordinator_for_call(hass, call)
+            try:
+                await coordinator.client.notify(
+                    call.data["device_id"],
+                    title=call.data["title"],
+                    message=call.data["message"],
+                    camera_entity=call.data["camera_entity"],
+                    chime=call.data["chime"],
+                    duration=call.data["duration"],
+                    actions=call.data["actions"],
+                )
+            except FlexDisplayApiError as err:
+                raise ServiceValidationError(str(err)) from err
+            await coordinator.async_request_refresh()
+
+        hass.services.async_register(
+            DOMAIN,
+            SERVICE_NOTIFY,
+            notify,
+            schema=NOTIFY_SCHEMA,
+        )
+
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FlexDisplay from a config entry."""
@@ -174,4 +236,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not coordinators:
         hass.services.async_remove(DOMAIN, SERVICE_SEND_MESHTASTIC_MESSAGE)
         hass.services.async_remove(DOMAIN, SERVICE_CLEAR_MESHTASTIC_UNREAD)
+        hass.services.async_remove(DOMAIN, SERVICE_NOTIFY)
     return True
