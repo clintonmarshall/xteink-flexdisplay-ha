@@ -7,7 +7,7 @@ on:
 
 jobs:
   bridge:
-    runs-on: python-3.13
+    runs-on: flexdisplay-ci
     steps:
       - uses: https://data.forgejo.org/actions/checkout@v6
       - name: Validate release metadata
