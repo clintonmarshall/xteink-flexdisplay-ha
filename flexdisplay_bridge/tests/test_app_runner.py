@@ -7,6 +7,7 @@ from app_runner import (
     LEGACY_PACKAGED_FIRMWARE,
     firmware_option,
     firmware_options,
+    mqtt_options,
     note4_firmware_options,
 )
 
@@ -121,3 +122,55 @@ def test_firmware_options_preserves_custom_manifest() -> None:
     assert resolved["firmware_url"] == options["firmware_url"]
     assert resolved["firmware_sha256"] == options["firmware_sha256"]
     assert resolved["firmware_size"] == str(options["firmware_size"])
+
+
+def test_mqtt_options_discovers_supervisor_service_for_fresh_install() -> None:
+    def service_reader(token: str) -> dict[str, object]:
+        assert token == "supervisor-token"
+        return {
+            "host": "172.30.33.2",
+            "port": "1883",
+            "username": "bridge-user",
+            "password": "bridge-password",
+        }
+
+    assert mqtt_options({}, "supervisor-token", service_reader) == {
+        "enabled": "true",
+        "host": "172.30.33.2",
+        "port": "1883",
+        "username": "bridge-user",
+        "password": "bridge-password",
+        "entity_source": "mqtt",
+    }
+
+
+def test_mqtt_options_preserves_explicit_hacs_and_broker_settings() -> None:
+    called = False
+
+    def service_reader(_token: str) -> dict[str, object]:
+        nonlocal called
+        called = True
+        return {}
+
+    resolved = mqtt_options(
+        {
+            "mqtt_enabled": False,
+            "mqtt_host": "mqtt.example.test",
+            "mqtt_port": 2883,
+            "mqtt_username": "custom-user",
+            "mqtt_password": "custom-password",
+            "home_assistant_entity_source": "hacs",
+        },
+        "supervisor-token",
+        service_reader,
+    )
+
+    assert called is False
+    assert resolved == {
+        "enabled": "false",
+        "host": "mqtt.example.test",
+        "port": "2883",
+        "username": "custom-user",
+        "password": "custom-password",
+        "entity_source": "hacs",
+    }

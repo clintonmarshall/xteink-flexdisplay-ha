@@ -35,17 +35,17 @@ home_assistant:
   timeout_seconds: 10
 
 mqtt:
-  # Enable after the bridge can render a screen successfully.
-  enabled: false
-  host: core-mosquitto
+  # Fresh Home Assistant App installs discover the Supervisor MQTT service.
+  enabled: true
+  host: ""
   port: 1883
-  username: flexdisplay
+  username: ""
   password_env: FLEXDISPLAY_MQTT_PASSWORD
   discovery_prefix: homeassistant
   topic_prefix: flexdisplay
-  # "hacs" avoids duplicate entities for existing integration users.
-  # Choose "mqtt" for the v0.20 App-only installation, or "both" for testing.
-  entity_source: hacs
+  # "mqtt" provides App-only entities without HACS. Existing installs may keep
+  # "hacs", or use "both" briefly while validating a migration.
+  entity_source: mqtt
 
 screen_history:
   enabled: true

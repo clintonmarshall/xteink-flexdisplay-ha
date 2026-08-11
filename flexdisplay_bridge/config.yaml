@@ -10,6 +10,8 @@ startup: application
 boot: auto
 init: false
 homeassistant_api: true
+services:
+  - mqtt:want
 ingress: true
 ingress_port: 8099
 ingress_entry: studio/
@@ -24,22 +26,22 @@ map:
   - addon_config:rw
 options:
   dashboard_title: HOME ASSISTANT
-  mqtt_enabled: false
-  mqtt_host: core-mosquitto
+  mqtt_enabled: true
+  mqtt_host: ""
   mqtt_port: 1883
-  mqtt_username: flexdisplay
+  mqtt_username: ""
   mqtt_password: ""
-  home_assistant_entity_source: hacs
+  home_assistant_entity_source: mqtt
   flexhub_url: ""
   flexhub_access_pin: ""
   flexhub_poll_seconds: 15
   screen_history_enabled: true
   screen_history_limit: 5
   bridge_api_key: ""
-  firmware_version: 1.5.0-flexdisplay.0.38.1
-  firmware_url: https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/download/v0.38.1/firmware.bin
-  firmware_sha256: 068060b3780267d51ba7c8ea3de08da5c773361fda01b10641a9ecf35c264724
-  firmware_size: 5967968
+  firmware_version: 1.5.0-flexdisplay.0.39.0
+  firmware_url: packaged
+  firmware_sha256: ae0c875a01e917c1d6bd632af6a2bc160c69e34e85cbd6ff29ec97bdbc5a12d0
+  firmware_size: 5972656
   firmware_minimum_battery: 40
   firmware_canary_required: true
   firmware_require_usb_for_canary: true
