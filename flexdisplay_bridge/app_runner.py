@@ -15,8 +15,8 @@ CONFIG_PATH = Path("/config/config.yaml")
 DEFAULT_FIRMWARE = {
     "firmware_version": "1.5.0-flexdisplay.0.39.0",
     "firmware_url": "packaged",
-    "firmware_sha256": "154b524d806f738f1f706d87dbb3342ef810134101fffea1ef248c0c9fbc4533",
-    "firmware_size": 5_972_640,
+    "firmware_sha256": "eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7",
+    "firmware_size": 5_976_336,
 }
 DEFAULT_NOTE4_FIRMWARE = {
     "note4_firmware_version": "1.2.2-voice-remote",
