@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.44.0
+
+- Redesign Dashboard Studio around task-focused Studio, Content, Fleet,
+  FlexHub, and Settings workspaces with a persistent fleet summary and larger
+  e-paper preview.
+- Add guided three-step workflows, plain-language descriptions, accessible
+  Help tooltips, and progressive disclosure across Content Channels, Photo
+  Frame, Fleet Management, FlexHub, branded fetch screens, and content packs.
+- Keep mixed-channel page configuration compact with one Edit/Done panel open
+  at a time, generate new channel IDs from their friendly names, and replace
+  unset previews with actionable empty states.
+- Preserve every existing Bridge API, saved configuration format, device
+  assignment, firmware rollout, and Home Assistant integration workflow.
+
 ## 0.43.0
 
 - Add paired, server-owned touch maps for Echo Spot dashboard tiles. Lights,

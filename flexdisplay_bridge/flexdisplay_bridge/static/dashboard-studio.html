@@ -21,12 +21,9 @@
     body {
       margin: 0;
       min-height: 100vh;
-      background:
-        radial-gradient(circle at 85% -10%, rgba(103, 214, 193, .14), transparent 28rem),
-        radial-gradient(circle at 10% 110%, rgba(255, 180, 84, .12), transparent 34rem),
-        #091018;
+      background: #08111a;
       color: var(--ink);
-      font: 15px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
     }
     button, input, select, textarea { font: inherit; }
     button, select, input, textarea {
@@ -56,13 +53,14 @@
     label { display: grid; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 700; letter-spacing: .035em; }
     .app {
       display: grid;
-      grid-template-columns: 270px minmax(420px, 1fr) 350px;
-      min-height: 100vh;
+      grid-template-columns: 320px minmax(420px, 1fr) 360px;
+      min-height: 0;
+      height: 100%;
     }
-    .sidebar, .inspector { background: rgba(17, 26, 35, .96); padding: 20px; overflow: auto; }
+    .sidebar, .inspector { background: #111a23; padding: 18px; overflow: auto; }
     .sidebar { border-right: 1px solid var(--line); }
     .inspector { border-left: 1px solid var(--line); }
-    .brand { display: flex; align-items: center; gap: 12px; margin-bottom: 24px; }
+    .brand { display: flex; align-items: center; gap: 12px; min-width: 220px; }
     .brand-mark {
       display: grid;
       width: 42px;
@@ -107,30 +105,33 @@
     .page-meta { overflow: hidden; text-align: left; }
     .page-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 750; }
     .page-layout { color: var(--muted); font-size: 11px; }
-    .workspace { min-width: 0; padding: 24px; overflow: auto; }
+    .workspace { min-width: 0; padding: 16px; overflow: auto; background: #0b141d; }
     .toolbar {
       display: flex;
       align-items: center;
       justify-content: space-between;
       gap: 16px;
-      margin-bottom: 20px;
+      min-height: 44px;
+      margin-bottom: 12px;
+      padding: 0 2px;
     }
-    .toolbar-group { display: flex; align-items: center; gap: 8px; }
+    .toolbar-group { display: flex; min-width: 0; align-items: center; justify-content: flex-end; gap: 7px; }
+    .toolbar > div:first-child { min-width: 145px; }
+    .toolbar > div:first-child .eyebrow { white-space: nowrap; }
+    .toolbar > div:first-child h2 { overflow: hidden; margin-bottom: 0; text-overflow: ellipsis; white-space: nowrap; }
     .segment { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
     .segment button { min-height: 30px; padding: 4px 12px; border: 0; background: transparent; color: var(--muted); }
     .segment button.active { background: var(--accent-2); color: #09221d; }
-    .device-select { width: 190px; }
+    .device-select { width: 170px; }
+    .toolbar .segment button { padding-right: 9px; padding-left: 9px; }
     .canvas-shell {
       display: grid;
-      min-height: calc(100vh - 112px);
+      min-height: 640px;
       place-items: center;
       padding: 32px;
       border: 1px solid var(--line);
       border-radius: 18px;
-      background:
-        linear-gradient(45deg, rgba(255,255,255,.018) 25%, transparent 25%) 0 0/18px 18px,
-        linear-gradient(45deg, transparent 75%, rgba(255,255,255,.018) 75%) 0 0/18px 18px,
-        #0c141b;
+      background: #0c141b;
       box-shadow: inset 0 1px rgba(255,255,255,.025);
     }
     .device-frame {
@@ -276,6 +277,119 @@
     }
     dialog.library-dialog { width: min(1120px, calc(100vw - 32px)); max-height: calc(100vh - 32px); overflow: auto; }
     dialog::backdrop { background: rgba(0,0,0,.62); backdrop-filter: blur(4px); }
+    .subapp-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 20px 0;
+    }
+    .subapp-header h2 { margin: 2px 0 3px; font-size: 20px; }
+    .subapp-description { max-width: 720px; margin: 0; color: var(--muted); font-size: 12px; }
+    .guide-strip {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 8px;
+      margin: 14px 20px 0;
+      padding: 9px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: #0d151d;
+    }
+    .guide-step { display: grid; grid-template-columns: 24px minmax(0, 1fr); align-items: center; gap: 8px; min-width: 0; }
+    .guide-number {
+      display: grid;
+      width: 24px;
+      height: 24px;
+      place-items: center;
+      border-radius: 50%;
+      background: rgba(103, 214, 193, .12);
+      color: var(--accent-2);
+      font-size: 11px;
+      font-weight: 900;
+    }
+    .guide-copy { min-width: 0; }
+    .guide-copy strong { display: block; overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+    .guide-copy span { display: block; overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+    .task-card {
+      display: grid;
+      gap: 10px;
+      padding: 13px;
+      border: 1px solid var(--line);
+      border-radius: 11px;
+      background: rgba(255,255,255,.015);
+    }
+    .task-card-title { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .task-card-title h3 { color: var(--accent-2); }
+    .task-card-title span { color: var(--muted); font-size: 10px; }
+    .field-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .help-tip {
+      position: relative;
+      z-index: 4;
+      min-height: 22px;
+      width: auto;
+      padding: 2px 7px;
+      border-color: #435463;
+      border-radius: 999px;
+      background: #17232e;
+      color: var(--accent-2);
+      font-size: 9px;
+      font-weight: 850;
+      letter-spacing: .02em;
+      text-transform: none;
+    }
+    .help-tip::after {
+      position: absolute;
+      z-index: 80;
+      top: calc(100% + 7px);
+      right: 0;
+      width: min(280px, 72vw);
+      padding: 9px 10px;
+      border: 1px solid #536573;
+      border-radius: 8px;
+      background: #071018;
+      box-shadow: 0 12px 32px rgba(0,0,0,.46);
+      color: var(--ink);
+      content: attr(data-tooltip);
+      font-size: 11px;
+      font-weight: 550;
+      letter-spacing: normal;
+      line-height: 1.4;
+      opacity: 0;
+      pointer-events: none;
+      text-align: left;
+      text-transform: none;
+      transform: translateY(-3px);
+      transition: opacity .14s ease, transform .14s ease;
+    }
+    .help-tip:hover::after, .help-tip:focus-visible::after, .help-tip.active::after { opacity: 1; transform: none; }
+    .guided-details {
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: rgba(13,21,29,.72);
+    }
+    .guided-details > summary {
+      cursor: pointer;
+      padding: 10px 12px;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 800;
+      list-style-position: inside;
+    }
+    .guided-details > summary span { margin-left: 6px; color: var(--muted); font-size: 10px; font-weight: 600; }
+    .guided-details[open] > summary { border-bottom: 1px solid var(--line); }
+    .guided-details-body { display: grid; gap: 10px; padding: 12px; }
+    .helper-callout {
+      margin: 0;
+      padding: 10px 11px;
+      border-left: 3px solid var(--accent-2);
+      border-radius: 7px;
+      background: rgba(103,214,193,.065);
+      color: var(--muted);
+      font-size: 11px;
+    }
+    .helper-callout strong { color: var(--ink); }
+    .subapp-actions { display: flex; flex-wrap: wrap; gap: 8px; padding-top: 2px; }
     .dialog-body { display: grid; gap: 16px; padding: 20px; }
     .library-shell { display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 18px; padding: 20px; }
     .library-controls { display: grid; align-content: start; gap: 12px; }
@@ -414,11 +528,226 @@
     .library-empty { grid-column: 1 / -1; min-height: 220px; display: grid; place-items: center; }
     .content-item-list { display: grid; gap: 10px; align-content: start; }
     .content-item-card { border: 1px solid var(--line); border-radius: 11px; background: #0d151d; overflow: hidden; }
+    .content-item-card.expanded { border-color: #536573; }
+    .content-item-card:not(.expanded) .content-item-body { display: none; }
     .content-item-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--line); }
+    .content-item-card:not(.expanded) .content-item-head { border-bottom: 0; }
+    .content-item-head [data-content-edit] { min-height: 30px; padding: 3px 9px; color: var(--accent-2); font-size: 10px; }
     .content-item-body { display: grid; gap: 10px; padding: 12px; }
     .content-preview { display: block; width: min(100%, 390px); max-height: 680px; object-fit: contain; background: white; box-shadow: var(--shadow); }
+    .content-preview:not([src]) { display: none; }
+    .content-preview[src] + .content-preview-empty { display: none; }
+    .content-preview-empty { width: min(100%, 390px); padding: 22px; }
+    .studio-shell {
+      display: grid;
+      grid-template-rows: auto auto minmax(0, 1fr);
+      min-height: 100vh;
+      background: #08111a;
+    }
+    .studio-header {
+      position: sticky;
+      z-index: 12;
+      top: 0;
+      display: grid;
+      grid-template-columns: minmax(220px, auto) minmax(0, 1fr) auto;
+      align-items: center;
+      gap: 20px;
+      min-height: 82px;
+      padding: 12px 18px;
+      border-bottom: 1px solid var(--line);
+      background: #0b141d;
+    }
+    .studio-header .brand-mark {
+      width: 44px;
+      height: 44px;
+      border-radius: 11px;
+      box-shadow: none;
+    }
+    .brand-copy { display: grid; gap: 1px; }
+    .brand-copy h1 { font-size: 20px; }
+    .header-summary {
+      display: flex;
+      min-width: 0;
+      align-items: stretch;
+      justify-content: center;
+      overflow: hidden;
+    }
+    .summary-item {
+      display: grid;
+      min-width: 118px;
+      align-content: center;
+      gap: 2px;
+      padding: 2px 18px;
+      border-left: 1px solid var(--line);
+    }
+    .summary-item:first-child { border-left: 0; }
+    .summary-label { color: var(--muted); font-size: 10px; font-weight: 750; letter-spacing: .04em; text-transform: uppercase; }
+    .summary-value { overflow: hidden; color: var(--ink); font-size: 13px; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+    .summary-detail { overflow: hidden; color: var(--accent-2); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .summary-item.offline .live-dot, .connection-pill.offline .live-dot { background: var(--danger); }
+    .header-actions { display: flex; align-items: center; gap: 8px; }
+    .header-actions button { white-space: nowrap; }
+    .connection-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+      min-height: 38px;
+      padding: 7px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
+      background: #0d151d;
+      color: var(--ink);
+      font-size: 12px;
+      font-weight: 750;
+    }
+    .connection-pill .live-dot { margin: 0; }
+    .connection-pill.offline .live-dot { background: var(--danger); }
+    .workspace-tabs {
+      position: sticky;
+      z-index: 11;
+      top: 82px;
+      display: flex;
+      min-height: 54px;
+      align-items: stretch;
+      gap: 2px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: #101923;
+    }
+    .workspace-tabs button {
+      position: relative;
+      min-width: 118px;
+      min-height: 54px;
+      padding: 0 18px;
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      color: var(--muted);
+      font-weight: 760;
+    }
+    .workspace-tabs button:hover { background: rgba(255,255,255,.025); color: var(--ink); }
+    .workspace-tabs button.active { color: var(--ink); }
+    .workspace-tabs button.active::after {
+      content: "";
+      position: absolute;
+      right: 16px;
+      bottom: 0;
+      left: 16px;
+      height: 3px;
+      border-radius: 3px 3px 0 0;
+      background: var(--accent);
+    }
+    .workspace-stage { min-height: 0; }
+    .workspace-panel { min-height: calc(100vh - 136px); }
+    .workspace-panel[hidden] { display: none; }
+    .workspace-panel.active { display: block; }
+    .sidebar-title {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .sidebar-title h2 { margin: 0; font-size: 16px; }
+    .sidebar-search { margin-bottom: 12px; }
+    .sidebar .section:first-of-type { padding-top: 0; border-top: 0; }
+    .sidebar .page-list { gap: 4px; }
+    .sidebar .page-item { border-radius: 7px; background: #0d151d; }
+    .sidebar .page-item.active { background: rgba(255, 180, 84, .08); }
+    .sidebar-footer {
+      margin-top: 16px;
+      padding-top: 16px;
+      border-top: 1px solid var(--line);
+    }
+    .preview-toolbar-meta { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 11px; }
+    .preview-zoom { width: 92px; min-height: 34px; }
+    .device-frame { transform: scale(var(--preview-scale, 1)); transform-origin: center; }
+    .module-workspace {
+      display: grid;
+      align-content: start;
+      gap: 20px;
+      width: min(1180px, calc(100% - 40px));
+      margin: 0 auto;
+      padding: 34px 0 56px;
+    }
+    .module-hero {
+      display: flex;
+      align-items: flex-end;
+      justify-content: space-between;
+      gap: 20px;
+      padding-bottom: 18px;
+      border-bottom: 1px solid var(--line);
+    }
+    .module-hero h2 { margin: 3px 0 4px; font-size: 26px; letter-spacing: -.025em; }
+    .module-list {
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0e1720;
+    }
+    .module-list-head, .module-row {
+      display: grid;
+      grid-template-columns: minmax(220px, 1fr) minmax(260px, 1.5fr) 130px;
+      align-items: center;
+      gap: 18px;
+      min-height: 58px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--line);
+    }
+    .module-list-head {
+      min-height: 42px;
+      background: #121e28;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .07em;
+      text-transform: uppercase;
+    }
+    .module-row:last-child { border-bottom: 0; }
+    .module-row:hover { background: rgba(255,255,255,.018); }
+    .module-name { display: grid; gap: 3px; }
+    .module-name strong { font-size: 14px; }
+    .module-version { color: var(--accent-2); font-size: 10px; font-weight: 800; }
+    .module-description { color: var(--muted); font-size: 12px; }
+    .module-row button { width: 100%; }
+    .settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+    .settings-card {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0e1720;
+    }
+    .settings-card p { margin: 0; color: var(--muted); font-size: 12px; }
+    .settings-card button { justify-self: start; }
+    .inspector > .section-head:first-child {
+      position: sticky;
+      z-index: 2;
+      top: -18px;
+      margin: -18px -18px 16px;
+      padding: 18px;
+      border-bottom: 1px solid var(--line);
+      background: #111a23;
+    }
+    .inspector .section { padding: 16px 0; }
+    .inspector .tile-list { grid-template-columns: 1fr; }
+    .workspace-footer {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-top: 12px;
+      color: var(--muted);
+      font-size: 11px;
+    }
     @media (max-width: 1120px) {
-      .app { grid-template-columns: 230px 1fr; }
+      .studio-header { grid-template-columns: minmax(210px, auto) 1fr; }
+      .header-summary { justify-content: flex-start; }
+      .header-actions { grid-column: 1 / -1; display: none; }
+      .summary-item:nth-child(n+3) { display: none; }
+      .app { grid-template-columns: 250px minmax(0, 1fr); height: auto; }
       .inspector { grid-column: 1 / -1; border-left: 0; border-top: 1px solid var(--line); }
       .tile-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
@@ -427,6 +756,12 @@
       .mesh-console-shell .mesh-panel:last-child { grid-column: 1 / -1; }
     }
     @media (max-width: 720px) {
+      .studio-shell { display: block; }
+      .studio-header { position: static; display: flex; align-items: center; min-height: 70px; }
+      .studio-header .brand { min-width: 0; flex: 1; }
+      .header-summary { display: none; }
+      .workspace-tabs { position: static; top: auto; overflow-x: auto; padding: 0 8px; }
+      .workspace-tabs button { min-width: 94px; padding: 0 12px; }
       .app { display: block; }
       .sidebar, .inspector, .workspace { padding: 16px; }
       .toolbar { align-items: stretch; flex-direction: column; }
@@ -443,17 +778,65 @@
       .library-gallery { grid-template-columns: repeat(2, minmax(150px, 1fr)); }
       .fleet-grid { grid-template-columns: 1fr; padding: 14px; }
       .policy-summary, .hub-cards { grid-template-columns: 1fr 1fr; }
+      .module-workspace { width: calc(100% - 28px); padding-top: 24px; }
+      .module-hero { align-items: flex-start; flex-direction: column; }
+      .module-list-head { display: none; }
+      .module-row { grid-template-columns: 1fr; gap: 8px; padding: 16px; }
+      .module-row button { width: auto; justify-self: start; }
+      .settings-grid { grid-template-columns: 1fr; }
+      .guide-strip { grid-template-columns: 1fr; }
+      .guide-copy strong, .guide-copy span { white-space: normal; }
+      .subapp-header { padding: 16px 16px 0; }
     }
   </style>
 </head>
 <body>
-  <div class="app">
-    <aside class="sidebar">
+  <div class="studio-shell">
+    <header class="studio-header">
       <div class="brand">
         <div class="brand-mark">F</div>
-        <div><div class="eyebrow">XTEINK fleet</div><h1>Dashboard Studio</h1></div>
+        <div class="brand-copy"><h1>FlexDisplay</h1><span class="small muted">Dashboard Studio</span></div>
       </div>
+      <div class="header-summary" aria-label="Fleet summary">
+        <div class="summary-item">
+          <span class="summary-label">Bridge</span>
+          <span id="headerConnection" class="summary-value"><span class="live-dot"></span>Connecting</span>
+          <span id="headerConnectionDetail" class="summary-detail">Loading fleet data</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Device</span>
+          <span id="headerDevice" class="summary-value">Sample X4</span>
+          <span id="headerFleetCount" class="summary-detail">0 devices</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Battery</span>
+          <span id="headerBattery" class="summary-value">—</span>
+          <span class="summary-detail">Selected device</span>
+        </div>
+        <div class="summary-item">
+          <span class="summary-label">Preview</span>
+          <span id="headerPreviewStatus" class="summary-value">Waiting</span>
+          <span id="headerSyncDetail" class="summary-detail">Not rendered yet</span>
+        </div>
+      </div>
+      <div class="header-actions">
+        <button id="headerAssignProfile">Preview on device</button>
+        <button id="headerSaveProfile" class="primary">Save changes</button>
+      </div>
+    </header>
 
+    <nav class="workspace-tabs" aria-label="FlexDisplay workspaces">
+      <button class="active" data-workspace="studio" aria-current="page">Studio</button>
+      <button data-workspace="content">Content</button>
+      <button data-workspace="fleet">Fleet</button>
+      <button data-workspace="flexhub">FlexHub</button>
+      <button data-workspace="settings">Settings</button>
+    </nav>
+
+    <div class="workspace-stage">
+      <section id="workspaceStudio" class="workspace-panel active" data-workspace-panel="studio">
+        <div class="app">
+          <aside class="sidebar">
       <div id="authPanel" class="auth" hidden>
         <strong>Bridge key required</strong>
         <span class="small muted">Enter the API key configured in the FlexDisplay Bridge App.</span>
@@ -461,73 +844,30 @@
         <button id="unlockButton" class="primary">Unlock Studio</button>
       </div>
 
-      <div class="section" style="border-top:0">
-        <div class="section-head"><h2>Profile</h2><span id="saveState" class="small muted">Loading…</span></div>
+      <div class="section">
+        <div class="sidebar-title"><h2>Pages</h2><button id="addPage" class="icon" title="Add page" aria-label="Add page">+</button></div>
+        <input id="pageSearch" class="sidebar-search" type="search" placeholder="Search pages…" aria-label="Search pages">
+        <div id="pageList" class="page-list"></div>
+      </div>
+
+      <div class="section">
+        <div class="section-head"><h2>Profiles</h2><span id="saveState" class="small muted">Loading…</span></div>
         <select id="profileSelect" aria-label="Dashboard profile"></select>
         <div class="profile-actions">
           <button id="newProfile">New profile</button>
           <button id="saveProfile" class="primary">Save changes</button>
         </div>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Pages</h2><button id="addPage" class="icon" title="Add page">＋</button></div>
-        <div id="pageList" class="page-list"></div>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Profile actions</h2></div>
-        <div class="button-row">
-          <button id="duplicateProfile">Duplicate</button>
-          <button id="deleteProfile" class="danger">Delete</button>
+        <div class="sidebar-footer">
+          <div class="button-row">
+            <button id="duplicateProfile">Duplicate</button>
+            <button id="deleteProfile" class="danger">Delete</button>
+          </div>
+          <p class="small muted" style="margin:12px 0 0">Profiles and pages are saved on the Bridge and survive App upgrades.</p>
         </div>
-        <p class="small muted" style="margin:12px 0 0">Profiles are stored in the Bridge data directory and survive App upgrades and restarts.</p>
       </div>
+          </aside>
 
-      <div class="section">
-        <div class="section-head"><h2>Fleet health</h2><span class="rule-badge">v0.20</span></div>
-        <button id="openFleetHealth" style="width:100%">Open fleet health</button>
-        <p class="small muted" style="margin:10px 0 0">Check battery, connectivity, update state, and recent screens across every X3/X4.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Fleet Management</h2><span class="rule-badge">v0.33</span></div>
-        <button id="openFleetPolicies" class="primary" style="width:100%">Open Fleet Management</button>
-        <p class="small muted" style="margin:10px 0 0">Build and deploy policies, choose default applications, monitor acknowledgements, and safely update X3/X4 firmware.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>FlexHub</h2><span class="rule-badge">v0.35</span></div>
-        <button id="openFlexHub" style="width:100%">Open Hub &amp; Mesh Console</button>
-        <p class="small muted" style="margin:10px 0 0">View hub health and Meshtastic status, manage receivers, and read or send messages.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Mixed content</h2><span class="rule-badge">v0.34</span></div>
-        <button id="openContentChannels" class="primary" style="width:100%">Create messages &amp; news</button>
-        <p class="small muted" style="margin:10px 0 0">Mix dashboards, messages, quotes and Australian news into one button-navigable channel.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Fleet content</h2><span class="rule-badge">v0.22</span></div>
-        <button id="openContentPacks" class="primary" style="width:100%">Manage content packs</button>
-        <p class="small muted" style="margin:10px 0 0">Roll out managed photos, books, logos, and assets to multiple X3/X4 devices with acknowledgements.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Photo Frame</h2><span class="rule-badge">v0.18</span></div>
-        <button id="openPhotoLibrary" class="primary" style="width:100%">Open media library</button>
-        <p class="small muted" style="margin:10px 0 0">Upload JPEG, PNG, WebP, or BMP images and preview their exact X3/X4 e-paper conversion.</p>
-      </div>
-
-      <div class="section">
-        <div class="section-head"><h2>Fetch screen</h2><span class="rule-badge">v0.21</span></div>
-        <button id="openLoadingScreen" class="primary" style="width:100%">Design fetch screen</button>
-        <p class="small muted" style="margin:10px 0 0">Show a locally cached logo, message, owner, or device identity while a dashboard updates.</p>
-      </div>
-    </aside>
-
-    <main class="workspace">
+          <main class="workspace">
       <div class="toolbar">
         <div>
           <div class="eyebrow">Live e-ink preview</div>
@@ -543,6 +883,13 @@
             <button data-model="N4">N4</button>
             <button data-model="ROOK">Spot</button>
           </div>
+          <label class="preview-toolbar-meta">Zoom
+            <select id="previewZoom" class="preview-zoom" aria-label="Preview zoom">
+              <option value="0.8">80%</option>
+              <option value="1" selected>100%</option>
+              <option value="1.2">120%</option>
+            </select>
+          </label>
         </div>
       </div>
 
@@ -558,9 +905,13 @@
           </div>
         </div>
       </div>
-    </main>
+      <div class="workspace-footer">
+        <span id="canvasDimensions">Canvas 480 × 800</span>
+        <span>Changes preview automatically</span>
+      </div>
+          </main>
 
-    <aside class="inspector">
+          <aside class="inspector">
       <div class="section-head">
         <div><div class="eyebrow">Page settings</div><h2 id="inspectorTitle">Overview</h2></div>
         <div class="button-row">
@@ -683,7 +1034,7 @@
         <p class="small muted" style="margin:10px 0 0">Sleeping devices apply the profile at their next scheduled or physical-button wake.</p>
       </div>
 
-      <div class="section">
+      <div id="physicalButtonSection" class="section">
         <div class="section-head">
           <div><h2>Physical-button actions</h2><span class="small muted">Per-device · Home Assistant mode</span></div>
         </div>
@@ -752,7 +1103,95 @@
         <div id="buttonActionSummary" class="action-summary"></div>
         <p class="small muted" style="margin:10px 0 0">Saved actions are active immediately on the Bridge. Back and Power stay reserved, and v0.34 reserves long Confirm for the on-device Quick Menu. Reader, TRMNL, OpenDisplay, and Photo Frame controls are not overridden.</p>
       </div>
-    </aside>
+          </aside>
+        </div>
+      </section>
+
+      <section id="workspaceContent" class="workspace-panel" data-workspace-panel="content" hidden>
+        <div class="module-workspace">
+          <div class="module-hero">
+            <div><div class="eyebrow">Content workspace</div><h2>Create and organise screens</h2><p class="muted">Build mixed channels, photo albums, managed content packs, and branded fetch screens from one place.</p></div>
+            <span class="connection-pill"><span class="live-dot"></span>Bridge-managed content</span>
+          </div>
+          <div class="module-list">
+            <div class="module-list-head"><span>Module</span><span>Purpose</span><span>Action</span></div>
+            <div class="module-row">
+              <div class="module-name"><strong>Mixed content channels</strong><span class="module-version">v0.34</span></div>
+              <div class="module-description">Combine dashboards, messages, quotes, Australian news, and TRMNL pages into a button-navigable sequence.</div>
+              <button id="openContentChannels" class="primary">Open editor</button>
+            </div>
+            <div class="module-row">
+              <div class="module-name"><strong>Photo Frame</strong><span class="module-version">v0.18</span></div>
+              <div class="module-description">Upload images, import Home Assistant camera snapshots, schedule albums, and preview X3/X4 conversion.</div>
+              <button id="openPhotoLibrary">Open library</button>
+            </div>
+            <div class="module-row">
+              <div class="module-name"><strong>Fleet content packs</strong><span class="module-version">v0.22</span></div>
+              <div class="module-description">Deploy managed photos, books, logos, and other SD-card assets with device acknowledgements.</div>
+              <button id="openContentPacks">Manage packs</button>
+            </div>
+            <div class="module-row">
+              <div class="module-name"><strong>Branded fetch screen</strong><span class="module-version">v0.21</span></div>
+              <div class="module-description">Choose the logo, owner, device identity, and message shown while the display retrieves fresh content.</div>
+              <button id="openLoadingScreen">Design screen</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="workspaceFleet" class="workspace-panel" data-workspace-panel="fleet" hidden>
+        <div class="module-workspace">
+          <div class="module-hero">
+            <div><div class="eyebrow">Fleet workspace</div><h2>Manage displays at scale</h2><p class="muted">Review device health, apply reusable policies, monitor acknowledgements, and coordinate safer firmware rollouts.</p></div>
+            <span id="fleetWorkspaceStatus" class="connection-pill"><span class="live-dot"></span>Fleet ready</span>
+          </div>
+          <div class="module-list">
+            <div class="module-list-head"><span>Module</span><span>Purpose</span><span>Action</span></div>
+            <div class="module-row">
+              <div class="module-name"><strong>Fleet Management</strong><span class="module-version">v0.33</span></div>
+              <div class="module-description">Assign policy profiles, default applications, dashboards, albums, transport modes, and OTA releases.</div>
+              <button id="openFleetPolicies" class="primary">Manage fleet</button>
+            </div>
+            <div class="module-row">
+              <div class="module-name"><strong>Fleet health</strong><span class="module-version">v0.20</span></div>
+              <div class="module-description">Inspect battery, connectivity, firmware, SD health, screen history, and recent check-in trends.</div>
+              <button id="openFleetHealth">View health</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="workspaceFlexHub" class="workspace-panel" data-workspace-panel="flexhub" hidden>
+        <div class="module-workspace">
+          <div class="module-hero">
+            <div><div class="eyebrow">FlexHub workspace</div><h2>Hub, receivers, and Meshtastic</h2><p class="muted">Monitor the always-on hub, discover OpenDisplay receivers, review delivery activity, and send or receive mesh messages.</p></div>
+            <span id="flexHubWorkspaceStatus" class="connection-pill"><span class="live-dot"></span>Connection on demand</span>
+          </div>
+          <div class="module-list">
+            <div class="module-list-head"><span>Module</span><span>Purpose</span><span>Action</span></div>
+            <div class="module-row">
+              <div class="module-name"><strong>Hub &amp; Mesh Console</strong><span class="module-version">v0.35</span></div>
+              <div class="module-description">Open receiver selection, task history, live FlexHub health, Meshtastic status, and the streamlined mesh inbox and composer.</div>
+              <button id="openFlexHub" class="primary">Open console</button>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="workspaceSettings" class="workspace-panel" data-workspace-panel="settings" hidden>
+        <div class="module-workspace">
+          <div class="module-hero">
+            <div><div class="eyebrow">Settings workspace</div><h2>Configure how Studio behaves</h2><p class="muted">Jump directly to the relevant contextual settings instead of searching through one long control page.</p></div>
+          </div>
+          <div class="settings-grid">
+            <article class="settings-card"><div><h3>Profiles and pages</h3><p>Choose a dashboard profile, organise its pages, and manage profile-level actions.</p></div><button data-studio-target="profileSelect" class="primary">Open in Studio</button></article>
+            <article class="settings-card"><div><h3>Physical-button actions</h3><p>Assign short, double, and long presses and show optional gesture indicators on the display.</p></div><button data-studio-target="physicalButtonSection">Configure buttons</button></article>
+            <article class="settings-card"><div><h3>Fetch-screen identity</h3><p>Set the default company logo, owner, device name, and loading message for the fleet.</p></div><button data-trigger="openLoadingScreen">Design fetch screen</button></article>
+            <article class="settings-card"><div><h3>Bridge authentication</h3><p>The Studio uses the API key configured in the FlexDisplay Bridge App and keeps it only for this browser session.</p></div><button data-studio-target="authPanel">Review connection</button></article>
+          </div>
+        </div>
+      </section>
+    </div>
   </div>
 
   <datalist id="serviceOptions"></datalist>
@@ -773,24 +1212,35 @@
     </form>
   </dialog>
   <dialog id="contentChannelDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Content Channels v0.34</div><h2 style="font-size:20px">Messages, quotes and news</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Content Channels v0.34</div><h2>Messages, quotes and news</h2><p class="subapp-description">Build one simple sequence from dashboards, messages, quotes, and news, then assign it to any display.</p></div>
       <button id="closeContentChannels" class="icon" title="Close">×</button>
+    </div>
+    <div class="guide-strip" aria-label="Content channel workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Choose a channel</strong><span>Open one or start a new sequence</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Add and order pages</strong><span>Mix the content your display needs</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Save and assign</strong><span>Preview it, then send it to a device</span></div></div>
     </div>
     <div class="library-shell management-shell">
       <div class="library-controls">
-        <label>Content channel<select id="contentChannelSelect"></select></label>
-        <div class="field-grid">
-          <button id="newContentChannel">New channel</button>
-          <button id="deleteContentChannel" class="danger">Delete</button>
-        </div>
-        <div class="field-grid">
-          <label>Channel ID<input id="contentChannelId" maxlength="32" placeholder="morning_briefing"></label>
-          <label>Name<input id="contentChannelName" maxlength="64" placeholder="Morning briefing"></label>
-        </div>
-        <section class="management-group">
-          <h3>Add content</h3>
-          <label>Page type
+        <section class="task-card">
+          <div class="task-card-title"><h3>Channel</h3><span>Your saved page sequence</span></div>
+          <label><span class="field-title">Content channel<button type="button" class="help-tip" data-tooltip="A channel is an ordered set of pages. A display can follow one channel and use its buttons to move between those pages.">Help</button></span><select id="contentChannelSelect"></select></label>
+          <div class="field-grid">
+            <button id="newContentChannel">New channel</button>
+            <button id="deleteContentChannel" class="danger">Delete</button>
+          </div>
+          <label><span class="field-title">Channel name<button type="button" class="help-tip" data-tooltip="Use a friendly name such as Morning briefing or Reception welcome. FlexDisplay creates the technical ID automatically for new channels.">Help</button></span><input id="contentChannelName" maxlength="64" placeholder="Morning briefing"></label>
+          <details class="guided-details">
+            <summary>Advanced identity <span>Usually automatic</span></summary>
+            <div class="guided-details-body">
+              <label><span class="field-title">Channel ID<button type="button" class="help-tip" data-tooltip="This stable ID is used by the Bridge API and device assignments. It can contain letters, numbers, underscores, and hyphens. Existing IDs cannot be changed.">Help</button></span><input id="contentChannelId" maxlength="32" placeholder="morning_briefing"></label>
+            </div>
+          </details>
+        </section>
+        <section class="task-card">
+          <div class="task-card-title"><h3>Add a page</h3><span>One type at a time</span></div>
+          <label><span class="field-title">Page type<button type="button" class="help-tip" data-tooltip="Dashboard inserts the device's assigned Home Assistant pages. Message, Quote, and News pages are configured directly in this channel.">Help</button></span>
             <select id="contentItemType">
               <option value="dashboard">Home Assistant dashboards</option>
               <option value="message">Message screen</option>
@@ -800,97 +1250,98 @@
           </label>
           <button id="addContentItem">Add page type</button>
         </section>
-        <div class="button-row">
+        <div class="subapp-actions">
           <button id="saveContentChannel" class="primary">Save channel</button>
           <button id="previewContentChannel">Preview</button>
         </div>
-        <section class="management-group">
-          <h3>Assign to a display</h3>
-          <label>Device<select id="contentChannelDevice"></select></label>
+        <details class="guided-details">
+          <summary>Assign to a display <span>After saving</span></summary>
+          <div class="guided-details-body">
+          <label><span class="field-title">Device<button type="button" class="help-tip" data-tooltip="Choose the physical X3 or X4 that should use this channel. Sleeping devices receive the assignment on their next wake.">Help</button></span><select id="contentChannelDevice"></select></label>
           <button id="assignContentChannel">Assign and refresh</button>
-          <span class="small muted">Left/right navigate the complete mixed channel. Long Confirm opens the device Quick Menu on v0.34 firmware.</span>
-        </section>
+          <p class="helper-callout"><strong>On the device:</strong> Left and right move through the channel. Long Confirm opens the Quick Menu on compatible firmware.</p>
+          </div>
+        </details>
       </div>
       <div>
-        <div class="section-head"><div><h2>Channel pages</h2><span class="small muted">Drag-free ordered list · use arrows to reorder</span></div></div>
+        <div class="section-head"><div><h2>Channel pages</h2><span class="small muted">Use the arrow buttons to change page order</span></div></div>
         <div id="contentItemList" class="content-item-list"></div>
         <div class="loading-preview-shell" style="min-height:420px;margin-top:16px">
           <img id="contentChannelPreview" class="content-preview" alt="Mixed content preview">
+          <div class="empty content-preview-empty">Choose a Message, Quote, or News page, then select Preview.</div>
         </div>
       </div>
     </div>
   </dialog>
   <dialog id="photoLibraryDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Photo Frame v0.18</div><h2 style="font-size:20px">Media library</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Photo Frame v0.18</div><h2>Media library</h2><p class="subapp-description">Create an album, add local or Home Assistant images, then choose where and when it should play.</p></div>
       <button id="closePhotoLibrary" class="icon" title="Close">×</button>
+    </div>
+    <div class="guide-strip" aria-label="Photo Frame workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Choose an album</strong><span>Name it and set optional timing</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Add pictures</strong><span>Upload files or capture an HA camera</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Send to a display</strong><span>Assign it now; sleepers update later</span></div></div>
     </div>
     <div class="library-shell">
       <div class="library-controls">
-        <label>Album<select id="photoAlbum"></select></label>
-        <div class="field-grid">
-          <button id="newPhotoAlbum">New album</button>
-          <button id="deletePhotoAlbum" class="danger">Delete album</button>
-        </div>
-        <label>Album name<input id="photoAlbumName" maxlength="64"></label>
-        <div class="field-grid">
-          <label>Change image
-            <select id="photoInterval">
-              <option value="300">Every 5 minutes</option>
-              <option value="900">Every 15 minutes</option>
-              <option value="1800">Every 30 minutes</option>
-              <option value="3600">Every hour</option>
-              <option value="7200">Every 2 hours</option>
-              <option value="21600">Every 6 hours</option>
-              <option value="86400">Daily</option>
-            </select>
-          </label>
-          <label>Playback
-            <select id="photoShuffle">
-              <option value="false">In album order</option>
-              <option value="true">Shuffle</option>
-            </select>
-          </label>
-        </div>
-        <div class="field-grid">
-          <label>Active from<input id="photoStart" type="time"></label>
-          <label>Active until<input id="photoEnd" type="time"></label>
-        </div>
-        <label>Timezone<input id="photoTimezone" maxlength="64" value="Australia/Melbourne"></label>
-        <button id="savePhotoAlbum" class="primary">Save album settings</button>
-
+        <section class="task-card">
+          <div class="task-card-title"><h3>Album</h3><span>Pictures that play together</span></div>
+          <label><span class="field-title">Album<button type="button" class="help-tip" data-tooltip="An album is a reusable group of pictures. Each album keeps its own order, refresh timing, and active hours.">Help</button></span><select id="photoAlbum"></select></label>
+          <div class="field-grid">
+            <button id="newPhotoAlbum">New album</button>
+            <button id="deletePhotoAlbum" class="danger">Delete album</button>
+          </div>
+          <label>Album name<input id="photoAlbumName" maxlength="64"></label>
+          <details class="guided-details">
+            <summary>Playback schedule <span>Optional</span></summary>
+            <div class="guided-details-body">
+              <div class="field-grid">
+                <label><span class="field-title">Change image<button type="button" class="help-tip" data-tooltip="Controls how long the current picture remains before the device selects the next one. Longer intervals conserve battery.">Help</button></span>
+                  <select id="photoInterval">
+                    <option value="300">Every 5 minutes</option>
+                    <option value="900">Every 15 minutes</option>
+                    <option value="1800">Every 30 minutes</option>
+                    <option value="3600">Every hour</option>
+                    <option value="7200">Every 2 hours</option>
+                    <option value="21600">Every 6 hours</option>
+                    <option value="86400">Daily</option>
+                  </select>
+                </label>
+                <label>Playback<select id="photoShuffle"><option value="false">In album order</option><option value="true">Shuffle</option></select></label>
+              </div>
+              <div class="field-grid"><label>Active from<input id="photoStart" type="time"></label><label>Active until<input id="photoEnd" type="time"></label></div>
+              <label><span class="field-title">Timezone<button type="button" class="help-tip" data-tooltip="Used for the album's active-hours schedule. Leave this as Australia/Melbourne unless the display travels to another region.">Help</button></span><input id="photoTimezone" maxlength="64" value="Australia/Melbourne"></label>
+            </div>
+          </details>
+          <button id="savePhotoAlbum" class="primary">Save album</button>
+        </section>
         <div class="upload-drop">
           <strong>Add photos</strong>
           <span class="small muted">JPEG · PNG · WebP · BMP · up to 8 MB each</span>
           <input id="photoUpload" type="file" accept="image/jpeg,image/png,image/webp,image/bmp" multiple>
         </div>
-
-        <div class="section" style="padding-bottom:0">
-          <div class="section-head"><h2>Home Assistant source</h2></div>
-          <label>Camera or image entity<input id="photoHaEntity" placeholder="Search camera or image entity…" autocomplete="off"></label>
-          <label style="margin-top:10px">Caption<input id="photoHaCaption" maxlength="120" placeholder="Optional caption"></label>
-          <button id="importPhotoHa" style="width:100%; margin-top:10px">Capture current image</button>
-        </div>
-
-        <div class="section" style="padding-bottom:0">
-          <div class="section-head"><h2>Assign to device</h2></div>
-          <label>Photo Frame device<select id="photoDevice"></select></label>
-          <button id="assignPhotoAlbum" style="width:100%; margin-top:10px">Assign album and refresh</button>
-        </div>
-
-        <label>Preview model
-          <select id="photoModel">
-            <option value="X3">X3 · 528 × 792</option>
-            <option value="X4">X4 · 480 × 800</option>
-          </select>
-        </label>
+        <details class="guided-details">
+          <summary>Import from Home Assistant <span>Camera or image entity</span></summary>
+          <div class="guided-details-body">
+            <label><span class="field-title">Camera or image entity<button type="button" class="help-tip" data-tooltip="Search for a Home Assistant camera.* or image.* entity. FlexDisplay captures its current image and stores a converted copy in this album.">Help</button></span><input id="photoHaEntity" placeholder="Search camera or image entity…" autocomplete="off"></label>
+            <label>Caption<input id="photoHaCaption" maxlength="120" placeholder="Optional caption"></label>
+            <button id="importPhotoHa">Capture current image</button>
+          </div>
+        </details>
+        <section class="task-card">
+          <div class="task-card-title"><h3>Send album</h3><span>Choose one display</span></div>
+          <label><span class="field-title">Photo Frame device<button type="button" class="help-tip" data-tooltip="Assigns this album as the device's Photo Frame source and queues a refresh. If the display is asleep, it will update after its next wake.">Help</button></span><select id="photoDevice"></select></label>
+          <button id="assignPhotoAlbum">Assign album and refresh</button>
+          <label><span class="field-title">Preview model<button type="button" class="help-tip" data-tooltip="Changes only the Studio previews so you can check cropping and proportions for the X3 or X4 screen.">Help</button></span><select id="photoModel"><option value="X3">X3 · 528 × 792</option><option value="X4">X4 · 480 × 800</option></select></label>
+        </section>
       </div>
       <div id="photoGallery" class="library-gallery"></div>
     </div>
   </dialog>
   <dialog id="fleetHealthDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Fleet health v0.20</div><h2 style="font-size:20px">XTEINK devices</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Fleet health v0.20</div><h2>XTEINK devices</h2><p class="subapp-description">See battery, connection, content, and acknowledgement health for every known display.</p></div>
       <div class="button-row">
         <button id="refreshFleetHealth">Refresh</button>
         <button id="closeFleetHealth" class="icon" title="Close">×</button>
@@ -901,51 +1352,67 @@
     </div>
   </dialog>
   <dialog id="fleetPolicyDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Fleet Management v0.33</div><h2 style="font-size:20px">Policies, profiles and safe firmware rollout</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Fleet Management v0.33</div><h2>Policies, profiles and safe firmware rollout</h2><p class="subapp-description">Choose a reusable behaviour, select its devices, then deploy settings or firmware with acknowledgement tracking.</p></div>
       <div class="button-row"><button id="refreshFleetPolicies">Refresh</button><button id="closeFleetPolicies" class="icon" title="Close">×</button></div>
+    </div>
+    <div class="guide-strip" aria-label="Fleet management workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Choose behaviour</strong><span>Select an existing policy or build one</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Select the scope</strong><span>All devices, one model, or a selection</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Deploy safely</strong><span>Track wake, apply, and acknowledgement</span></div></div>
     </div>
     <div class="library-shell management-shell">
       <div class="library-controls">
         <div id="fleetPolicySummary" class="policy-summary"></div>
         <section class="management-group">
           <div class="section-head"><div><h3>1 · Build a policy profile</h3><span class="small muted">Reusable device behaviour</span></div><button id="newFleetPolicy">New</button></div>
-          <label>Policy profile<select id="fleetPolicyProfile"></select></label>
+          <label><span class="field-title">Policy profile<button type="button" class="help-tip" data-tooltip="A policy profile is a reusable group of power, refresh, rendering, and transport settings. Select one here before deploying it to devices.">Help</button></span><select id="fleetPolicyProfile"></select></label>
           <div id="fleetPolicyDescription" class="small muted"></div>
           <div id="fleetPolicyBuilder" class="policy-builder" hidden>
             <div class="field-grid"><label>Profile ID<input id="fleetPolicyId" maxlength="32" placeholder="showroom"></label><label>Name<input id="fleetPolicyLabel" maxlength="48" placeholder="Showroom"></label></div>
             <label>Description<input id="fleetPolicyProfileDescription" maxlength="160" placeholder="How this policy should be used"></label>
             <div class="policy-toggle-grid">
-              <label><input id="policyIntelligentSleep" type="checkbox">Smart sleep</label>
-              <label><input id="policyStayAwakeUsb" type="checkbox">Awake on USB</label>
-              <label><input id="policyLiveMode" type="checkbox">Live mode</label>
+              <label title="Let the device extend sleep when content is unchanged or the battery is low"><input id="policyIntelligentSleep" type="checkbox">Smart sleep</label>
+              <label title="Prevent sleep while the display receives USB power"><input id="policyStayAwakeUsb" type="checkbox">Awake on USB</label>
+              <label title="Keep the device responsive for interactive dashboard use"><input id="policyLiveMode" type="checkbox">Live mode</label>
             </div>
-            <div class="field-grid"><label>Refresh every<select id="policyRefresh"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="21600">6 hours</option></select></label><label>Manual sleep<select id="policyManualSleep"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option></select></label></div>
-            <div class="field-grid"><label>Low battery at<input id="policyLowBattery" type="number" min="10" max="80" value="30"></label><label>Low-battery slowdown<input id="policyLowMultiplier" type="number" min="1" max="12" value="4"></label></div>
-            <div class="field-grid"><label>Unchanged slowdown<input id="policyUnchangedMultiplier" type="number" min="1" max="12" value="2"></label><label>Wake grace seconds<input id="policyWakeGrace" type="number" min="0" max="600" value="60"></label></div>
-            <div class="field-grid"><label>Active from<input id="policyActiveStart" type="time" value="00:00"></label><label>Active until<input id="policyActiveEnd" type="time" value="00:00"></label></div>
-            <label>Display rendering<select id="policyRenderingProfile"><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 full refresh and richer shading</option></select></label>
-            <label>OpenDisplay transport<select id="policyOpenDisplayTransport"><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred · fastest fleet delivery</option><option value="ble_only">BLE only · lowest memory use</option></select></label>
-            <label>Timezone<input id="policyTimezone" maxlength="64" value="Australia/Melbourne"></label>
+            <label><span class="field-title">Refresh every<button type="button" class="help-tip" data-tooltip="The normal interval between content checks. Longer intervals improve battery life; shorter intervals suit frequently changing dashboards.">Help</button></span><select id="policyRefresh"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option><option value="21600">6 hours</option></select></label>
+            <details class="guided-details">
+              <summary>Advanced power and transport <span>Optional tuning</span></summary>
+              <div class="guided-details-body">
+                <label>Manual sleep<select id="policyManualSleep"><option value="300">5 minutes</option><option value="900">15 minutes</option><option value="1800">30 minutes</option><option value="3600">1 hour</option><option value="7200">2 hours</option></select></label>
+                <div class="field-grid"><label>Low battery at<input id="policyLowBattery" type="number" min="10" max="80" value="30"></label><label>Low-battery slowdown<input id="policyLowMultiplier" type="number" min="1" max="12" value="4"></label></div>
+                <div class="field-grid"><label>Unchanged slowdown<input id="policyUnchangedMultiplier" type="number" min="1" max="12" value="2"></label><label>Wake grace seconds<input id="policyWakeGrace" type="number" min="0" max="600" value="60"></label></div>
+                <div class="field-grid"><label>Active from<input id="policyActiveStart" type="time" value="00:00"></label><label>Active until<input id="policyActiveEnd" type="time" value="00:00"></label></div>
+                <label><span class="field-title">Display rendering<button type="button" class="help-tip" data-tooltip="Standard is fastest and best for text. Photo uses fuller refreshes and richer shading, especially on X4, but takes longer.">Help</button></span><select id="policyRenderingProfile"><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 full refresh and richer shading</option></select></label>
+                <label><span class="field-title">OpenDisplay transport<button type="button" class="help-tip" data-tooltip="Auto prefers fast LAN delivery while USB-powered and falls back to BLE on battery. BLE-only uses less memory but transfers more slowly.">Help</button></span><select id="policyOpenDisplayTransport"><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred · fastest fleet delivery</option><option value="ble_only">BLE only · lowest memory use</option></select></label>
+                <label>Timezone<input id="policyTimezone" maxlength="64" value="Australia/Melbourne"></label>
+              </div>
+            </details>
             <div class="button-row"><button id="saveFleetPolicyProfile" class="primary">Save profile</button><button id="deleteFleetPolicyProfile" class="danger">Delete</button><button id="cancelFleetPolicyEdit">Cancel</button></div>
           </div>
         </section>
 
         <section class="management-group">
           <div><h3>2 · Choose scope and application</h3><span class="small muted">The same selection is used for policy and firmware actions</span></div>
-          <label>Apply to<select id="fleetPolicyScope"><option value="all">Every X3 and X4</option><option value="x3">All X3 displays</option><option value="x4">All X4 displays</option><option value="devices">Selected devices</option></select></label>
-          <label>Default application<select id="fleetPolicyMode"><option value="unchanged">Keep current default</option><option value="home_assistant">Home Assistant dashboard</option><option value="photo_frame">Photo Frame</option><option value="reader">CrossPoint Reader</option><option value="trmnl">TRMNL</option><option value="opendisplay">OpenDisplay</option></select></label>
+          <label><span class="field-title">Apply to<button type="button" class="help-tip" data-tooltip="Choose the entire fleet, one hardware model, or Selected devices. The list on the right shows exactly which devices are in scope.">Help</button></span><select id="fleetPolicyScope"><option value="all">Every X3 and X4</option><option value="x3">All X3 displays</option><option value="x4">All X4 displays</option><option value="devices">Selected devices</option></select></label>
+          <label><span class="field-title">Default application<button type="button" class="help-tip" data-tooltip="Controls which application opens after a reboot or wake. Keep current default leaves each device's existing choice unchanged.">Help</button></span><select id="fleetPolicyMode"><option value="unchanged">Keep current default</option><option value="home_assistant">Home Assistant dashboard</option><option value="photo_frame">Photo Frame</option><option value="reader">CrossPoint Reader</option><option value="trmnl">TRMNL</option><option value="opendisplay">OpenDisplay</option></select></label>
           <label>Dashboard profile<select id="fleetPolicyDashboard"><option value="">Keep current dashboard</option></select></label>
           <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
-          <label>Display rendering<select id="fleetPolicyRendering"><option value="unchanged">Keep current rendering</option><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 experimental quality</option></select></label>
-          <label>OpenDisplay transport<select id="fleetPolicyOpenDisplayTransport"><option value="unchanged">Keep current transport policy</option><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred</option><option value="ble_only">BLE only</option></select></label>
-          <label>Delivery<select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
+          <label><span class="field-title">Delivery<button type="button" class="help-tip" data-tooltip="At next device wake is the safest battery option. Queue refresh now asks online devices to check in immediately; sleeping devices still wait for wake.">Help</button></span><select id="fleetPolicyDelivery"><option value="when_awake">At next device wake</option><option value="apply_now">Queue refresh now</option></select></label>
+          <details class="guided-details">
+            <summary>Advanced delivery options <span>Rendering and transport</span></summary>
+            <div class="guided-details-body">
+              <label>Display rendering<select id="fleetPolicyRendering"><option value="unchanged">Keep current rendering</option><option value="standard">Standard · fast and crisp</option><option value="photo">Photo · X4 experimental quality</option></select></label>
+              <label>OpenDisplay transport<select id="fleetPolicyOpenDisplayTransport"><option value="unchanged">Keep current transport policy</option><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred</option><option value="ble_only">BLE only</option></select></label>
+            </div>
+          </details>
           <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
-          <p class="small muted" style="margin:0">A policy is applied after the display wakes, saves the new revision, and confirms it on its following check-in. Studio now distinguishes waiting-for-wake from waiting-for-confirmation.</p>
+          <p class="helper-callout"><strong>What happens next:</strong> the device wakes, saves the new revision, and confirms it on its following check-in. Waiting to wake and waiting to confirm are shown separately.</p>
         </section>
 
         <section class="management-group">
-          <div><h3>3 · Firmware rollout</h3><span class="small muted">Canary first, then automatic bounded rollout</span></div>
+          <div class="task-card-title"><div><h3>3 · Firmware rollout</h3><span class="small muted">Canary first, then automatic bounded rollout</span></div><button type="button" class="help-tip" data-tooltip="FlexDisplay updates one eligible USB-powered canary first. The remaining selected devices start only after the canary reboots and acknowledges the new version.">Help</button></div>
           <div id="fleetFirmwareRelease" class="firmware-release">Loading configured release…</div>
           <div id="fleetFirmwareRollout" class="small muted"></div>
           <div class="button-row"><button id="installFleetFirmware" class="primary">Update selected scope</button><button id="resetFleetFirmware">Reset rollout</button></div>
@@ -959,24 +1426,41 @@
     </div>
   </dialog>
   <dialog id="flexHubDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">SenseCAP FlexHub v0.35</div><h2 style="font-size:20px">Hub and Meshtastic Console</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">SenseCAP FlexHub v0.35</div><h2>Hub and Meshtastic Console</h2><p class="subapp-description">Connect the Bridge to your FlexHub, review fleet and mesh status, send messages, and trigger receiver actions.</p></div>
       <div class="button-row"><button id="refreshFlexHub">Refresh</button><button id="closeFlexHub" class="icon" title="Close">×</button></div>
+    </div>
+    <div class="guide-strip" aria-label="FlexHub workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Connect the hub</strong><span>Save its local network address once</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Monitor activity</strong><span>See receivers, tasks, and mesh messages</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Send or automate</strong><span>Message nodes or trigger display rules</span></div></div>
     </div>
     <div class="library-shell">
       <div class="library-controls">
-        <label>FlexHub base address<input id="flexHubUrl" type="url" placeholder="http://flexhub.local"></label>
-        <p class="small muted">Enter the hub address without a page path. Pasted <code>/flexhub</code>, <code>/meshtastic</code>, and status URLs are accepted and reduced to the base address automatically.</p>
-        <label>Access PIN<input id="flexHubPin" type="password" maxlength="64" placeholder="Leave blank if disabled"></label>
-        <button id="saveFlexHub" class="primary">Save and connect</button>
-        <button id="testFlexHub">Test connection</button>
-        <div class="button-row">
-          <button id="openFlexHubSelector" disabled>Open selector</button>
-          <button id="openFlexHubConsole" disabled>Open FlexHub</button>
-          <button id="openMeshtasticConsole" disabled>Open Meshtastic</button>
-        </div>
-        <div id="flexHubConnection" class="empty">FlexHub is not configured.</div>
-        <p class="small muted">The PIN is stored in the Bridge App data directory. Console pages open directly on the local hub in a new tab; status is fetched through the Bridge and published to Home Assistant when MQTT discovery is enabled.</p>
+        <section class="task-card">
+          <div class="task-card-title"><h3>Connect FlexHub</h3><span>One-time setup</span></div>
+          <label><span class="field-title">FlexHub address<button type="button" class="help-tip" data-tooltip="Enter the hub address without a page path, for example http://flexhub.local or http://10.200.40.20. Pasted FlexHub or Meshtastic paths are removed automatically.">Help</button></span><input id="flexHubUrl" type="url" placeholder="http://flexhub.local"></label>
+          <details class="guided-details">
+            <summary>Connection options <span>PIN and testing</span></summary>
+            <div class="guided-details-body">
+              <label><span class="field-title">Access PIN<button type="button" class="help-tip" data-tooltip="Only enter a PIN if FlexHub access protection is enabled. It is stored in the Bridge App data directory, not in the browser.">Help</button></span><input id="flexHubPin" type="password" maxlength="64" placeholder="Leave blank if disabled"></label>
+              <button id="testFlexHub">Test connection</button>
+            </div>
+          </details>
+          <button id="saveFlexHub" class="primary">Save and connect</button>
+          <div id="flexHubConnection" class="empty">FlexHub is not configured.</div>
+        </section>
+        <details class="guided-details">
+          <summary>Open a hub interface <span>Advanced tools</span></summary>
+          <div class="guided-details-body">
+            <div class="button-row">
+              <button id="openFlexHubSelector" disabled>Receiver selector</button>
+              <button id="openFlexHubConsole" disabled>FlexHub web UI</button>
+              <button id="openMeshtasticConsole" disabled>Meshtastic web UI</button>
+            </div>
+            <p class="helper-callout">These pages open directly on the local hub. Bridge status is also published to Home Assistant when MQTT discovery is enabled.</p>
+          </div>
+        </details>
       </div>
       <div id="flexHubCards" class="hub-cards"><div class="empty">Configure the FlexHub address to begin.</div></div>
     </div>
@@ -989,23 +1473,17 @@
             <span id="meshUnreadBadge" class="mesh-badge unread">0 unread</span>
           </div>
         </div>
-        <label>Search messages<input id="meshSearch" type="search" maxlength="80" placeholder="Sender or message text"></label>
-        <div class="mesh-filter-grid">
-          <label>Direction
-            <select id="meshDirectionFilter">
-              <option value="">All</option>
-              <option value="inbound">Received</option>
-              <option value="outbound">Sent</option>
-            </select>
-          </label>
-          <label>Channel<select id="meshChannelFilter"><option value="">All channels</option></select></label>
-          <label class="wide">Node<select id="meshNodeFilter"><option value="">All nodes</option></select></label>
-        </div>
-        <div class="button-row">
-          <button id="applyMeshFilters">Apply filters</button>
-          <button id="markMeshRead">Mark all read</button>
-        </div>
-        <details class="mesh-collapsible" open>
+        <label><span class="field-title">Search messages<button type="button" class="help-tip" data-tooltip="Search message text or sender names in the current FlexHub history. Use Filters only when you need a channel, node, or direction.">Help</button></span><input id="meshSearch" type="search" maxlength="80" placeholder="Sender or message text"></label>
+        <details class="mesh-collapsible">
+          <summary>Message filters</summary>
+          <div class="mesh-filter-grid">
+            <label>Direction<select id="meshDirectionFilter"><option value="">All</option><option value="inbound">Received</option><option value="outbound">Sent</option></select></label>
+            <label>Channel<select id="meshChannelFilter"><option value="">All channels</option></select></label>
+            <label class="wide">Node<select id="meshNodeFilter"><option value="">All nodes</option></select></label>
+          </div>
+          <div class="button-row" style="margin-top:8px"><button id="applyMeshFilters">Apply filters</button><button id="markMeshRead">Mark all read</button></div>
+        </details>
+        <details class="mesh-collapsible">
           <summary>Direct FlexHub controls</summary>
           <div class="mesh-action-grid">
             <button data-mesh-action="scan">Scan receivers</button>
@@ -1042,13 +1520,13 @@
           <label>Channel<select id="meshSendChannel"></select></label>
           <label id="meshRecipientLabel" class="wide" hidden>Recipient<select id="meshRecipient"></select></label>
         </div>
-        <label>Message<textarea id="meshComposer" rows="4" placeholder="Type a Meshtastic message"></textarea></label>
+        <label><span class="field-title">Message<button type="button" class="help-tip" data-tooltip="Messages are limited to 220 UTF-8 bytes. Broadcast reaches the selected channel; Direct message targets one Meshtastic node.">Help</button></span><textarea id="meshComposer" rows="4" placeholder="Type a Meshtastic message"></textarea></label>
         <div id="meshByteCount" class="mesh-byte-count">0 / 220 bytes</div>
         <label class="check-row"><input id="meshRequestAck" type="checkbox"> Request delivery acknowledgement</label>
         <button id="sendMeshMessage" class="primary" disabled>Send message</button>
         <div id="meshSendStatus" class="mesh-action-status">Ready.</div>
 
-        <details class="mesh-collapsible" open>
+        <details class="mesh-collapsible">
           <summary>Quick replies</summary>
           <div id="meshTemplateList" class="mesh-template-list"><div class="mesh-unavailable">No saved replies yet.</div></div>
           <label style="margin-top:8px">Reply name<input id="meshTemplateLabel" maxlength="48" placeholder="e.g. On my way"></label>
@@ -1087,13 +1565,18 @@
     </div>
   </dialog>
   <dialog id="loadingScreenDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Branded Fetch Screen v0.21</div><h2 style="font-size:20px">Loading-screen designer</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Branded Fetch Screen v0.21</div><h2>Loading-screen designer</h2><p class="subapp-description">Replace technical fetch messages with a clear branded screen while the device retrieves new content.</p></div>
       <button id="closeLoadingScreen" class="icon" title="Close">×</button>
+    </div>
+    <div class="guide-strip" aria-label="Loading screen workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Choose the target</strong><span>Set a fleet default or one display</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Choose the message</strong><span>Add branding and useful identity</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Preview and save</strong><span>Check X3/X4 proportions first</span></div></div>
     </div>
     <div class="loading-shell">
       <div class="loading-controls">
-        <label>Apply design to<select id="loadingTarget"></select></label>
+        <label><span class="field-title">Apply design to<button type="button" class="help-tip" data-tooltip="Fleet default applies unless a device has its own override. Select a device when it needs different branding, owner text, or layout.">Help</button></span><select id="loadingTarget"></select></label>
         <div id="loadingInheritance" class="small muted"></div>
         <button id="resetLoadingScreen" hidden>Use fleet default</button>
         <div class="field-grid">
@@ -1103,7 +1586,7 @@
               <option value="false">Disabled</option>
             </select>
           </label>
-          <label>When to show
+          <label><span class="field-title">When to show<button type="button" class="help-tip" data-tooltip="Every fetch provides the most consistent branding. Manual wakes avoids an extra e-paper refresh during unattended scheduled updates.">Help</button></span>
             <select id="loadingPolicy">
               <option value="always">Every fetch</option>
               <option value="manual">Manual wakes only</option>
@@ -1112,7 +1595,7 @@
             </select>
           </label>
         </div>
-        <label>Layout
+        <label><span class="field-title">Layout<button type="button" class="help-tip" data-tooltip="Centered brand is the general-purpose option. Large logo favours visual branding, Device identity emphasises ownership, and Minimal status updates fastest.">Help</button></span>
           <select id="loadingLayout">
             <option value="centered">Centered brand</option>
             <option value="logo">Large logo</option>
@@ -1122,19 +1605,27 @@
         </label>
         <label>Headline<input id="loadingHeadline" maxlength="80" placeholder="Updating dashboard"></label>
         <label>Message<input id="loadingMessage" maxlength="120" placeholder="Fetching the latest information"></label>
-        <label>Owner name<input id="loadingOwner" maxlength="80" placeholder="Optional owner or department"></label>
-        <div class="field-grid">
-          <label class="check-row"><input id="loadingShowDevice" type="checkbox">Device name</label>
-          <label class="check-row"><input id="loadingShowOwner" type="checkbox">Owner name</label>
-          <label class="check-row"><input id="loadingShowArea" type="checkbox">Area/location</label>
-        </div>
+        <details class="guided-details">
+          <summary>Identity details <span>Owner, device, and location</span></summary>
+          <div class="guided-details-body">
+            <label>Owner name<input id="loadingOwner" maxlength="80" placeholder="Optional owner or department"></label>
+            <div class="field-grid">
+              <label class="check-row"><input id="loadingShowDevice" type="checkbox">Device name</label>
+              <label class="check-row"><input id="loadingShowOwner" type="checkbox">Owner name</label>
+              <label class="check-row"><input id="loadingShowArea" type="checkbox">Area/location</label>
+            </div>
+          </div>
+        </details>
         <div class="upload-drop">
           <strong>Company logo or icon</strong>
           <span id="loadingLogoName" class="small muted">No custom logo · built-in sync icon will be used</span>
           <input id="loadingLogoUpload" type="file" accept="image/jpeg,image/png,image/webp,image/bmp">
           <button id="removeLoadingLogo" class="danger">Remove logo</button>
         </div>
-        <p class="small muted">Tokens: {device_name}, {device_id}, {owner}, {area}, {profile}</p>
+        <details class="guided-details">
+          <summary>Personalisation tokens <span>Insert live device details</span></summary>
+          <div class="guided-details-body"><p class="helper-callout"><strong>Available:</strong> {device_name}, {device_id}, {owner}, {area}, and {profile}. Add a token to the headline or message and FlexDisplay replaces it for each device.</p></div>
+        </details>
         <div class="field-grid">
           <label>Preview model
             <select id="loadingModel">
@@ -1151,9 +1642,14 @@
     </div>
   </dialog>
   <dialog id="contentPackDialog" class="library-dialog">
-    <div class="section-head" style="padding:18px 20px 0">
-      <div><div class="eyebrow">Fleet Content v0.22</div><h2 style="font-size:20px">Content-pack rollout</h2></div>
+    <div class="subapp-header">
+      <div><div class="eyebrow">Fleet Content v0.22</div><h2>Content-pack rollout</h2><p class="subapp-description">Install one managed ZIP, select its displays, and follow delivery acknowledgements without replacing personal files.</p></div>
       <button id="closeContentPacks" class="icon" title="Close">×</button>
+    </div>
+    <div class="guide-strip" aria-label="Content pack workflow">
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Install a pack</strong><span>Upload a valid content-pack ZIP</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Select devices</strong><span>Choose the exact rollout scope</span></div></div>
+      <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Deploy and track</strong><span>Sleeping displays update on wake</span></div></div>
     </div>
     <div class="loading-shell">
       <div class="loading-controls">
@@ -1162,11 +1658,11 @@
           <span class="small muted">The ZIP contains content-pack.json plus managed photos, books, logos, or assets.</span>
           <input id="contentPackUpload" type="file" accept=".zip,application/zip">
         </div>
-        <label>Pack to deploy<select id="contentPackVersion"></select></label>
+        <label><span class="field-title">Pack to deploy<button type="button" class="help-tip" data-tooltip="Choose an installed pack version. Devices compare the pack ID and version, download only when needed, and acknowledge after applying it.">Help</button></span><select id="contentPackVersion"></select></label>
         <div class="section-head" style="margin-top:14px"><h2>Target devices</h2><button id="selectAllContentDevices">Select all</button></div>
         <div id="contentPackDevices" class="tile-list"></div>
         <button id="deployContentPack" class="primary">Deploy to selected devices</button>
-        <p class="small muted">Sleeping displays receive the pack at their next scheduled or physical-button wake. Personal files and settings are preserved.</p>
+        <p class="helper-callout"><strong>Safe by default:</strong> sleeping displays receive the pack at their next scheduled or physical-button wake. Personal files and device settings are preserved.</p>
       </div>
       <div>
         <div class="section-head"><h2>Rollout status</h2><button id="refreshContentPacks">Refresh</button></div>
@@ -1178,6 +1674,47 @@
 
   <script>
     const $ = (selector) => document.querySelector(selector);
+    const channelIdFromName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
+    const uniqueId = (prefix = "item") => globalThis.crypto?.randomUUID
+      ? `${prefix}-${crypto.randomUUID()}`
+      : `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+
+    function prepareHelpTips(root = document) {
+      root.querySelectorAll?.(".help-tip").forEach((button) => {
+        if (button.hasAttribute("aria-label")) return;
+        const fieldTitle = button.closest(".field-title");
+        const subject = fieldTitle ? [...fieldTitle.childNodes].filter((node) => node !== button).map((node) => node.textContent).join(" ").trim() : "this setting";
+        button.setAttribute("aria-label", `Help: ${subject || "this setting"}`);
+        button.setAttribute("aria-expanded", "false");
+      });
+    }
+
+    const helpTipObserver = new MutationObserver((records) => records.forEach((record) => record.addedNodes.forEach((node) => {
+      if (node.nodeType === Node.ELEMENT_NODE) prepareHelpTips(node);
+    })));
+    helpTipObserver.observe(document.body, {childList:true, subtree:true});
+    prepareHelpTips();
+    document.addEventListener("click", (event) => {
+      const selectedTip = event.target.closest?.(".help-tip");
+      document.querySelectorAll(".help-tip.active").forEach((button) => {
+        if (button !== selectedTip) {
+          button.classList.remove("active");
+          button.setAttribute("aria-expanded", "false");
+        }
+      });
+      if (!selectedTip) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const expanded = selectedTip.classList.toggle("active");
+      selectedTip.setAttribute("aria-expanded", String(expanded));
+    }, true);
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll(".help-tip.active").forEach((button) => {
+        button.classList.remove("active");
+        button.setAttribute("aria-expanded", "false");
+      });
+    });
     const state = {
       profiles: [],
       devices: [],
@@ -1189,6 +1726,8 @@
       profile: null,
       pageIndex: 0,
       model: "X4",
+      workspace: sessionStorage.getItem("flexdisplayStudioWorkspace") || "studio",
+      previewZoom: 1,
       dirty: false,
       previewTimer: null,
       previewRequest: 0,
@@ -1225,6 +1764,7 @@
       contentChannels: {channels: {}, assignments: {}, capabilities: {}},
       contentChannelDraft: null,
       contentChannelPreviewUrl: "",
+      contentExpandedIndex: null,
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1257,6 +1797,51 @@
       node.className = `${error ? "error " : ""}show`;
       clearTimeout(node.timer);
       node.timer = setTimeout(() => node.className = "", 3200);
+    }
+
+    function activateWorkspace(name = "studio") {
+      const available = new Set(["studio", "content", "fleet", "flexhub", "settings"]);
+      const selected = available.has(name) ? name : "studio";
+      state.workspace = selected;
+      sessionStorage.setItem("flexdisplayStudioWorkspace", selected);
+      document.querySelectorAll("[data-workspace]").forEach((button) => {
+        const active = button.dataset.workspace === selected;
+        button.classList.toggle("active", active);
+        if (active) button.setAttribute("aria-current", "page");
+        else button.removeAttribute("aria-current");
+      });
+      document.querySelectorAll("[data-workspace-panel]").forEach((panel) => {
+        const active = panel.dataset.workspacePanel === selected;
+        panel.hidden = !active;
+        panel.classList.toggle("active", active);
+      });
+      window.scrollTo({top: 0, behavior: "smooth"});
+    }
+
+    function selectedPreviewDevice() {
+      return state.devices.find((device) => device.device_id === $("#deviceSelect")?.value) || state.devices[0] || null;
+    }
+
+    function renderHeaderStatus(connectionError = "") {
+      const selected = selectedPreviewDevice();
+      const online = state.devices.filter((device) => device.online).length;
+      const connected = !connectionError && Boolean(state.profile || state.profiles.length);
+      $("#headerConnection").innerHTML = `<span class="live-dot"></span>${connected ? "Connected" : "Unavailable"}`;
+      $("#headerConnection").parentElement.classList.toggle("offline", !connected);
+      $("#headerConnectionDetail").textContent = connectionError || `${online} of ${state.devices.length} online`;
+      $("#headerDevice").textContent = selected?.name || selected?.device_id || `Sample ${state.model}`;
+      $("#headerFleetCount").textContent = `${state.devices.length} device${state.devices.length === 1 ? "" : "s"}`;
+      $("#headerBattery").textContent = Number.isFinite(Number(selected?.battery_percent)) ? `${Math.round(Number(selected.battery_percent))}%` : "—";
+      $("#headerPreviewStatus").textContent = $("#previewStatus")?.textContent || "Waiting";
+      $("#headerSyncDetail").textContent = selected?.last_seen ? `Last seen ${selected.last_seen}` : "Local preview";
+      $("#headerAssignProfile").disabled = !selected;
+      $("#fleetWorkspaceStatus").innerHTML = `<span class="live-dot"></span>${online} online · ${state.devices.length} total`;
+    }
+
+    function setPreviewZoom(value) {
+      state.previewZoom = Math.max(.8, Math.min(1.2, Number(value) || 1));
+      $("#previewZoom").value = String(state.previewZoom);
+      $("#deviceFrame").style.setProperty("--preview-scale", state.previewZoom);
     }
 
     function escapeHtml(value) {
@@ -1359,6 +1944,7 @@
             </article>`;
         }).join("");
         populateDevices();
+        renderHeaderStatus();
       } catch (error) {
         grid.innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
       }
@@ -1619,6 +2205,8 @@
         updateMeshUnread();
       }
       const connected = Boolean(summary.connected);
+      $("#flexHubWorkspaceStatus").classList.toggle("offline", !connected);
+      $("#flexHubWorkspaceStatus").innerHTML = `<span class="live-dot"></span>${connected ? "FlexHub connected" : summary.configured ? "FlexHub unavailable" : "FlexHub not configured"}`;
       for (const [selector, field] of [["#openFlexHubSelector", "selector_url"], ["#openFlexHubConsole", "console_url"], ["#openMeshtasticConsole", "meshtastic_url"]]) {
         $(selector).disabled = !summary[field];
       }
@@ -2449,11 +3037,13 @@
         populateDevices();
         chooseProfile(state.profile?.name || state.profiles[0]?.name);
         $("#saveState").textContent = "Saved";
+        renderHeaderStatus();
         loadEntities();
         loadServices();
         if ($("#buttonActionDevice").value) loadButtonActions($("#buttonActionDevice").value);
       } catch (error) {
         $("#saveState").textContent = "Unavailable";
+        renderHeaderStatus(String(error.message || "Bridge unavailable"));
         if (!String(error.message).includes("API key")) toast(error.message, true);
       }
     }
@@ -2648,7 +3238,9 @@
       state.contentChannelDraft = selected ? clone(selected) : starterContentChannel();
       $("#contentChannelId").value = state.contentChannelDraft.id || channelId || "";
       $("#contentChannelId").disabled = Boolean(selected);
+      $("#contentChannelId").dataset.auto = selected ? "false" : "true";
       $("#contentChannelName").value = state.contentChannelDraft.name || "";
+      state.contentExpandedIndex = null;
       renderContentItems();
     }
 
@@ -2668,15 +3260,16 @@
       list.innerHTML = items.map((item, index) => {
         let fields = "";
         if (item.type === "dashboard") {
-          fields = `<p class="small muted" style="margin:0">Inserts every active page from the dashboard profile already assigned to each device. Change that profile from the main Studio or Fleet Management.</p>`;
+          fields = `<p class="helper-callout"><strong>Uses the assigned profile:</strong> every active dashboard page already assigned to each device is inserted here. Change that profile from Studio or Fleet Management.</p>`;
         } else if (item.type === "message") {
-          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>Message<textarea data-content-field="body" maxlength="1400">${escapeHtml(item.body || "")}</textarea></label><div class="field-grid"><label>Priority<select data-content-field="priority"><option value="normal">Normal</option><option value="important">Important</option><option value="critical">Critical</option></select></label><label>Footer<input data-content-field="footer" maxlength="160" value="${escapeHtml(item.footer || "")}"></label></div><label>Optional QR/link<input data-content-field="link" type="url" value="${escapeHtml(item.link || "")}" placeholder="https://example.com"></label>`;
+          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label><span class="field-title">Message<button type="button" class="help-tip" data-tooltip="This is the main text displayed on the e-paper screen. Keep the most important information near the beginning for smaller layouts.">Help</button></span><textarea data-content-field="body" maxlength="1400">${escapeHtml(item.body || "")}</textarea></label><details class="guided-details"><summary>Message options <span>Priority, footer, and QR link</span></summary><div class="guided-details-body"><div class="field-grid"><label>Priority<select data-content-field="priority"><option value="normal">Normal</option><option value="important">Important</option><option value="critical">Critical</option></select></label><label>Footer<input data-content-field="footer" maxlength="160" value="${escapeHtml(item.footer || "")}"></label></div><label><span class="field-title">Optional QR/link<button type="button" class="help-tip" data-tooltip="When supplied, FlexDisplay generates a QR code so viewers can open the related URL from the display.">Help</button></span><input data-content-field="link" type="url" value="${escapeHtml(item.link || "")}" placeholder="https://example.com"></label></div></details>`;
         } else if (item.type === "quote") {
-          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>Quote collection<textarea data-content-field="quotes_text" placeholder="One quote per line — optional author">${escapeHtml(quoteText(item))}</textarea></label><div class="field-grid"><label>Selection<select data-content-field="selection"><option value="daily">Same quote for the day</option><option value="random">Random on refresh</option></select></label><label>Footer<input data-content-field="footer" maxlength="120" value="${escapeHtml(item.footer || "")}"></label></div><p class="small muted" style="margin:0">Leave the collection empty to use the built-in offline quote pack.</p>`;
+          fields = `<label>Heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label><span class="field-title">Quote collection<button type="button" class="help-tip" data-tooltip="Enter one quote per line. Add an author after an em dash. Leave the collection empty to use FlexDisplay's built-in offline quote pack.">Help</button></span><textarea data-content-field="quotes_text" placeholder="One quote per line — optional author">${escapeHtml(quoteText(item))}</textarea></label><details class="guided-details"><summary>Quote options <span>Rotation and footer</span></summary><div class="guided-details-body"><div class="field-grid"><label>Selection<select data-content-field="selection"><option value="daily">Same quote for the day</option><option value="random">Random on refresh</option></select></label><label>Footer<input data-content-field="footer" maxlength="120" value="${escapeHtml(item.footer || "")}"></label></div></div></details>`;
         } else {
-          fields = `<label>Feed preset<select data-content-field="preset">${presetOptions}</select></label><label>Page heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>RSS/Atom URL<input data-content-field="url" type="url" value="${escapeHtml(item.url || "")}"></label><div class="field-grid"><label>Source/attribution<input data-content-field="source" maxlength="100" value="${escapeHtml(item.source || "")}"></label><label>Layout<select data-content-field="layout"><option value="digest">Headline digest</option><option value="headline">One large headline</option><option value="summary">Article summary pages</option></select></label></div><label>Maximum stories<input data-content-field="limit" type="number" min="1" max="8" value="${Number(item.limit || 4)}"></label>`;
+          fields = `<label><span class="field-title">Feed preset<button type="button" class="help-tip" data-tooltip="Choose a built-in Australian feed, or select Custom RSS/Atom URL to use another public news source.">Help</button></span><select data-content-field="preset">${presetOptions}</select></label><label>Page heading<input data-content-field="title" maxlength="80" value="${escapeHtml(item.title || "")}"></label><label>RSS/Atom URL<input data-content-field="url" type="url" value="${escapeHtml(item.url || "")}"></label><details class="guided-details"><summary>News layout options <span>Attribution and story count</span></summary><div class="guided-details-body"><div class="field-grid"><label>Source/attribution<input data-content-field="source" maxlength="100" value="${escapeHtml(item.source || "")}"></label><label>Layout<select data-content-field="layout"><option value="digest">Headline digest</option><option value="headline">One large headline</option><option value="summary">Article summary pages</option></select></label></div><label>Maximum stories<input data-content-field="limit" type="number" min="1" max="8" value="${Number(item.limit || 4)}"></label></div></details>`;
         }
-        return `<article class="content-item-card" data-content-index="${index}"><div class="content-item-head"><div><strong>${index + 1}. ${escapeHtml(item.type === "rss" ? "News / RSS" : titleCase(item.type))}</strong><div class="small muted">${escapeHtml(item.title || "Untitled")}</div></div><div class="button-row"><button class="icon" data-content-move="-1" title="Move up">↑</button><button class="icon" data-content-move="1" title="Move down">↓</button><button class="icon danger" data-content-remove title="Remove">×</button></div></div><div class="content-item-body">${fields}</div></article>`;
+        const expanded = state.contentExpandedIndex === index;
+        return `<article class="content-item-card ${expanded ? "expanded" : ""}" data-content-index="${index}"><div class="content-item-head"><div><strong>${index + 1}. ${escapeHtml(item.type === "rss" ? "News / RSS" : titleCase(item.type))}</strong><div class="small muted">${escapeHtml(item.title || "Untitled")}</div></div><div class="button-row"><button data-content-edit aria-expanded="${expanded}">${expanded ? "Done" : "Edit"}</button><button class="icon" data-content-move="-1" title="Move up">↑</button><button class="icon" data-content-move="1" title="Move down">↓</button><button class="icon danger" data-content-remove title="Remove">×</button></div></div><div class="content-item-body">${fields}</div></article>`;
       }).join("");
       list.querySelectorAll("[data-content-index]").forEach((card) => {
         const item = items[Number(card.dataset.contentIndex)];
@@ -2695,8 +3288,9 @@
     }
 
     async function saveContentChannel() {
-      const channelId = $("#contentChannelId").value.trim();
-      if (!channelId) return toast("Enter a channel ID.", true);
+      const channelId = $("#contentChannelId").value.trim() || channelIdFromName($("#contentChannelName").value);
+      if (!channelId) return toast("Enter a channel name.", true);
+      $("#contentChannelId").value = channelId;
       state.contentChannelDraft.id = channelId;
       state.contentChannelDraft.name = $("#contentChannelName").value.trim() || channelId;
       try {
@@ -3370,11 +3964,15 @@
       renderPages();
       renderInspector();
       updateDirtyState();
+      renderHeaderStatus();
       schedulePreview();
     }
 
     function renderPages() {
-      $("#pageList").innerHTML = state.profile.pages.map((page, index) => `
+      const query = ($("#pageSearch")?.value || "").trim().toLowerCase();
+      $("#pageList").innerHTML = state.profile.pages.map((page, index) => ({page, index}))
+        .filter(({page}) => !query || `${page.title} ${layoutLabel(page.layout)}`.toLowerCase().includes(query))
+        .map(({page, index}) => `
         <div class="page-item ${index === state.pageIndex ? "active" : ""}" data-page="${index}" tabindex="0">
           <span class="page-number">${index + 1}</span>
           <span class="page-meta">
@@ -3383,7 +3981,7 @@
           </span>
           <span aria-hidden="true">›</span>
         </div>
-      `).join("");
+      `).join("") || '<div class="empty">No pages match that search.</div>';
       document.querySelectorAll(".page-item").forEach((item) => {
         const select = () => {
           state.pageIndex = Number(item.dataset.page);
@@ -3951,11 +4549,14 @@
 
     function updateDirtyState() {
       $("#saveState").innerHTML = state.dirty ? '<span class="dirty-dot">● Unsaved</span>' : "Saved";
+      $("#headerSaveProfile").textContent = state.dirty ? "Save changes · unsaved" : "Save changes";
     }
 
     function schedulePreview() {
       clearTimeout(state.previewTimer);
       $("#previewStatus").textContent = "Rendering…";
+      $("#headerPreviewStatus").textContent = "Rendering…";
+      $("#headerSyncDetail").textContent = "Preparing dashboard snapshot";
       state.previewTimer = setTimeout(renderPreview, 350);
     }
 
@@ -3986,11 +4587,13 @@
         $("#previewStatus").textContent = response.headers.get("X-FlexDisplay-Preview-HA-Error") === "true"
           ? "Preview · HA values unavailable"
           : "Live preview";
+        renderHeaderStatus();
       } catch (error) {
         if (requestId !== state.previewRequest) return;
         $("#previewState").hidden = false;
         $("#previewState").textContent = error.message;
         $("#previewStatus").textContent = "Needs attention";
+        renderHeaderStatus();
       }
     }
 
@@ -4046,6 +4649,8 @@
       $("#deviceFrame").classList.toggle("round", model === "ROOK");
       $("#previewWrap").style.setProperty("--ratio", `${specs[0]}/${specs[1]}`);
       $("#modelLabel").textContent = `${model} · ${specs[0]} × ${specs[1]}`;
+      $("#canvasDimensions").textContent = `Canvas ${specs[0]} × ${specs[1]}`;
+      renderHeaderStatus();
       schedulePreview();
     }
 
@@ -4227,10 +4832,30 @@
       `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
     ).join("");
 
+    document.querySelectorAll("[data-workspace]").forEach((button) => {
+      button.addEventListener("click", () => activateWorkspace(button.dataset.workspace));
+    });
+    document.querySelectorAll("[data-studio-target]").forEach((button) => {
+      button.addEventListener("click", () => {
+        activateWorkspace("studio");
+        requestAnimationFrame(() => {
+          const target = document.getElementById(button.dataset.studioTarget);
+          target?.scrollIntoView({behavior: "smooth", block: "center"});
+          if (target && !target.hidden && typeof target.focus === "function") target.focus({preventScroll: true});
+        });
+      });
+    });
+    document.querySelectorAll("[data-trigger]").forEach((button) => {
+      button.addEventListener("click", () => document.getElementById(button.dataset.trigger)?.click());
+    });
     $("#unlockButton").addEventListener("click", () => {
       sessionStorage.setItem("flexdisplayBridgeKey", $("#apiKey").value);
       load();
     });
+    $("#headerSaveProfile").addEventListener("click", saveProfile);
+    $("#headerAssignProfile").addEventListener("click", assignProfile);
+    $("#pageSearch").addEventListener("input", renderPages);
+    $("#previewZoom").addEventListener("change", (event) => setPreviewZoom(event.target.value));
     $("#profileSelect").addEventListener("change", (event) => {
       if (state.dirty && !confirm("Discard the unsaved changes to this profile?")) {
         event.target.value = state.profile.name;
@@ -4465,28 +5090,41 @@
     $("#contentChannelSelect").addEventListener("change", (event) => chooseContentChannel(event.target.value));
     $("#newContentChannel").addEventListener("click", () => {
       state.contentChannelDraft = starterContentChannel();
+      state.contentExpandedIndex = null;
       $("#contentChannelId").value = "";
       $("#contentChannelId").disabled = false;
+      $("#contentChannelId").dataset.auto = "true";
       $("#contentChannelName").value = "";
       $("#contentChannelPreview").removeAttribute("src");
       renderContentItems();
-      $("#contentChannelId").focus();
+      $("#contentChannelName").focus();
     });
     $("#deleteContentChannel").addEventListener("click", deleteContentChannel);
     $("#addContentItem").addEventListener("click", () => {
       state.contentChannelDraft.items.push(defaultContentItem($("#contentItemType").value));
+      state.contentExpandedIndex = state.contentChannelDraft.items.length - 1;
       renderContentItems();
     });
     $("#saveContentChannel").addEventListener("click", saveContentChannel);
     $("#previewContentChannel").addEventListener("click", previewContentChannel);
     $("#assignContentChannel").addEventListener("click", assignContentChannel);
-    $("#contentChannelName").addEventListener("input", (event) => { if (state.contentChannelDraft) state.contentChannelDraft.name = event.target.value; });
+    $("#contentChannelName").addEventListener("input", (event) => {
+      if (state.contentChannelDraft) state.contentChannelDraft.name = event.target.value;
+      const idField = $("#contentChannelId");
+      if (!idField.disabled && idField.dataset.auto !== "false") idField.value = channelIdFromName(event.target.value);
+    });
+    $("#contentChannelId").addEventListener("input", (event) => { event.target.dataset.auto = event.target.value ? "false" : "true"; });
     $("#contentItemList").addEventListener("click", (event) => {
       const card = event.target.closest("[data-content-index]");
       if (!card) return;
       const index = Number(card.dataset.contentIndex);
+      if (event.target.closest("[data-content-edit]")) {
+        state.contentExpandedIndex = state.contentExpandedIndex === index ? null : index;
+        return renderContentItems();
+      }
       if (event.target.closest("[data-content-remove]")) {
         state.contentChannelDraft.items.splice(index, 1);
+        state.contentExpandedIndex = null;
         return renderContentItems();
       }
       const move = event.target.closest("[data-content-move]");
@@ -4494,6 +5132,8 @@
         const target = index + Number(move.dataset.contentMove);
         if (target < 0 || target >= state.contentChannelDraft.items.length) return;
         [state.contentChannelDraft.items[index], state.contentChannelDraft.items[target]] = [state.contentChannelDraft.items[target], state.contentChannelDraft.items[index]];
+        if (state.contentExpandedIndex === index) state.contentExpandedIndex = target;
+        else if (state.contentExpandedIndex === target) state.contentExpandedIndex = index;
         renderContentItems();
       }
     });
@@ -4548,6 +5188,7 @@
     $("#photoModel").addEventListener("change", renderPhotoGallery);
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
+      renderHeaderStatus();
       if (selected?.model) {
         const model = selected.model.toUpperCase();
         setModel(model.includes("ROOK") || model.includes("ECHO_SPOT") ? "ROOK" : model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
@@ -4562,6 +5203,8 @@
       event.preventDefault();
       event.returnValue = "";
     });
+    activateWorkspace(state.workspace);
+    setPreviewZoom(1);
     setModel("X4");
     load();
   </script>
