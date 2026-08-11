@@ -1,0 +1,36 @@
+name: Publish compatibility release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing vX.Y.Z tag to publish
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    env:
+      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          ref: ${{ inputs.tag || github.ref }}
+      - name: Verify version metadata
+        run: python3 scripts/check_release_metadata.py "${RELEASE_TAG#v}"
+      - name: Publish GitHub release if missing
+        run: >-
+          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
+          gh release create "$RELEASE_TAG"
+          --verify-tag
+          --generate-notes
+          --title "FlexDisplay $RELEASE_TAG"
