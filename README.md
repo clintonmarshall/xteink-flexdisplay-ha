@@ -256,6 +256,21 @@ Dashboard Studio's Fleet Content workspace distributes revised managed photos,
 books, logos, and assets to one or many displays without erasing personal
 files or device settings.
 
+The Content Manager adds a guided Quick Cards builder
+for offline ID badges, contacts, Wi-Fi cards, emergency details, messages, and
+saved images. It packages card metadata and optional one-bit BMP assets, then
+assigns the checksum-verified content pack to all eligible X3/X4 displays, one
+hardware model, or a selected X3/X4 device set immediately or at a scheduled
+time. Home Assistant exposes
+content availability separately from firmware updates so the two rollout types
+cannot be confused.
+
+Content-pack versions are immutable: build a new version whenever cards or
+assets change. Device download URLs carry an opaque per-pack access token, but
+the Bridge serves them over the local HTTP connection, so Quick Cards should be
+treated as visible to devices and observers on the trusted display LAN. Use a
+TLS-terminating proxy or private tunnel before exposing that traffic elsewhere.
+
 Firmware and Bridge `0.23.0` add capability-negotiated screen transfer
 optimization. A device with a verified cached frame receives a zero-byte
 unchanged response, while Photo Frame mode uses PNG instead of raw BMP.

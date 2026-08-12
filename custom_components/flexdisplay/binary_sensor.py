@@ -17,9 +17,9 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .coordinator import FlexDisplayCoordinator
 from .device_capabilities import (
     firmware_manageable,
-    firmware_provider,
     reports_battery,
     reports_usb_power,
+    supports_xteink_ota,
 )
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
@@ -51,6 +51,12 @@ DESCRIPTIONS = (
         value_fn=lambda record: bool(record.get("sd_ready")),
     ),
     FlexDisplayBinarySensorDescription(
+        key="sd_writable",
+        translation_key="sd_writable",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        value_fn=lambda record: bool(record.get("sd_writable")),
+    ),
+    FlexDisplayBinarySensorDescription(
         key="image_unchanged",
         translation_key="image_unchanged",
         value_fn=lambda record: bool(record.get("image_unchanged")),
@@ -66,6 +72,12 @@ DESCRIPTIONS = (
         translation_key="home_assistant_error",
         device_class=BinarySensorDeviceClass.PROBLEM,
         value_fn=lambda record: bool(record.get("ha_error")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="dashboard_fetch_error",
+        translation_key="dashboard_fetch_error",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda record: bool(record.get("dashboard_fetch_error")),
     ),
     FlexDisplayBinarySensorDescription(
         key="firmware_update_problem",
@@ -96,8 +108,8 @@ class FlexDisplayBinarySensor(FlexDisplayEntity, BinarySensorEntity):
         key = self.entity_description.key
         if key == "usb_connected":
             return reports_usb_power(record)
-        if key == "sd_ready":
-            return firmware_provider(record) == "xteink"
+        if key in {"sd_ready", "sd_writable"}:
+            return supports_xteink_ota(record)
         if key == "low_battery":
             return reports_battery(record)
         if key == "firmware_update_problem":
@@ -130,7 +142,10 @@ async def async_setup_entry(
             for description in DESCRIPTIONS
             if not (
                 (description.key == "usb_connected" and not reports_usb_power(record))
-                or (description.key == "sd_ready" and firmware_provider(record) != "xteink")
+                or (
+                    description.key in {"sd_ready", "sd_writable"}
+                    and not supports_xteink_ota(record)
+                )
                 or (description.key == "low_battery" and not reports_battery(record))
                 or (
                     description.key == "firmware_update_problem"

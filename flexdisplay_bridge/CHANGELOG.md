@@ -10,6 +10,10 @@
 - Add saved device groups, non-mutating policy and firmware impact previews,
   identity provenance, unified audit timelines, configuration-drift alerts,
   and an authenticated redacted support bundle.
+- Add a guided Fleet Content Manager for checksum-verified offline Quick Cards,
+  immutable token-protected packs, scoped or scheduled deployments, bounded
+  deployment history, a separate Home Assistant content-update entity, and
+  actionable SD-write and dashboard-fetch diagnostics.
 - Reconcile Home Assistant entities when device capabilities change and keep
   device ownership, commands, policies, provisioning, and updates specific to
   each supported family.

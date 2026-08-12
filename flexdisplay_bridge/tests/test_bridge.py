@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import base64
 import io
 import hashlib
 import json
 import zipfile
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -31,6 +33,7 @@ from flexdisplay_bridge.content_channels import (
     ContentChannelValidationError,
     parse_channel,
 )
+from flexdisplay_bridge.content_pack import ContentPackConflictError, ContentPackStore
 from flexdisplay_bridge.content_renderer import render_content_page
 from flexdisplay_bridge.dashboards import (
     DashboardPage,
@@ -43,6 +46,18 @@ from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
 from flexdisplay_bridge.renderer import DashboardRenderer, _icon_kind
 from flexdisplay_bridge.store import DeviceStore
 from PIL import Image
+
+
+def _one_bit_bmp_base64(width: int = 16, height: int = 16) -> str:
+    output = io.BytesIO()
+    Image.new("1", (width, height), color=1).save(output, format="BMP")
+    return base64.b64encode(output.getvalue()).decode("ascii")
+
+
+def _rgb_bmp_base64() -> str:
+    output = io.BytesIO()
+    Image.new("RGB", (16, 16), color="white").save(output, format="BMP")
+    return base64.b64encode(output.getvalue()).decode("ascii")
 
 
 def test_note4_house_pulse_renderer_and_bmp_delivery(tmp_path: Path) -> None:
@@ -333,10 +348,14 @@ def test_v034_mixed_channel_interleaves_dashboard_and_message(tmp_path: Path) ->
             assert image.size == (480, 800)
 
 
-def _content_pack_zip(version: str = "ldcs-1") -> bytes:
+def _content_pack_zip(
+    version: str = "ldcs-1",
+    source: str = "photos/welcome.png",
+    target: str = "/photos/flexdisplay/welcome.png",
+) -> bytes:
     output = io.BytesIO()
     with zipfile.ZipFile(output, "w") as archive:
-        archive.writestr("photos/welcome.png", b"fleet-content")
+        archive.writestr(source, b"fleet-content")
         archive.writestr(
             "content-pack.json",
             json.dumps(
@@ -345,8 +364,8 @@ def _content_pack_zip(version: str = "ldcs-1") -> bytes:
                     "name": "LDCS welcome pack",
                     "files": [
                         {
-                            "source": "photos/welcome.png",
-                            "target": "/photos/flexdisplay/welcome.png",
+                            "source": source,
+                            "target": target,
                         }
                     ],
                 }
@@ -669,6 +688,446 @@ def test_v022_content_pack_rollout_is_acknowledged_per_device(tmp_path: Path) ->
         assert "x-flexdisplay-content-version" not in acknowledged.headers
         state = client.get("/api/v1/content-packs").json()
         assert state["assignments"]["X3-CONTENT"]["status"] == "installed"
+
+
+def test_content_pack_install_is_serialized_and_versions_are_immutable(
+    tmp_path: Path,
+) -> None:
+    store = ContentPackStore(tmp_path / "packs.json", tmp_path / "content-packs")
+    archive = _content_pack_zip("parallel-1")
+
+    def install() -> str:
+        try:
+            store.install(archive)
+            return "installed"
+        except ContentPackConflictError:
+            return "conflict"
+
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results = sorted(executor.map(lambda _: install(), range(2)))
+
+    assert results == ["conflict", "installed"]
+    assert not (tmp_path / "content-packs" / ".parallel-1.tmp").exists()
+    token = store.download_token("parallel-1")
+    content = store.file_path("parallel-1", "photos/welcome.png", token).read_bytes()
+    assert content == b"fleet-content"
+    assert "download_token" not in store.payload()["packs"]["parallel-1"]
+
+
+def test_content_pack_rejects_invalid_descriptors_and_quotes_download_paths(
+    tmp_path: Path,
+) -> None:
+    def descriptor_zip(descriptor: bytes) -> bytes:
+        output = io.BytesIO()
+        with zipfile.ZipFile(output, "w") as archive:
+            archive.writestr("content-pack.json", descriptor)
+        return output.getvalue()
+
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        for descriptor in (b"[]", b"\xff"):
+            rejected = client.post(
+                "/api/v1/content-packs",
+                content=descriptor_zip(descriptor),
+                headers={"Content-Type": "application/zip"},
+            )
+            assert rejected.status_code == 400
+
+        assert client.get(
+            "/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-RESERVED"}
+        ).status_code == 200
+        uploaded = client.post(
+            "/api/v1/content-packs",
+            content=_content_pack_zip(
+                "reserved-1",
+                source="photos/a?b#c%.png",
+                target="/photos/flexdisplay/a?b#c%.png",
+            ),
+            headers={"Content-Type": "application/zip"},
+        )
+        assert uploaded.status_code == 200
+        assert client.post(
+            "/api/v1/content-packs/reserved-1/rollout",
+            json={"device_ids": ["X3-RESERVED"]},
+        ).status_code == 200
+        assigned = client.get(
+            "/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-RESERVED"}
+        )
+        assert client.get(
+            "/api/v1/content-packs/reserved-1/manifest.json?access_token=%C3%A9"
+        ).status_code == 404
+        assert client.get(
+            "/api/v1/content-packs/reserved-1/files/photos/a%3Fb%23c%25.png"
+            "?access_token=%C3%A9"
+        ).status_code == 404
+        manifest = client.get(assigned.headers["x-flexdisplay-content-manifest-url"])
+        assert manifest.status_code == 200
+        file_url = manifest.json()["files"][0]["url"]
+        assert "%3F" in file_url and "%23" in file_url and "%25" in file_url
+        downloaded = client.get(file_url)
+        assert downloaded.status_code == 200
+        assert downloaded.content == b"fleet-content"
+
+        huge_integer = b"9" * 5000
+        descriptor_overflow = client.post(
+            "/api/v1/content-packs",
+            content=descriptor_zip(huge_integer),
+            headers={"Content-Type": "application/zip"},
+        )
+        assert descriptor_overflow.status_code == 400
+        quick_cards_overflow = client.post(
+            "/api/v1/content-packs/quick-cards",
+            content=huge_integer,
+            headers={"Content-Type": "application/json"},
+        )
+        assert quick_cards_overflow.status_code == 400
+
+
+def test_content_manager_builds_quick_cards_and_scopes_scheduled_rollout(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        for device_id in ("X3-CARD01", "X4-CARD02"):
+            assert client.get(
+                "/api/v1/screen", headers={"X-FlexDisplay-ID": device_id}
+            ).status_code == 200
+
+        built = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "wallet-1",
+                "name": "Visitor wallet",
+                "cards": [
+                    {
+                        "id": "visitor",
+                        "type": "id_badge",
+                        "title": "Visitor",
+                        "body": "Please report to reception",
+                        "qr_payload": "https://example.test/check-in",
+                        "image_path": "/cards/flexdisplay/assets/profile.bmp",
+                    }
+                ],
+                "assets": [
+                    {
+                        "filename": "profile.bmp",
+                        "data_base64": _one_bit_bmp_base64(),
+                    }
+                ],
+            },
+        )
+        assert built.status_code == 200
+        assert built.json()["pack"]["kind"] == "quick_cards"
+        assert built.json()["pack"]["card_count"] == 1
+        assert "download_token" not in json.dumps(
+            client.get("/api/v1/content-packs").json()
+        )
+        assert client.get(
+            "/api/v1/content-packs/wallet-1/files/quick-cards/cards.json"
+        ).status_code == 404
+
+        immediate = client.post(
+            "/api/v1/content-packs/wallet-1/rollout",
+            json={"scope": "devices", "device_ids": ["X4-CARD02"]},
+        )
+        assert immediate.status_code == 200
+        assigned = client.get(
+            "/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-CARD02"}
+        )
+        manifest_url = assigned.headers["x-flexdisplay-content-manifest-url"]
+        assert "access_token=" in manifest_url
+        card_manifest_response = client.get(manifest_url)
+        assert card_manifest_response.status_code == 200
+        card_manifest_payload = card_manifest_response.json()
+        cards_url = next(
+            item["url"]
+            for item in card_manifest_payload["files"]
+            if item["source"] == "quick-cards/cards.json"
+        )
+        card_manifest = client.get(cards_url)
+        assert card_manifest.status_code == 200
+        assert card_manifest.json()["schema_version"] == 1
+        assert card_manifest.json()["cards"][0]["qr_payload"].startswith("https://")
+        original_cards = card_manifest.content
+
+        acknowledged = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-CARD02",
+                "X-FlexDisplay-Content-Version": "wallet-1",
+                "X-FlexDisplay-Content-Status": "installed",
+            },
+        )
+        assert "x-flexdisplay-content-version" not in acknowledged.headers
+        duplicate = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "wallet-1",
+                "cards": [
+                    {"id": "changed", "type": "message", "title": "Changed"}
+                ],
+            },
+        )
+        assert duplicate.status_code == 409
+        assert client.get(cards_url).content == original_cards
+        no_redelivery = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-CARD02",
+                "X-FlexDisplay-Content-Version": "wallet-1",
+                "X-FlexDisplay-Content-Status": "installed",
+            },
+        )
+        assert "x-flexdisplay-content-version" not in no_redelivery.headers
+
+        scheduled_for = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        rollout = client.post(
+            "/api/v1/content-packs/wallet-1/rollout",
+            json={"scope": "x3", "scheduled_for": scheduled_for},
+        )
+        assert rollout.status_code == 200
+        assert rollout.json()["device_ids"] == ["X3-CARD01"]
+        state = client.get("/api/v1/content-packs").json()
+        assert state["assignments"]["X3-CARD01"]["status"] == "scheduled"
+        assert state["deployments"][-1]["scope"] == "x3"
+
+        waiting = client.get(
+            "/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-CARD01"}
+        )
+        assert "x-flexdisplay-content-version" not in waiting.headers
+
+
+def test_quick_card_builder_rejects_unsafe_image_paths(tmp_path: Path) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        response = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "unsafe-1",
+                "cards": [
+                    {
+                        "id": "unsafe",
+                        "type": "image",
+                        "title": "Unsafe",
+                        "image_path": "/books/private.bmp",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 400
+        assert "/cards/flexdisplay/" in response.json()["detail"]
+
+
+def test_quick_card_builder_rejects_non_bmp_assets(tmp_path: Path) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        response = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "unsafe-asset-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [{"filename": "profile.png", "data_base64": "iVBORw=="}],
+            },
+        )
+        assert response.status_code == 400
+        assert "BMP" in response.json()["detail"]
+
+
+def test_quick_card_builder_rejects_missing_or_invalid_bmp_assets(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        missing = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "missing-asset-1",
+                "cards": [
+                    {
+                        "id": "badge",
+                        "type": "id_badge",
+                        "title": "Badge",
+                        "image_path": "/cards/flexdisplay/assets/missing.bmp",
+                    }
+                ],
+            },
+        )
+        assert missing.status_code == 400
+        assert "not included" in missing.json()["detail"]
+
+        invalid = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "invalid-asset-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [
+                    {
+                        "filename": "broken.bmp",
+                        "data_base64": base64.b64encode(b"BMnot-a-bitmap").decode("ascii"),
+                    }
+                ],
+            },
+        )
+        assert invalid.status_code == 400
+        assert "valid BMP" in invalid.json()["detail"]
+
+        wrong_depth = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "wrong-depth-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [
+                    {"filename": "colour.bmp", "data_base64": _rgb_bmp_base64()}
+                ],
+            },
+        )
+        assert wrong_depth.status_code == 400
+        assert "one-bit BMP" in wrong_depth.json()["detail"]
+
+        missing_image = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "missing-image-1",
+                "cards": [{"id": "photo", "type": "image", "title": "Photo"}],
+            },
+        )
+        assert missing_image.status_code == 400
+        assert "requires an included image" in missing_image.json()["detail"]
+
+        duplicate = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "duplicate-assets-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [
+                    {"filename": "Profile.bmp", "data_base64": _one_bit_bmp_base64()},
+                    {"filename": "profile.bmp", "data_base64": _one_bit_bmp_base64()},
+                ],
+            },
+        )
+        assert duplicate.status_code == 400
+        assert "Duplicate Quick Card asset" in duplicate.json()["detail"]
+
+        long_name = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "long-asset-name-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [
+                    {
+                        "filename": f"{'a' * 300}.bmp",
+                        "data_base64": _one_bit_bmp_base64(),
+                    }
+                ],
+            },
+        )
+        assert long_name.status_code == 400
+        assert "up to 120 characters" in long_name.json()["detail"]
+
+
+def test_quick_card_request_body_is_bounded_for_chunked_uploads(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setitem(
+        create_app.__globals__, "MAX_QUICK_CARD_REQUEST_BYTES", 64
+    )
+
+    def chunks():
+        yield b'{"version":"oversized-1","padding":"'
+        yield b"x" * 80
+        yield b'"}'
+
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        response = client.post(
+            "/api/v1/content-packs/quick-cards",
+            content=chunks(),
+            headers={"Content-Type": "application/json"},
+        )
+    assert response.status_code == 413
+    assert response.json()["detail"] == "Quick Cards request is too large"
+
+
+def test_content_rollouts_fail_closed_for_unsupported_device_families(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        for device_id, model in (
+            ("X3-CONTENT01", "X3"),
+            ("X4-CONTENT02", "X4"),
+            ("ROOK-CONTENT03", "ROOK"),
+            ("N4-CONTENT04", "ZECTRIX_NOTE4"),
+        ):
+            assert client.get(
+                "/api/v1/screen",
+                headers={
+                    "X-FlexDisplay-ID": device_id,
+                    "X-FlexDisplay-Model": model,
+                },
+            ).status_code == 200
+
+        built = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "eligible-1",
+                "cards": [{"id": "message", "type": "message", "title": "Hello"}],
+            },
+        )
+        assert built.status_code == 200
+
+        unsupported = client.post(
+            "/api/v1/content-packs/eligible-1/rollout",
+            json={
+                "scope": "devices",
+                "device_ids": ["X3-CONTENT01", "ROOK-CONTENT03"],
+            },
+        )
+        assert unsupported.status_code == 409
+        assert "ROOK-CONTENT03" in unsupported.json()["detail"]
+        assert client.get("/api/v1/content-packs").json()["assignments"] == {}
+        assert client.get("/api/v1/devices/X3-CONTENT01").json()[
+            "pending_commands"
+        ] == []
+
+        unknown = client.post(
+            "/api/v1/content-packs/eligible-1/rollout",
+            json={
+                "scope": "devices",
+                "device_ids": ["X3-CONTENT01", "X3-MISSING"],
+            },
+        )
+        assert unknown.status_code == 404
+        assert "X3-MISSING" in unknown.json()["detail"]
+        assert client.get("/api/v1/content-packs").json()["assignments"] == {}
+
+        invalid_schedule = client.post(
+            "/api/v1/content-packs/eligible-1/rollout",
+            json={
+                "scope": "devices",
+                "device_ids": ["X4-CONTENT02"],
+                "scheduled_for": "not-a-date",
+            },
+        )
+        assert invalid_schedule.status_code == 400
+        assert client.get("/api/v1/content-packs").json()["assignments"] == {}
+
+        immediate = client.post(
+            "/api/v1/content-packs/eligible-1/rollout",
+            json={
+                "scope": "devices",
+                "device_ids": ["X4-CONTENT02"],
+                "scheduled_for": "   ",
+            },
+        )
+        assert immediate.status_code == 200
+        assert client.get("/api/v1/content-packs").json()["assignments"][
+            "X4-CONTENT02"
+        ]["status"] == "pending"
+        assert client.get("/api/v1/devices/X4-CONTENT02").json()[
+            "pending_commands"
+        ] == ["refresh"]
+
+        all_devices = client.post(
+            "/api/v1/content-packs/eligible-1/rollout",
+            json={"scope": "all"},
+        )
+        assert all_devices.status_code == 200
+        assert all_devices.json()["device_ids"] == ["X3-CONTENT01", "X4-CONTENT02"]
 
 
 def test_v021_screen_advertises_cached_branded_fetch_asset(tmp_path: Path) -> None:
@@ -1881,6 +2340,47 @@ def test_device_image_conversion_diagnostic_is_bounded_and_clears_active_fault(
         assert device["image_conversion_error"] is False
         assert device["last_image_error"] == detail[:160]
         assert "image_conversion" not in device["health_issues"]
+
+
+def test_device_sd_write_and_fetch_diagnostics_are_actionable_and_recover(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        failed = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-RUNTIME",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-SD-Writable": "false",
+                "X-FlexDisplay-SD-Diagnostic": "write-failed",
+                "X-FlexDisplay-Last-Fetch-Error": "fetch:download_failed",
+                "X-FlexDisplay-Image-Cached": "true",
+            },
+        )
+        assert failed.status_code == 200
+        device = client.get("/api/v1/devices/X4-RUNTIME").json()
+        assert device["sd_writable"] is False
+        assert device["sd_diagnostic"] == "write-failed"
+        assert device["dashboard_fetch_error"] is True
+        assert "sd_write" in device["health_issues"]
+        assert "dashboard_fetch" in device["health_issues"]
+
+        recovered = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-RUNTIME",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-SD-Writable": "true",
+                "X-FlexDisplay-SD-Diagnostic": "ok",
+                "X-FlexDisplay-Image-Cached": "true",
+            },
+        )
+        assert recovered.status_code == 200
+        device = client.get("/api/v1/devices/X4-RUNTIME").json()
+        assert device["sd_writable"] is True
+        assert device["dashboard_fetch_error"] is False
+        assert "sd_write" not in device["health_issues"]
+        assert "dashboard_fetch" not in device["health_issues"]
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:

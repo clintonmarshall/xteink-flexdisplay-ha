@@ -20,6 +20,14 @@ accepted; devices without trusted family or capability evidence are presented
 read-only and excluded from firmware, provisioning, policy, and command actions.
 Packaged device firmware versions are unchanged.
 
+Platform 0.46.0 content packs are immutable and use the exact opaque-token
+manifest and file URLs advertised by the Bridge. Current packaged X3/X4
+firmware follows those URLs without a firmware update. A legacy client that
+discards URL query parameters cannot fetch managed packs and reports a content
+error; normal dashboard delivery remains available. Pack downloads use local
+HTTP, so sensitive Quick Cards belong only on a trusted display LAN unless a
+TLS proxy or private tunnel protects that traffic.
+
 Home Assistant OpenDisplay uploads use BLE. Assign OpenDisplay as the device's
 persistent mode for on-demand uploads; temporary Quick Menu sessions retain a
 bounded receive window. When USB and Wi-Fi are active, select `ble_only` because

@@ -40,7 +40,14 @@ from .content_channels import (
     ContentPage,
     parse_channel,
 )
-from .content_pack import MAX_PACK_BYTES, ContentPackError, ContentPackStore
+from .content_pack import (
+    MAX_PACK_BYTES,
+    MAX_QUICK_CARD_REQUEST_BYTES,
+    ContentPackAccessError,
+    ContentPackConflictError,
+    ContentPackError,
+    ContentPackStore,
+)
 from .content_renderer import render_content_page
 from .dashboard_assets import (
     MAX_BADGE_PHOTO_BYTES,
@@ -1278,10 +1285,18 @@ def _decorate_device(
         health_issues.append("offline")
     if result.get("sd_ready") is False and not _is_android_display(result):
         health_issues.append("sd_card")
+    if (
+        result.get("sd_writable") is False
+        and result.get("sd_ready") is True
+        and not _is_android_display(result)
+    ):
+        health_issues.append("sd_write")
     if result.get("ha_error"):
         health_issues.append("home_assistant")
     if result.get("image_conversion_error"):
         health_issues.append("image_conversion")
+    if result.get("dashboard_fetch_error"):
+        health_issues.append("dashboard_fetch")
     if result.get("firmware_update_status") in {"failed", "cancelled"}:
         health_issues.append("firmware_update")
     if result["low_battery"]:
@@ -1481,6 +1496,28 @@ def _optional_integer(value: str | None, minimum: int, maximum: int) -> int | No
         return max(minimum, min(maximum, int(value)))
     except ValueError:
         return None
+
+
+async def _bounded_request_body(
+    request: Request, maximum: int, too_large_detail: str
+) -> bytes:
+    """Read an HTTP body without allowing chunked requests to bypass the cap."""
+    supplied_length = request.headers.get("content-length")
+    if supplied_length not in (None, ""):
+        try:
+            content_length = int(supplied_length)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length") from err
+        if content_length < 0:
+            raise HTTPException(status_code=400, detail="Invalid Content-Length")
+        if content_length > maximum:
+            raise HTTPException(status_code=413, detail=too_large_detail)
+    content = bytearray()
+    async for chunk in request.stream():
+        if len(content) + len(chunk) > maximum:
+            raise HTTPException(status_code=413, detail=too_large_detail)
+        content.extend(chunk)
+    return bytes(content)
 
 
 def _boolean(value: str | None) -> bool | None:
@@ -2757,10 +2794,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             return
         version = str(assignment["desired_version"])
         base_url = str(request.base_url).rstrip("/")
-        _, digest = content_packs.manifest(version, base_url)
+        access_token = content_packs.download_token(version)
+        _, digest = content_packs.manifest(version, base_url, access_token)
         response.headers["X-FlexDisplay-Content-Version"] = version
         response.headers["X-FlexDisplay-Content-Manifest-URL"] = (
             f"{base_url}/api/v1/content-packs/{version}/manifest.json"
+            f"?access_token={access_token}"
         )
         response.headers["X-FlexDisplay-Content-Manifest-SHA256"] = digest
 
@@ -5576,14 +5615,36 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.post("/api/v1/content-packs")
     async def upload_content_pack(request: Request) -> dict[str, Any]:
         authorize(request)
-        content_length = _optional_integer(
-            request.headers.get("content-length"), 0, MAX_PACK_BYTES + 1
+        archive = await _bounded_request_body(
+            request, MAX_PACK_BYTES, "Content pack is too large"
         )
-        if content_length is not None and content_length > MAX_PACK_BYTES:
-            raise HTTPException(status_code=413, detail="Content pack is too large")
-        archive = await request.body()
         try:
             pack = content_packs.install(archive)
+        except ContentPackConflictError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        except ContentPackError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"pack": pack}
+
+    @app.post("/api/v1/content-packs/quick-cards")
+    async def build_quick_card_pack(request: Request) -> dict[str, Any]:
+        """Create a device-ready Quick Cards pack directly from Studio."""
+        authorize(request)
+        body = await _bounded_request_body(
+            request,
+            MAX_QUICK_CARD_REQUEST_BYTES,
+            "Quick Cards request is too large",
+        )
+        try:
+            payload = json.loads(body)
+        except (ValueError, UnicodeDecodeError, RecursionError) as err:
+            raise HTTPException(status_code=400, detail="Quick Cards JSON is invalid") from err
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Quick Cards JSON must be an object")
+        try:
+            pack = content_packs.build_quick_cards(payload)
+        except ContentPackConflictError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
         except ContentPackError as err:
             raise HTTPException(status_code=400, detail=str(err)) from err
         return {"pack": pack}
@@ -5593,24 +5654,64 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         version: str, payload: dict[str, Any], request: Request
     ) -> dict[str, Any]:
         authorize(request)
-        selected = payload.get("device_ids")
-        if not isinstance(selected, list) or not selected:
+        scope = str(payload.get("scope") or "devices").lower()
+        selected = payload.get("device_ids") or []
+        if not isinstance(selected, list):
+            raise HTTPException(status_code=400, detail="Device IDs must be a list")
+        if scope not in {"all", "x3", "x4", "devices"}:
+            raise HTTPException(status_code=400, detail="Unsupported content scope")
+        if scope == "devices" and not selected:
             raise HTTPException(status_code=400, detail="Select at least one device")
-        device_ids = [_device_id(str(value)) for value in selected]
+        requested_ids = {_device_id(str(value)) for value in selected}
+        scoped = fleet_scope_records(scope, requested_ids)
         known = {str(item.get("device_id") or "") for item in store.all()}
-        missing = [device_id for device_id in device_ids if device_id not in known]
-        if missing:
-            raise HTTPException(
-                status_code=404, detail=f"Unknown devices: {', '.join(missing)}"
+        if scope == "devices":
+            missing = sorted(requested_ids - known)
+            if missing:
+                raise HTTPException(
+                    status_code=404, detail=f"Unknown devices: {', '.join(missing)}"
+                )
+            unsupported = sorted(
+                str(record.get("device_id") or "")
+                for record in scoped
+                if not _device_capabilities(record).supports_xteink_ota
             )
+            if unsupported:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Content packs require an X3/X4 content-capable device: "
+                        f"{', '.join(unsupported)}"
+                    ),
+                )
+        eligible = [
+            record
+            for record in scoped
+            if _device_capabilities(record).supports_xteink_ota
+        ]
+        device_ids = [str(record.get("device_id") or "") for record in eligible]
+        if not device_ids:
+            raise HTTPException(
+                status_code=404,
+                detail="No X3/X4 content-capable devices matched the content scope",
+            )
+        scheduled_for = str(payload.get("scheduled_for") or "").strip()
         try:
-            assignments = content_packs.assign(version, device_ids)
+            assignments = content_packs.assign(
+                version,
+                device_ids,
+                scope=scope,
+                scheduled_for=scheduled_for,
+            )
         except ContentPackError as err:
-            raise HTTPException(status_code=404, detail=str(err)) from err
-        for device_id in device_ids:
-            store.queue_command(device_id, "refresh")
+            status_code = 404 if str(err) == "Unknown content pack" else 400
+            raise HTTPException(status_code=status_code, detail=str(err)) from err
+        if not scheduled_for:
+            for device_id in device_ids:
+                store.queue_command(device_id, "refresh")
         return {
             "version": version,
+            "scope": scope,
             "device_ids": device_ids,
             "assignments": assignments,
         }
@@ -5620,11 +5721,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         name="device_content_pack_manifest",
     )
     def content_pack_manifest(version: str, request: Request) -> Response:
+        access_token = request.query_params.get("access_token", "")
         try:
             content, digest = content_packs.manifest(
-                version, str(request.base_url).rstrip("/")
+                version, str(request.base_url).rstrip("/"), access_token
             )
-        except ContentPackError as err:
+        except (ContentPackAccessError, ContentPackError) as err:
             raise HTTPException(status_code=404, detail=str(err)) from err
         return Response(
             content=content,
@@ -5633,10 +5735,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
 
     @app.get("/api/v1/content-packs/{version}/files/{source:path}")
-    def content_pack_file(version: str, source: str) -> FileResponse:
+    def content_pack_file(version: str, source: str, request: Request) -> FileResponse:
+        access_token = request.query_params.get("access_token", "")
         try:
-            path = content_packs.file_path(version, source)
-        except ContentPackError as err:
+            path = content_packs.file_path(version, source, access_token)
+        except (ContentPackAccessError, ContentPackError) as err:
             raise HTTPException(status_code=404, detail=str(err)) from err
         return FileResponse(path)
 
@@ -5662,6 +5765,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_free_heap: str | None = Header(default=None),
         x_flexdisplay_min_free_heap: str | None = Header(default=None),
         x_flexdisplay_sd_ready: str | None = Header(default=None),
+        x_flexdisplay_sd_writable: str | None = Header(default=None),
+        x_flexdisplay_sd_diagnostic: str | None = Header(default=None),
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_reset_reason: str | None = Header(default=None),
         x_flexdisplay_boot_id: str | None = Header(default=None),
@@ -5669,6 +5774,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_image_sha256: str | None = Header(default=None),
         x_flexdisplay_image_cached: str | None = Header(default=None),
         x_flexdisplay_last_image_error: str | None = Header(default=None),
+        x_flexdisplay_last_fetch_error: str | None = Header(default=None),
         x_flexdisplay_capabilities: str | None = Header(default=None),
         x_flexdisplay_content_version: str | None = Header(default=None),
         x_flexdisplay_content_status: str | None = Header(default=None),
@@ -5712,6 +5818,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if x_flexdisplay_last_image_error is not None
             else None
         )
+        last_fetch_error = (
+            _header_value(x_flexdisplay_last_fetch_error).strip()
+            if x_flexdisplay_last_fetch_error is not None
+            else None
+        )
         one_bit_bytes = ((width + 7) // 8) * height
         model_source_reported = bool(x_flexdisplay_model)
         model_source_inferred = bool(
@@ -5751,6 +5862,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 x_flexdisplay_min_free_heap, 0, 1_000_000
             ),
             "sd_ready": _boolean(x_flexdisplay_sd_ready),
+            "sd_writable": _boolean(x_flexdisplay_sd_writable),
+            "sd_diagnostic": _header_value(x_flexdisplay_sd_diagnostic) or None,
             "wake_reason": x_flexdisplay_wake_reason or None,
             "reset_reason": x_flexdisplay_reset_reason or None,
             "boot_id": x_flexdisplay_boot_id or None,
@@ -5800,6 +5913,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # proves a subsequent delivery converted successfully, so clear
             # only the active fault while retaining its history and timestamp.
             telemetry["image_conversion_error"] = False
+        if last_fetch_error is not None:
+            telemetry["dashboard_fetch_error"] = bool(last_fetch_error)
+            if last_fetch_error:
+                telemetry["last_fetch_error"] = last_fetch_error
+                telemetry["last_fetch_error_at"] = datetime.now(UTC).isoformat(
+                    timespec="seconds"
+                )
+        elif image_cached:
+            telemetry["dashboard_fetch_error"] = False
         record = store.touch(device_id, telemetry)
         content_assignment = content_packs.observe(
             device_id,
