@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+    <uses-permission android:name="android.permission.CAMERA" />
+
+    <application
+        android:label="FlexDisplay Companion"
+        tools:replace="android:label">
+        <activity
+            android:name=".MainActivity"
+            android:excludeFromRecents="false" />
+    </application>
+</manifest>

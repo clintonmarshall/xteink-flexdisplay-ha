@@ -3,6 +3,7 @@ package au.com.ldcs.flexdisplay.rook;
 import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.KeyguardManager;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
@@ -36,6 +37,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final int VOICE_PERMISSION_REQUEST = 4103;
+    private static final int CAMERA_PERMISSION_REQUEST = 4104;
     private static final int VOICE_SAMPLE_RATE = 16_000;
     private static final int VOICE_MAX_BYTES = VOICE_SAMPLE_RATE * 2 * 8;
     private static final int VOICE_MIN_BYTES = VOICE_SAMPLE_RATE;
@@ -46,6 +48,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService voiceNetwork = Executors.newSingleThreadExecutor();
     private final Runnable scheduledRefresh = () -> refresh(false);
     private final ReceiverProfile profile = ReceiverProfile.detect();
+    private CameraSnapshotter cameraSnapshotter;
     private ReceiverConfig config;
     private FlexDisplayClient client;
     private FrameLayout root;
@@ -58,9 +61,15 @@ public final class MainActivity extends Activity {
     private String pendingCommandId = "";
     private String pendingQuickAction = "";
     private boolean fetching;
+    private boolean commandInProgress;
     private boolean refreshPending;
     private boolean destroyed;
-    private boolean notificationLoopStarted;
+    private volatile boolean foregroundActive = !BuildConfig.COMPANION;
+    private volatile boolean notificationLoopStarted;
+    private volatile int notificationGeneration;
+    private boolean cameraPermissionPrompted;
+    private volatile boolean microphoneEnabled = true;
+    private int lastAudibleMusicVolumePercent = 45;
     private long notificationSequence;
     private List<FlexDisplayClient.Interaction> interactions = Collections.emptyList();
     private FrameLayout notificationOverlay;
@@ -71,39 +80,71 @@ public final class MainActivity extends Activity {
     private long touchStartedAt;
     private volatile boolean voiceRecording;
     private volatile boolean voiceBusy;
+    private volatile boolean discardVoiceCapture;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
-        getWindow().addFlags(
-                WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON
-                        | WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
-                        | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED);
+        cameraSnapshotter = new CameraSnapshotter(getApplicationContext());
+        int windowFlags = WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
+        if (!BuildConfig.COMPANION) {
+            windowFlags |= WindowManager.LayoutParams.FLAG_TURN_SCREEN_ON
+                    | WindowManager.LayoutParams.FLAG_SHOW_WHEN_LOCKED;
+        }
+        getWindow().addFlags(windowFlags);
         client = new FlexDisplayClient(this);
+        client.setForegroundAllowed(foregroundActive);
         config = ReceiverConfig.load(this);
-        applyIntentConfiguration();
+        microphoneEnabled = config.microphoneEnabled;
         buildUi();
-        enterKioskMode();
-        if (config.isReady()) refresh(false); else showSettings();
+        enterReceiverMode();
+        if (!config.isReady()) {
+            showSettings();
+        } else if (!BuildConfig.COMPANION) {
+            refresh(false);
+        }
     }
 
     @Override
     protected void onNewIntent(android.content.Intent intent) {
         super.onNewIntent(intent);
         setIntent(intent);
-        applyIntentConfiguration();
         refresh(true);
     }
 
     @Override
     protected void onResume() {
         super.onResume();
-        enterKioskMode();
+        foregroundActive = true;
+        client.setForegroundAllowed(true);
+        enterReceiverMode();
+        if (BuildConfig.COMPANION && config.isReady()) {
+            requestCompanionCameraPermission();
+            refresh(true);
+        }
+    }
+
+    @Override
+    protected void onPause() {
+        if (BuildConfig.COMPANION) {
+            foregroundActive = false;
+            discardVoiceCapture = true;
+            voiceRecording = false;
+            cameraSnapshotter.cancel();
+            handler.removeCallbacks(scheduledRefresh);
+            refreshPending = true;
+            notificationGeneration++;
+            notificationLoopStarted = false;
+            client.setForegroundAllowed(false);
+        }
+        super.onPause();
     }
 
     @Override
     protected void onDestroy() {
         destroyed = true;
+        cameraSnapshotter.cancel();
+        client.cancelForegroundRequests();
         handler.removeCallbacksAndMessages(null);
         network.shutdownNow();
         notificationNetwork.shutdownNow();
@@ -234,6 +275,14 @@ public final class MainActivity extends Activity {
 
     private void refresh(boolean immediate) {
         if (!config.isReady()) return;
+        if (BuildConfig.COMPANION && !foregroundActive) {
+            if (immediate) refreshPending = true;
+            return;
+        }
+        if (commandInProgress) {
+            if (immediate) refreshPending = true;
+            return;
+        }
         if (fetching) {
             if (immediate) refreshPending = true;
             return;
@@ -265,6 +314,10 @@ public final class MainActivity extends Activity {
 
     private void applyResult(FlexDisplayClient.Result result) {
         fetching = false;
+        if (BuildConfig.COMPANION && !foregroundActive) {
+            refreshPending = true;
+            return;
+        }
         if (result.bitmap != null) {
             currentBitmap = result.bitmap;
             imageView.setImageBitmap(result.bitmap);
@@ -272,7 +325,7 @@ public final class MainActivity extends Activity {
         String digest = result.header("X-FlexDisplay-Image-SHA256");
         if (!digest.isEmpty()) imageSha256 = digest;
         interactions = result.interactions;
-        applyDesiredAudio(result);
+        applyDesiredState(result);
         showStatus("", false);
         startNotificationLoop();
 
@@ -296,16 +349,24 @@ public final class MainActivity extends Activity {
     }
 
     private void startNotificationLoop() {
-        if (notificationLoopStarted || !config.isReady()) return;
+        if (notificationLoopStarted || !config.isReady()
+                || (BuildConfig.COMPANION && !foregroundActive)) return;
         notificationLoopStarted = true;
+        int generation = ++notificationGeneration;
         notificationNetwork.execute(() -> {
-            while (!destroyed && !Thread.currentThread().isInterrupted()) {
-                try {
+            try {
+                while (!destroyed
+                        && generation == notificationGeneration
+                        && (!BuildConfig.COMPANION || foregroundActive)
+                        && !Thread.currentThread().isInterrupted()) {
+                    try {
                     ReceiverConfig selectedConfig = config;
                     long previousSequence = notificationSequence;
                     FlexDisplayClient.NotificationEvent event =
                             client.waitForNotification(selectedConfig, notificationSequence);
                     notificationSequence = Math.max(notificationSequence, event.sequence);
+                    if (generation != notificationGeneration
+                            || (BuildConfig.COMPANION && !foregroundActive)) break;
                     if (event.notification != null
                             && (event.event.isEmpty() || "notification".equals(event.event))) {
                         Bitmap image = event.notification.hasImage
@@ -315,10 +376,18 @@ public final class MainActivity extends Activity {
                     } else if (event.sequence > previousSequence && !event.refresh) {
                         handler.post(() -> dismissNotification(false));
                     }
-                    if (event.refresh) handler.post(() -> refresh(true));
-                } catch (Exception error) {
-                    if (!destroyed) SystemClock.sleep(2_000L);
+                        if (event.refresh) handler.post(() -> refresh(true));
+                    } catch (Exception error) {
+                        if (destroyed
+                                || generation != notificationGeneration
+                                || (BuildConfig.COMPANION && !foregroundActive)) break;
+                        SystemClock.sleep(2_000L);
+                    }
                 }
+            } finally {
+                handler.post(() -> {
+                    if (generation == notificationGeneration) notificationLoopStarted = false;
+                });
             }
         });
     }
@@ -391,7 +460,7 @@ public final class MainActivity extends Activity {
         playChime(notification.chime);
         notificationDismissal = () -> dismissNotification(true);
         handler.postDelayed(notificationDismissal, notification.duration * 1000L);
-        enterKioskMode();
+        enterReceiverMode();
     }
 
     private void performNotificationAction(
@@ -450,7 +519,8 @@ public final class MainActivity extends Activity {
 
     private void playChime(String chime) {
         if ("none".equals(chime)) return;
-        ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_NOTIFICATION, 90);
+        if (currentMusicVolumePercent() == 0) return;
+        ToneGenerator tone = new ToneGenerator(AudioManager.STREAM_MUSIC, 90);
         int selected = "alert".equals(chime)
                 ? ToneGenerator.TONE_PROP_ACK
                 : ToneGenerator.TONE_PROP_BEEP2;
@@ -461,7 +531,7 @@ public final class MainActivity extends Activity {
         handler.postDelayed(tone::release, 1_200L);
     }
 
-    private void applyDesiredAudio(FlexDisplayClient.Result result) {
+    private void applyDesiredState(FlexDisplayClient.Result result) {
         String volume = result.header("X-FlexDisplay-Desired-Volume");
         if (!volume.isEmpty()) {
             setMusicVolume(parseInt(volume, 45));
@@ -470,11 +540,26 @@ public final class MainActivity extends Activity {
         if ("true".equals(muted)) {
             setMusicVolume(0);
         } else if ("false".equals(muted) && currentMusicVolumePercent() == 0) {
-            setMusicVolume(volume.isEmpty() ? 45 : parseInt(volume, 45));
+            setMusicVolume(volume.isEmpty() ? lastAudibleMusicVolumePercent : parseInt(volume, 45));
         }
         String brightness = result.header("X-FlexDisplay-Desired-Brightness");
         if (!brightness.isEmpty()) {
             setWindowBrightness(parseInt(brightness, currentWindowBrightnessPercent()));
+        }
+        String microphone = result.header("X-FlexDisplay-Desired-Microphone-Enabled")
+                .toLowerCase(Locale.ROOT);
+        if ("true".equals(microphone) || "false".equals(microphone)) {
+            microphoneEnabled = "true".equals(microphone);
+            config = config.withMicrophoneEnabled(microphoneEnabled);
+            config.save(this);
+            if (!microphoneEnabled) {
+                discardVoiceCapture = true;
+                voiceRecording = false;
+                setAssistActive(false, "Microphone disabled by Home Assistant");
+            } else if (!voiceBusy) {
+                assistButton.setEnabled(true);
+                assistButton.setText("Assist");
+            }
         }
     }
 
@@ -483,14 +568,18 @@ public final class MainActivity extends Activity {
         if (manager == null) return;
         int max = Math.max(1, manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
         int selected = Math.max(0, Math.min(100, percent));
-        manager.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, selected * max / 100)), 0);
+        if (selected > 0) lastAudibleMusicVolumePercent = selected;
+        int streamVolume = Math.round(selected * max / 100f);
+        manager.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, streamVolume)), 0);
     }
 
     private int currentMusicVolumePercent() {
         AudioManager manager = (AudioManager) getSystemService(AUDIO_SERVICE);
         if (manager == null) return 0;
         int max = Math.max(1, manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
-        return Math.max(0, Math.min(100, manager.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max));
+        return Math.max(0, Math.min(
+                100,
+                Math.round(manager.getStreamVolume(AudioManager.STREAM_MUSIC) * 100f / max)));
     }
 
     private void adjustMusicVolume(int delta) {
@@ -527,6 +616,11 @@ public final class MainActivity extends Activity {
             return;
         }
         if (voiceRecording || voiceBusy) return;
+        if (BuildConfig.COMPANION && !foregroundActive) return;
+        if (!microphoneEnabled) {
+            showTransientStatus("Microphone disabled by Home Assistant");
+            return;
+        }
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, VOICE_PERMISSION_REQUEST);
             showTransientStatus("Allow microphone, then hold Assist again");
@@ -554,6 +648,7 @@ public final class MainActivity extends Activity {
                 return;
             }
             voiceBusy = true;
+            discardVoiceCapture = false;
             voiceRecording = true;
             setAssistActive(true, "Listening… release to send");
             voiceNetwork.execute(() -> recordAndSendVoice(recorder, bufferSize));
@@ -595,6 +690,13 @@ public final class MainActivity extends Activity {
             recorder.release();
         }
         byte[] audio = output.toByteArray();
+        if (discardVoiceCapture
+                || !microphoneEnabled
+                || (BuildConfig.COMPANION && !foregroundActive)) {
+            voiceBusy = false;
+            handler.post(() -> setAssistActive(false, "Assist recording cancelled"));
+            return;
+        }
         if (audio.length < VOICE_MIN_BYTES) {
             voiceBusy = false;
             handler.post(() -> setAssistActive(false, "Hold Assist a little longer"));
@@ -614,15 +716,8 @@ public final class MainActivity extends Activity {
 
     private void playAssistAudio(FlexDisplayClient.VoiceAssistantResponse response) {
         if (response.audio.length == 0) return;
+        if (currentMusicVolumePercent() == 0) return;
         int sampleRate = response.sampleRate <= 0 ? VOICE_SAMPLE_RATE : response.sampleRate;
-        AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
-        if (audioManager != null && audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
-            int maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
-            audioManager.setStreamVolume(
-                    AudioManager.STREAM_MUSIC,
-                    Math.max(1, maxVolume / 2),
-                    0);
-        }
         int minBuffer = AudioTrack.getMinBufferSize(
                 sampleRate,
                 AudioFormat.CHANNEL_OUT_MONO,
@@ -647,7 +742,7 @@ public final class MainActivity extends Activity {
     }
 
     private void setAssistActive(boolean active, String message) {
-        assistButton.setEnabled(!active && !voiceBusy);
+        assistButton.setEnabled(microphoneEnabled && !active && !voiceBusy);
         assistButton.setText(active ? "Listening" : (voiceBusy ? "Assist…" : "Assist"));
         showStatus(message, true);
         if (!active) {
@@ -660,6 +755,7 @@ public final class MainActivity extends Activity {
     private void executeCommands(String commands, String commandId) {
         boolean success = true;
         String detail = "ok";
+        boolean cameraSnapshot = false;
         for (String command : commands.split(",")) {
             String selected = command.trim().toLowerCase(Locale.ROOT);
             switch (selected) {
@@ -690,13 +786,21 @@ public final class MainActivity extends Activity {
                     setMusicVolume(0);
                     break;
                 case "unmute":
-                    setMusicVolume(45);
+                    setMusicVolume(lastAudibleMusicVolumePercent);
                     break;
                 case "brightness-up":
                     adjustBrightness(15);
                     break;
                 case "brightness-down":
                     adjustBrightness(-15);
+                    break;
+                case "camera-snapshot":
+                    if (BuildConfig.COMPANION) {
+                        cameraSnapshot = true;
+                    } else {
+                        success = false;
+                        detail = "camera-companion-only";
+                    }
                     break;
                 case "refresh":
                 case "full-refresh":
@@ -713,13 +817,98 @@ public final class MainActivity extends Activity {
                     detail = "unsupported-" + selected;
             }
         }
-        pendingCommandResult = commands + ":" + (success ? "ok" : detail);
-        pendingCommandId = commandId;
+        if (cameraSnapshot && success) {
+            captureAndUploadSnapshot(commands, commandId);
+        } else {
+            completeCommand(commands, commandId, success, detail);
+        }
+    }
+
+    private void captureAndUploadSnapshot(String commands, String commandId) {
+        if (!foregroundActive) {
+            completeCommand(commands, commandId, false, "camera-backgrounded");
+            return;
+        }
+        KeyguardManager keyguard = (KeyguardManager) getSystemService(KEYGUARD_SERVICE);
+        if (keyguard != null && keyguard.isDeviceLocked()) {
+            completeCommand(commands, commandId, false, "camera-device-locked");
+            return;
+        }
+        if (commandId == null || commandId.trim().isEmpty()) {
+            completeCommand(commands, commandId, false, "camera-command-id-missing");
+            return;
+        }
+        if (!getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) {
+            completeCommand(commands, commandId, false, "camera-unavailable");
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.CAMERA) != PackageManager.PERMISSION_GRANTED) {
+            showTransientStatus("Camera snapshot denied: enable Camera permission in Android settings");
+            completeCommand(commands, commandId, false, "camera-permission-denied");
+            return;
+        }
+        commandInProgress = true;
+        showStatus("Taking camera snapshot…", true);
+        int rotation = getWindowManager().getDefaultDisplay().getRotation();
+        cameraSnapshotter.capture(rotation, new CameraSnapshotter.Callback() {
+            @Override
+            public void onCaptured(byte[] jpeg, String facing) {
+                handler.post(() -> showStatus("Uploading camera snapshot…", true));
+                network.execute(() -> {
+                    try {
+                        client.uploadCameraSnapshot(config, jpeg, facing, commandId);
+                        handler.post(MainActivity.this::completeCameraUpload);
+                    } catch (Exception error) {
+                        handler.post(() -> completeCommand(
+                                commands,
+                                commandId,
+                                false,
+                                safeCommandDetail("camera-upload-failed", error)));
+                    }
+                });
+            }
+
+            @Override
+            public void onError(String detail) {
+                handler.post(() -> completeCommand(commands, commandId, false, detail));
+            }
+        });
+    }
+
+    private void completeCameraUpload() {
+        commandInProgress = false;
+        pendingCommandResult = "";
+        pendingCommandId = "";
+        if (foregroundActive) showTransientStatus("Camera snapshot uploaded");
         handler.postDelayed(() -> refresh(true), 250L);
+    }
+
+    private void completeCommand(String commands, String commandId, boolean success, String detail) {
+        commandInProgress = false;
+        pendingCommandResult = commands + ":" + (success ? "ok" : detail);
+        pendingCommandId = commandId == null ? "" : commandId;
+        if (foregroundActive) {
+            showTransientStatus(success && commands.contains("camera-snapshot")
+                    ? "Camera snapshot uploaded"
+                    : success ? "" : "Command failed: " + detail);
+        }
+        handler.postDelayed(() -> refresh(true), 250L);
+    }
+
+    private static String safeCommandDetail(String prefix, Exception error) {
+        String message = error.getMessage();
+        if (message == null || message.trim().isEmpty()) return prefix;
+        String safe = message.toLowerCase(Locale.ROOT).replaceAll("[^a-z0-9_-]+", "-");
+        if (safe.length() > 48) safe = safe.substring(0, 48);
+        return prefix + "-" + safe;
     }
 
     private void applyError(Exception error) {
         fetching = false;
+        if (BuildConfig.COMPANION && !foregroundActive) {
+            refreshPending = true;
+            return;
+        }
         refreshPending = false;
         showStatus("FlexDisplay offline\n" + error.getMessage() + "\n\nTap to retry · hold for settings", true);
         handler.postDelayed(scheduledRefresh, 15_000L);
@@ -742,32 +931,29 @@ public final class MainActivity extends Activity {
         form.addView(deviceId);
         new AlertDialog.Builder(this)
                 .setTitle("FlexDisplay " + profile.label)
-                .setMessage("Enter the LAN address of FlexDisplay Bridge. Hold outside an interactive tile to return here.")
+                .setMessage(
+                        "Enter the trusted LAN or VPN address of FlexDisplay Bridge. Changing the Bridge address or device ID creates a new receiver token; delete the old Bridge record before pairing that ID again. Hold outside an interactive tile to return here.")
                 .setView(form)
                 .setCancelable(config.isReady())
                 .setNegativeButton(config.isReady() ? "Cancel" : null, null)
                 .setPositiveButton("Connect", (dialog, which) -> {
-                    config = new ReceiverConfig(
+                    ReceiverConfig entered = new ReceiverConfig(
                             url.getText().toString(),
                             deviceId.getText().toString(),
-                            config.receiverToken);
+                            config.receiverToken,
+                            config.microphoneEnabled);
+                    boolean identityChanged = !entered.bridgeUrl.equals(config.bridgeUrl)
+                            || !entered.deviceId.equals(config.deviceId);
+                    config = identityChanged
+                            ? new ReceiverConfig(entered.bridgeUrl, entered.deviceId)
+                            : entered;
+                    microphoneEnabled = config.microphoneEnabled;
                     config.save(this);
                     imageSha256 = "";
+                    requestCompanionCameraPermission();
                     refresh(true);
                 })
                 .show();
-    }
-
-    private void applyIntentConfiguration() {
-        String url = getIntent().getStringExtra("bridge_url");
-        String id = getIntent().getStringExtra("device_id");
-        if (url != null || id != null) {
-            config = new ReceiverConfig(
-                    url == null ? config.bridgeUrl : url,
-                    id == null ? config.deviceId : id,
-                    config.receiverToken);
-            config.save(this);
-        }
     }
 
     private void showTransientStatus(String text) {
@@ -782,7 +968,11 @@ public final class MainActivity extends Activity {
         statusView.setVisibility(visible ? View.VISIBLE : View.GONE);
     }
 
-    private void enterKioskMode() {
+    private void enterReceiverMode() {
+        if (BuildConfig.COMPANION) {
+            getWindow().getDecorView().setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+            return;
+        }
         getWindow().getDecorView().setSystemUiVisibility(
                 View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY
                         | View.SYSTEM_UI_FLAG_FULLSCREEN
@@ -795,9 +985,35 @@ public final class MainActivity extends Activity {
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         super.onRequestPermissionsResult(requestCode, permissions, grantResults);
-        if (requestCode != VOICE_PERMISSION_REQUEST) return;
         boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
-        showTransientStatus(granted ? "Microphone ready" : "Microphone permission denied");
+        if (requestCode == VOICE_PERMISSION_REQUEST) {
+            showTransientStatus(granted ? "Microphone ready" : "Microphone permission denied");
+            refresh(true);
+        } else if (requestCode == CAMERA_PERMISSION_REQUEST) {
+            showTransientStatus(granted
+                    ? "Camera snapshots enabled"
+                    : "Camera snapshots remain disabled");
+            refresh(true);
+        }
+    }
+
+    private void requestCompanionCameraPermission() {
+        if (!BuildConfig.COMPANION
+                || cameraPermissionPrompted
+                || !foregroundActive
+                || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED
+                || !getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) return;
+        cameraPermissionPrompted = true;
+        new AlertDialog.Builder(this)
+                .setTitle("Enable camera snapshots?")
+                .setMessage(
+                        "FlexDisplay only opens the camera while this app is visible and after you request a snapshot from Home Assistant. Images are re-encoded without camera metadata and sent to your configured Bridge.")
+                .setNegativeButton("Not now", (dialog, which) ->
+                        showTransientStatus("Camera snapshots remain disabled"))
+                .setPositiveButton("Continue", (dialog, which) -> requestPermissions(
+                        new String[] { Manifest.permission.CAMERA },
+                        CAMERA_PERMISSION_REQUEST))
+                .show();
     }
 
     private static long parseLong(String value, long fallback) {

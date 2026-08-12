@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import hashlib
+import hmac
 import re
 import threading
 from collections.abc import Callable
@@ -33,6 +35,9 @@ def _is_android_receiver(record: dict[str, Any]) -> bool:
         "ECHOSHOW5",
         "ECHOSHOW52019",
         "AMAZONECHOSHOW5",
+        "ANDROID",
+        "ANDROIDPHONE",
+        "ANDROIDCOMPANION",
     }
 
 
@@ -270,6 +275,65 @@ class DeviceStore:
                         record["last_problem_reset_reason"] = reason
             self._save()
             return deepcopy(record)
+
+    def pin_receiver_token(self, device_id: str, token: str) -> bool:
+        """Atomically pin the first Android receiver token or verify the winner."""
+        if not token:
+            return False
+        observed = hashlib.sha256(token.encode("utf-8")).hexdigest()
+        with self._lock:
+            record = self._state["devices"].setdefault(
+                device_id,
+                {
+                    "device_id": device_id,
+                    "first_seen": utc_now(),
+                    "pending_commands": [],
+                    "render_revision": 0,
+                },
+            )
+            expected = str(record.get("receiver_token_sha256") or "")
+            if expected:
+                return hmac.compare_digest(expected, observed)
+            record["receiver_token_sha256"] = observed
+            record["receiver_token_pinned_at"] = utc_now()
+            self._save()
+            return True
+
+    def update_metadata(
+        self, device_id: str, changes: dict[str, Any]
+    ) -> dict[str, Any] | None:
+        """Persist management metadata without pretending the device checked in."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None:
+                return None
+            record.update(
+                {key: value for key, value in changes.items() if value is not None}
+            )
+            self._save()
+            return deepcopy(record)
+
+    def clear_camera_snapshot_metadata(self, device_id: str) -> bool:
+        """Remove metadata when the memory-only cached JPEG is unavailable."""
+        fields = (
+            "camera_snapshot_at",
+            "camera_snapshot_facing",
+            "camera_snapshot_content_type",
+            "camera_snapshot_size",
+            "camera_snapshot_command_id",
+        )
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return False
+            changed = False
+            for field in fields:
+                if field in record:
+                    record.pop(field, None)
+                    changed = True
+            if changed:
+                self._save()
+            return changed
 
     def ensure_provisioning(self, device_id: str, assignment: dict[str, Any]) -> dict[str, Any]:
         """Persist the initial assignment for an automatically discovered device."""
@@ -652,6 +716,86 @@ class DeviceStore:
             )
             record["command_history"] = history[-16:]
             self._update_firmware_rollout(record, result)
+            self._save()
+            return True
+
+    def consume_camera_snapshot_command(
+        self,
+        device_id: str,
+        command_id: str,
+        *,
+        max_age_seconds: int = 120,
+    ) -> bool:
+        """Atomically consume one fresh dispatched camera request exactly once."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record or not command_id:
+                return False
+            if command_id != str(record.get("dispatched_command_id") or ""):
+                return False
+            if list(record.get("dispatched_commands") or []) != ["camera-snapshot"]:
+                return False
+            try:
+                dispatched_at = datetime.fromisoformat(
+                    str(record.get("command_dispatched_at") or "")
+                )
+            except ValueError:
+                return False
+            if (datetime.now(UTC) - dispatched_at).total_seconds() > max_age_seconds:
+                return False
+            now = utc_now()
+            result = "camera-snapshot:ok"
+            record["last_command_result"] = result
+            record["last_command_id"] = command_id[:96]
+            record["command_completed_at"] = now
+            record["camera_snapshot_command_id"] = command_id[:96]
+            record["dispatched_commands"] = []
+            record.pop("dispatched_command_id", None)
+            history = record.setdefault("command_history", [])
+            history.append(
+                {
+                    "command_id": command_id[:96],
+                    "result": result,
+                    "completed_at": now,
+                }
+            )
+            record["command_history"] = history[-16:]
+            self._save()
+            return True
+
+    def expire_camera_snapshot_command(
+        self, device_id: str, *, max_age_seconds: int = 120
+    ) -> bool:
+        """Discard a stale queued or dispatched one-shot camera command."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return False
+            pending = list(record.get("pending_commands") or [])
+            dispatched = list(record.get("dispatched_commands") or [])
+            if pending != ["camera-snapshot"] and dispatched != ["camera-snapshot"]:
+                return False
+            timestamp = (
+                record.get("command_queued_at")
+                if pending == ["camera-snapshot"]
+                else record.get("command_dispatched_at")
+            )
+            try:
+                age = (
+                    datetime.now(UTC) - datetime.fromisoformat(str(timestamp or ""))
+                ).total_seconds()
+            except ValueError:
+                age = max_age_seconds + 1
+            if age <= max_age_seconds:
+                return False
+            if pending == ["camera-snapshot"]:
+                record["pending_commands"] = []
+                record.pop("pending_command_id", None)
+            if dispatched == ["camera-snapshot"]:
+                record["dispatched_commands"] = []
+                record.pop("dispatched_command_id", None)
+            record["last_command_result"] = "camera-snapshot:expired"
+            record["command_completed_at"] = utc_now()
             self._save()
             return True
 

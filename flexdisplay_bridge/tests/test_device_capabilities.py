@@ -23,6 +23,7 @@ from flexdisplay_bridge.device_capabilities import (
         ("AMAZON_ECHO_SPOT", "rook", "android_app", (480, 480)),
         ("CHECKERS", "checkers", "android_app", (960, 480)),
         ("Echo Show 5 2019", "checkers", "android_app", (960, 480)),
+        ("ANDROID_PHONE", "android_phone", "android_app", (None, None)),
     ],
 )
 def test_current_model_aliases_resolve_to_trusted_descriptors(
@@ -98,6 +99,30 @@ def test_android_receivers_expose_receiver_management_without_esp_ota(
     assert descriptor.management.supports_audio is True
     assert descriptor.management.supports_battery_policy is False
     assert descriptor.management.supports_sleep_policy is False
+
+
+def test_android_phone_is_on_demand_and_reports_companion_capabilities() -> None:
+    descriptor = resolve_device_capabilities(
+        "ANDROID_COMPANION",
+        capabilities="android,companion,camera,microphone,speaker,battery,usb",
+        width=1080,
+        height=2400,
+    )
+
+    assert descriptor.model_key == "android_phone"
+    assert descriptor.family == "android_receiver"
+    assert descriptor.display.width == 1080
+    assert descriptor.display.height == 2400
+    assert descriptor.power.power_class == "on_demand"
+    assert descriptor.power.battery_managed is True
+    assert descriptor.power.reports_battery is True
+    assert descriptor.power.reports_usb_power is True
+    assert descriptor.delivery.supports_long_poll is True
+    assert descriptor.management.supports_camera is True
+    assert descriptor.management.supports_microphone is True
+    assert descriptor.management.supports_audio is True
+    assert "camera-snapshot" in descriptor.management.actions
+    assert "test-chime" in descriptor.management.actions
 
 
 def test_arbitrary_esp_color_lcd_gets_mqtt_delivery_but_no_firmware_provider() -> None:

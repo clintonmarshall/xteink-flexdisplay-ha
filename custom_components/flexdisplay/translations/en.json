@@ -240,6 +240,9 @@
       "low_battery": {
         "name": "Low battery"
       },
+      "microphone_available": {
+        "name": "Microphone available"
+      },
       "home_assistant_error": {
         "name": "Home Assistant error"
       },
@@ -261,6 +264,16 @@
     "image": {
       "current_screen": {
         "name": "Current screen"
+      }
+    },
+    "camera": {
+      "camera_snapshot": {
+        "name": "Camera snapshot"
+      }
+    },
+    "media_player": {
+      "speaker": {
+        "name": "Speaker"
       }
     },
     "button": {
@@ -296,6 +309,9 @@
       },
       "test_chime": {
         "name": "Test chime"
+      },
+      "take_snapshot": {
+        "name": "Take snapshot"
       },
       "volume_up": {
         "name": "Volume up"
@@ -407,6 +423,9 @@
       },
       "voice_mute": {
         "name": "Mute speaker"
+      },
+      "microphone_enabled": {
+        "name": "Allow push-to-talk microphone"
       }
     },
     "time": {

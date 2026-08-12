@@ -11,7 +11,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import is_note4, management_supports, reports_usb_power
+from .device_capabilities import (
+    desired_microphone_enabled,
+    is_android_receiver,
+    is_note4,
+    management_supports,
+    reports_usb_power,
+)
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -113,7 +119,7 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         self._attr_unique_id = f"{device_id}_voice_mute"
 
     def _record_supported(self, record: dict) -> bool:
-        return is_note4(record)
+        return is_note4(record) or is_android_receiver(record)
 
     @property
     def is_on(self) -> bool:
@@ -134,13 +140,37 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         await self._set(False)
 
 
-def _is_note4(record: dict) -> bool:
-    return str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+class FlexDisplayMicrophoneEnabled(FlexDisplayEntity, SwitchEntity):
+    """Allow local push-to-talk Assist without starting remote recording."""
 
+    _attr_translation_key = "microphone_enabled"
+    _attr_entity_category = EntityCategory.CONFIG
 
-def _is_android_receiver(record: dict) -> bool:
-    model = str(record.get("model") or "").upper()
-    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_microphone_enabled"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "microphone")
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether local Assist recording is permitted."""
+        return desired_microphone_enabled(self.record)
+
+    async def _set(self, enabled: bool) -> None:
+        await self.coordinator.client.voice_settings(
+            self.device_id, {"microphone_enabled": enabled}
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_on(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(False)
 
 
 def _entities_for_device(
@@ -166,8 +196,10 @@ def _entities_for_device(
             and reports_usb_power(record)
         )
     ]
-    if is_note4(record) or _is_android_receiver(record):
+    if is_note4(record) or is_android_receiver(record):
         entities.append(FlexDisplayVoiceMute(coordinator, device_id))
+    if management_supports(record, "microphone"):
+        entities.append(FlexDisplayMicrophoneEnabled(coordinator, device_id))
     return tuple(entities)
 
 

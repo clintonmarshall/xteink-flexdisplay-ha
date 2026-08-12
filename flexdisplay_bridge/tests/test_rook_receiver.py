@@ -6,7 +6,7 @@ from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
-from flexdisplay_bridge.app import create_app
+from flexdisplay_bridge.app import CameraSnapshotBroker, create_app
 from flexdisplay_bridge.config import (
     BridgeConfig,
     DashboardPageConfig,
@@ -48,6 +48,7 @@ def test_rook_screen_is_round_safe_colour_png(tmp_path: Path) -> None:
             headers={
                 "X-FlexDisplay-ID": "ROOK-TEST01",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "test-receiver-token-01",
                 "X-FlexDisplay-Firmware": "android-0.1.0",
                 "X-FlexDisplay-Width": "480",
                 "X-FlexDisplay-Height": "480",
@@ -146,6 +147,7 @@ def test_rook_cannot_receive_esp32_firmware(tmp_path: Path) -> None:
             headers={
                 "X-FlexDisplay-ID": "ROOK-TEST02",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "test-receiver-token-02",
                 "X-FlexDisplay-Width": "480",
                 "X-FlexDisplay-Height": "480",
                 "X-FlexDisplay-Capabilities": "android,round-display",
@@ -164,6 +166,7 @@ def test_checkers_screen_is_landscape_android_png(tmp_path: Path) -> None:
             headers={
                 "X-FlexDisplay-ID": "CHECKERS-SHOW501",
                 "X-FlexDisplay-Model": "CHECKERS",
+                "X-FlexDisplay-Receiver-Token": "test-receiver-token-03",
                 "X-FlexDisplay-Firmware": "android-0.2.0",
                 "X-FlexDisplay-Width": "960",
                 "X-FlexDisplay-Height": "480",
@@ -195,6 +198,7 @@ def test_android_receiver_fleet_controls_and_diagnostics(tmp_path: Path) -> None
     headers = {
         "X-FlexDisplay-ID": "CHECKERS-CONTROL01",
         "X-FlexDisplay-Model": "CHECKERS",
+        "X-FlexDisplay-Receiver-Token": "test-receiver-token-04",
         "X-FlexDisplay-Firmware": "android-0.4.0",
         "X-FlexDisplay-Width": "960",
         "X-FlexDisplay-Height": "480",
@@ -250,6 +254,296 @@ def test_android_receiver_fleet_controls_and_diagnostics(tmp_path: Path) -> None
         assert update.headers["x-flexdisplay-desired-muted"] == "true"
         assert update.headers["x-flexdisplay-desired-brightness"] == "40"
         assert update.headers["x-flexdisplay-commands"] == "test-chime"
+
+
+def _android_phone_headers(token: str = "phone-receiver-secret") -> dict[str, str]:
+    return {
+        "X-FlexDisplay-ID": "ANDROID-PHONE01",
+        "X-FlexDisplay-Model": "ANDROID_PHONE",
+        "X-FlexDisplay-Firmware": "android-0.5.0",
+        "X-FlexDisplay-Width": "1080",
+        "X-FlexDisplay-Height": "2400",
+        "X-FlexDisplay-Capabilities": (
+            "android,companion,color,touch,png,camera,microphone,speaker,battery,usb"
+        ),
+        "X-FlexDisplay-Receiver-Token": token,
+        "X-FlexDisplay-Camera-Available": "true",
+        "X-FlexDisplay-Camera-Permission": "true",
+        "X-FlexDisplay-Microphone-Available": "true",
+        "X-FlexDisplay-Microphone-Permission": "true",
+        "X-FlexDisplay-Speaker-Available": "true",
+        "X-FlexDisplay-Battery-Percent": "76",
+        "X-FlexDisplay-USB-Connected": "false",
+        "X-FlexDisplay-Hardware-Manufacturer": "Samsung",
+        "X-FlexDisplay-Hardware-Model": "SM-G991B",
+    }
+
+
+def test_android_phone_token_is_pinned_before_any_state_or_command_mutation(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    with TestClient(create_app(config)) as client:
+        paired = client.get("/api/v1/screen", headers=_android_phone_headers())
+        assert paired.status_code == 200
+        before = client.app.state.store.get("ANDROID-PHONE01")
+        queued = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/commands/test-chime",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+        )
+        assert queued.status_code == 200
+
+        attacker = _android_phone_headers("attacker-receiver-secret")
+        attacker["X-FlexDisplay-Model"] = "X3"
+        attacker["X-FlexDisplay-Command-Result"] = "test-chime:ok"
+        response = client.get("/api/v1/screen", headers=attacker)
+
+        assert response.status_code == 401
+        after = client.app.state.store.get("ANDROID-PHONE01")
+        assert after["model"] == "ANDROID_PHONE"
+        assert after["last_seen"] == before["last_seen"]
+        assert after["pending_commands"] == ["test-chime"]
+
+
+def test_android_phone_first_token_wins_and_loser_cannot_repair(tmp_path: Path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        winner = client.get(
+            "/api/v1/screen", headers=_android_phone_headers("first-phone-token")
+        )
+        assert winner.status_code == 200
+        loser = client.get(
+            "/api/v1/screen", headers=_android_phone_headers("second-phone-token")
+        )
+        assert loser.status_code == 401
+        winner_again = client.get(
+            "/api/v1/screen", headers=_android_phone_headers("first-phone-token")
+        )
+        assert winner_again.status_code == 200
+
+
+def test_android_phone_microphone_requires_explicit_management_opt_in(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    management = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
+    receiver = {"X-FlexDisplay-Receiver-Token": "phone-receiver-secret"}
+    with TestClient(create_app(config)) as client:
+        paired = client.get("/api/v1/screen", headers=_android_phone_headers())
+
+        assert paired.status_code == 200
+        assert paired.headers["x-flexdisplay-desired-microphone-enabled"] == "false"
+        assert (
+            client.app.state.store.get("ANDROID-PHONE01")[
+                "desired_microphone_enabled"
+            ]
+            is False
+        )
+        denied = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/assist",
+            headers=receiver,
+            content=b"\x00\x00" * 8000,
+        )
+        assert denied.status_code == 409
+        assert denied.json()["detail"] == "Microphone is disabled"
+
+        enabled = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/voice",
+            headers=management,
+            json={"microphone_enabled": True},
+        )
+        assert enabled.status_code == 200
+        refreshed = client.get("/api/v1/screen", headers=_android_phone_headers())
+        assert refreshed.headers["x-flexdisplay-desired-microphone-enabled"] == "true"
+
+
+def test_camera_snapshot_requires_explicit_one_time_correlated_request(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    management = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
+    receiver = {"X-FlexDisplay-Receiver-Token": "phone-receiver-secret"}
+    jpeg = io.BytesIO()
+    Image.new("RGB", (640, 480), "navy").save(jpeg, format="JPEG")
+    with TestClient(create_app(config)) as client:
+        assert client.get(
+            "/api/v1/screen", headers=_android_phone_headers()
+        ).status_code == 200
+
+        direct_command = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/commands/camera-snapshot",
+            headers=management,
+        )
+        assert direct_command.status_code == 400
+        assert direct_command.json()["detail"] == "Unsupported command"
+
+        unsolicited = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={**receiver, "X-FlexDisplay-Command-ID": "wrong"},
+            content=jpeg.getvalue(),
+        )
+        assert unsolicited.status_code == 409
+
+        requested = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot/request",
+            headers=management,
+        )
+        assert requested.status_code == 200
+        command = client.get(
+            "/api/v1/screen", headers=_android_phone_headers()
+        )
+        command_id = command.headers["x-flexdisplay-command-id"]
+        assert command.headers["x-flexdisplay-commands"] == "camera-snapshot"
+
+        accepted = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={
+                **receiver,
+                "Content-Type": "application/octet-stream",
+                "X-FlexDisplay-Command-ID": command_id,
+                "X-FlexDisplay-Camera-Facing": "front",
+            },
+            content=jpeg.getvalue(),
+        )
+        assert accepted.status_code == 200
+        first = client.get(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot", headers=management
+        )
+        assert first.status_code == 200
+        assert first.headers["content-type"] == "image/jpeg"
+        assert first.headers["cache-control"] == "no-store, private"
+        cached = first.content
+
+        replay = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={
+                **receiver,
+                "Content-Type": "application/octet-stream",
+                "X-FlexDisplay-Command-ID": command_id,
+            },
+            content=jpeg.getvalue(),
+        )
+        assert replay.status_code == 409
+        assert client.get(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot", headers=management
+        ).content == cached
+
+
+def test_sensitive_camera_management_fails_closed_without_bridge_key(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        assert client.get(
+            "/api/v1/screen", headers=_android_phone_headers()
+        ).status_code == 200
+        response = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot/request"
+        )
+        assert response.status_code == 503
+
+
+def test_camera_snapshot_broker_physically_expires_cached_bytes() -> None:
+    broker = CameraSnapshotBroker()
+    broker.put(
+        "ANDROID-PHONE01",
+        b"jpeg-bytes",
+        captured_at="2000-01-01T00:00:00+00:00",
+        facing="front",
+    )
+
+    assert broker.expire(300) == ["ANDROID-PHONE01"]
+    assert broker.get("ANDROID-PHONE01") is None
+
+
+def test_camera_snapshot_metadata_is_cleared_when_bridge_restarts(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    management = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
+    receiver = {
+        "X-FlexDisplay-Receiver-Token": "phone-receiver-secret",
+        "Content-Type": "application/octet-stream",
+    }
+    jpeg = io.BytesIO()
+    Image.new("RGB", (64, 64), "navy").save(jpeg, format="JPEG")
+
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers=_android_phone_headers())
+        requested = client.post(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot/request",
+            headers=management,
+        )
+        assert requested.status_code == 200
+        command = client.get("/api/v1/screen", headers=_android_phone_headers())
+        accepted = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={
+                **receiver,
+                "X-FlexDisplay-Command-ID": command.headers[
+                    "x-flexdisplay-command-id"
+                ],
+            },
+            content=jpeg.getvalue(),
+        )
+        assert accepted.status_code == 200
+        assert client.app.state.store.get("ANDROID-PHONE01")["camera_snapshot_at"]
+
+    restarted = create_app(config)
+    record = restarted.state.store.get("ANDROID-PHONE01")
+    assert record is not None
+    assert "camera_snapshot_at" not in record
+    assert "camera_snapshot_facing" not in record
+    assert "camera_snapshot_content_type" not in record
+    assert "camera_snapshot_size" not in record
+    with TestClient(restarted) as client:
+        missing = client.get(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers=management,
+        )
+        assert missing.status_code == 404
+
+
+def test_camera_snapshot_rejects_oversize_and_expired_dispatch(
+    tmp_path: Path,
+) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    management = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
+    receiver = {
+        "X-FlexDisplay-Receiver-Token": "phone-receiver-secret",
+        "Content-Type": "application/octet-stream",
+    }
+    with TestClient(create_app(config)) as client:
+        client.get("/api/v1/screen", headers=_android_phone_headers())
+        client.post(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot/request",
+            headers=management,
+        )
+        command = client.get("/api/v1/screen", headers=_android_phone_headers())
+        command_id = command.headers["x-flexdisplay-command-id"]
+
+        too_large = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={
+                **receiver,
+                "X-FlexDisplay-Command-ID": command_id,
+                "Content-Length": str(5 * 1024 * 1024 + 1),
+            },
+            content=b"",
+        )
+        assert too_large.status_code == 413
+
+        # The store is in memory, so use its lock-protected metadata helper to
+        # age the same active dispatch without changing last_seen.
+        client.app.state.store.update_metadata(
+            "ANDROID-PHONE01", {"command_dispatched_at": "2000-01-01T00:00:00+00:00"}
+        )
+        jpeg = io.BytesIO()
+        Image.new("RGB", (64, 64), "navy").save(jpeg, format="JPEG")
+        expired = client.put(
+            "/api/v1/devices/ANDROID-PHONE01/camera/snapshot",
+            headers={**receiver, "X-FlexDisplay-Command-ID": command_id},
+            content=jpeg.getvalue(),
+        )
+        assert expired.status_code == 409
 
 
 def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:

@@ -6,6 +6,8 @@ import android.content.IntentFilter;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraManager;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
 import android.os.BatteryManager;
@@ -35,6 +37,7 @@ import java.util.Map;
 
 final class FlexDisplayClient {
     static final String FIRMWARE_VERSION = "android-0.5.0";
+    static final int MAX_CAMERA_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
     static final class Interaction {
         final String id;
@@ -168,10 +171,25 @@ final class FlexDisplayClient {
 
     private final Context context;
     private final ReceiverProfile profile;
+    private volatile boolean foregroundAllowed = !BuildConfig.COMPANION;
+    private volatile HttpURLConnection activeScreenConnection;
+    private volatile HttpURLConnection activeNotificationConnection;
 
     FlexDisplayClient(Context context) {
         this.context = context.getApplicationContext();
         this.profile = ReceiverProfile.detect();
+    }
+
+    void setForegroundAllowed(boolean allowed) {
+        foregroundAllowed = allowed || !BuildConfig.COMPANION;
+        if (!foregroundAllowed) cancelForegroundRequests();
+    }
+
+    void cancelForegroundRequests() {
+        HttpURLConnection screen = activeScreenConnection;
+        if (screen != null) screen.disconnect();
+        HttpURLConnection notification = activeNotificationConnection;
+        if (notification != null) notification.disconnect();
     }
 
     Result fetch(
@@ -181,21 +199,27 @@ final class FlexDisplayClient {
             String commandResult,
             String commandId,
             String quickAction) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(config, "/api/v1/screen", "GET", 25_000);
+        activeScreenConnection = connection;
         connection.setRequestProperty("Accept", "image/png");
         connection.setRequestProperty("X-FlexDisplay-ID", config.deviceId);
         connection.setRequestProperty("X-FlexDisplay-Width", Integer.toString(profile.width));
         connection.setRequestProperty("X-FlexDisplay-Height", Integer.toString(profile.height));
         connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
         connection.setRequestProperty("X-FlexDisplay-Firmware", FIRMWARE_VERSION);
-        boolean cameraAvailable = hasFeature(PackageManager.FEATURE_CAMERA_ANY);
-        boolean microphoneAvailable = hasFeature(PackageManager.FEATURE_MICROPHONE);
-        connection.setRequestProperty("X-FlexDisplay-Capabilities", capabilities(cameraAvailable, microphoneAvailable));
-        connection.setRequestProperty("X-FlexDisplay-Camera-Available", Boolean.toString(cameraAvailable));
-        connection.setRequestProperty("X-FlexDisplay-Microphone-Available", Boolean.toString(microphoneAvailable));
+        connection.setRequestProperty("X-FlexDisplay-Capabilities", deviceCapabilities());
+        connection.setRequestProperty("X-FlexDisplay-Hardware-Manufacturer", safeHeader(Build.MANUFACTURER));
+        connection.setRequestProperty("X-FlexDisplay-Hardware-Model", safeHeader(Build.MODEL));
+        connection.setRequestProperty("X-FlexDisplay-Camera-Available", Boolean.toString(cameraAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Camera-Permission", Boolean.toString(permissionGranted(android.Manifest.permission.CAMERA)));
+        connection.setRequestProperty("X-FlexDisplay-Microphone-Available", Boolean.toString(microphoneAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Microphone-Permission", Boolean.toString(permissionGranted(android.Manifest.permission.RECORD_AUDIO)));
+        connection.setRequestProperty("X-FlexDisplay-Speaker-Available", Boolean.toString(speakerAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Speaker-Permission", "true");
         connection.setRequestProperty("X-FlexDisplay-Audio-Available", "true");
         connection.setRequestProperty("X-FlexDisplay-Touch-Available", "true");
-        connection.setRequestProperty("X-FlexDisplay-Always-On", "true");
+        connection.setRequestProperty("X-FlexDisplay-Always-On", Boolean.toString(!BuildConfig.COMPANION));
         connection.setRequestProperty("X-FlexDisplay-Device-Class", profile.deviceClass);
         AudioState audioState = audioState();
         connection.setRequestProperty("X-FlexDisplay-Volume", Integer.toString(audioState.volume));
@@ -222,32 +246,30 @@ final class FlexDisplayClient {
         if (!commandId.isEmpty()) connection.setRequestProperty("X-FlexDisplay-Command-ID", commandId);
         if (!quickAction.isEmpty()) connection.setRequestProperty("X-FlexDisplay-Quick-Action", quickAction);
 
-        requireSuccess(connection);
-        Map<String, String> headers = responseHeaders(connection);
-        byte[] body = readBytes(connection.getInputStream());
-        connection.disconnect();
+        Map<String, String> headers;
+        byte[] body;
+        try {
+            requireSuccess(connection);
+            headers = responseHeaders(connection);
+            body = readBytes(connection.getInputStream());
+        } finally {
+            connection.disconnect();
+            if (activeScreenConnection == connection) activeScreenConnection = null;
+        }
         Bitmap bitmap = body.length == 0 ? null : BitmapFactory.decodeByteArray(body, 0, body.length);
         if (body.length > 0 && bitmap == null) throw new IOException("Bridge response was not a supported image");
+        requireForeground();
         return new Result(bitmap, Collections.unmodifiableMap(headers), fetchInteractions(config));
     }
 
-    private String capabilities(boolean cameraAvailable, boolean microphoneAvailable) {
-        String caps = profile.capabilities();
-        if (cameraAvailable) caps += ",camera,camera-snapshot";
-        if (microphoneAvailable) caps += ",microphone";
-        return caps;
-    }
-
-    private boolean hasFeature(String feature) {
-        return context.getPackageManager().hasSystemFeature(feature);
-    }
-
     List<Interaction> fetchInteractions(ReceiverConfig config) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/interactions",
                 "GET",
                 10_000);
+        activeScreenConnection = connection;
         requireSuccess(connection);
         try {
             JSONObject payload = new JSONObject(readText(connection.getInputStream()));
@@ -263,6 +285,7 @@ final class FlexDisplayClient {
             throw new IOException("Bridge returned invalid interaction data", error);
         } finally {
             connection.disconnect();
+            if (activeScreenConnection == connection) activeScreenConnection = null;
         }
     }
 
@@ -274,13 +297,15 @@ final class FlexDisplayClient {
     }
 
     NotificationEvent waitForNotification(ReceiverConfig config, long after) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/notifications/next?after=" + after + "&timeout=25",
                 "GET",
                 35_000);
-        requireSuccess(connection);
+        activeNotificationConnection = connection;
         try {
+            requireSuccess(connection);
             JSONObject payload = new JSONObject(readText(connection.getInputStream()));
             long sequence = payload.optLong("sequence", after);
             JSONObject value = payload.optJSONObject("notification");
@@ -294,6 +319,45 @@ final class FlexDisplayClient {
             throw new IOException("Bridge returned invalid notification data", error);
         } finally {
             connection.disconnect();
+            if (activeNotificationConnection == connection) activeNotificationConnection = null;
+        }
+    }
+
+    void uploadCameraSnapshot(
+            ReceiverConfig config,
+            byte[] jpeg,
+            String facing,
+            String commandId) throws IOException {
+        requireForeground();
+        if (commandId == null || commandId.trim().isEmpty()) {
+            throw new IOException("Camera snapshot command ID is missing");
+        }
+        if (jpeg == null || jpeg.length < 2 || jpeg.length > MAX_CAMERA_SNAPSHOT_BYTES) {
+            throw new IOException("Camera snapshot is empty or exceeds 2 MiB");
+        }
+        if ((jpeg[0] & 0xff) != 0xff || (jpeg[1] & 0xff) != 0xd8) {
+            throw new IOException("Camera snapshot is not JPEG data");
+        }
+        HttpURLConnection connection = open(
+                config,
+                "/api/v1/devices/" + config.deviceId + "/camera/snapshot",
+                "PUT",
+                30_000);
+        activeScreenConnection = connection;
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/octet-stream");
+        connection.setRequestProperty("X-FlexDisplay-Camera-Facing", safeHeader(facing));
+        connection.setRequestProperty("X-FlexDisplay-Command-ID", safeHeader(commandId));
+        connection.setFixedLengthStreamingMode(jpeg.length);
+        try {
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(jpeg);
+            }
+            requireSuccess(connection);
+            readBytes(connection.getInputStream());
+        } finally {
+            connection.disconnect();
+            if (activeScreenConnection == connection) activeScreenConnection = null;
         }
     }
 
@@ -367,6 +431,12 @@ final class FlexDisplayClient {
         return connection;
     }
 
+    private void requireForeground() throws IOException {
+        if (BuildConfig.COMPANION && !foregroundAllowed) {
+            throw new IOException("Companion receiver is in the background");
+        }
+    }
+
     private static JSONObject confirmationPayload(boolean confirmed) throws IOException {
         try {
             return new JSONObject().put("confirmed", confirmed);
@@ -437,7 +507,9 @@ final class FlexDisplayClient {
         if (manager == null) return new AudioState(0, false);
         int max = Math.max(1, manager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
         int current = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
-        return new AudioState(Math.max(0, Math.min(100, current * 100 / max)), current == 0);
+        return new AudioState(
+                Math.max(0, Math.min(100, Math.round(current * 100f / max))),
+                current == 0);
     }
 
     private int screenBrightness() {
@@ -449,6 +521,41 @@ final class FlexDisplayClient {
         } catch (android.provider.Settings.SettingNotFoundException error) {
             return 100;
         }
+    }
+
+    private String deviceCapabilities() {
+        String result = profile.capabilities();
+        if (!BuildConfig.COMPANION) return result;
+        if (cameraAvailable()) result += ",camera";
+        if (microphoneAvailable()) result += ",microphone";
+        if (speakerAvailable()) result += ",speaker";
+        return result;
+    }
+
+    private boolean cameraAvailable() {
+        if (!context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) return false;
+        CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+        try {
+            return manager != null && manager.getCameraIdList().length > 0;
+        } catch (CameraAccessException | SecurityException error) {
+            return false;
+        }
+    }
+
+    private boolean microphoneAvailable() {
+        return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+    }
+
+    private boolean speakerAvailable() {
+        return context.getPackageManager().hasSystemFeature("android.hardware.audio.output");
+    }
+
+    private boolean permissionGranted(String permission) {
+        return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static String safeHeader(String value) {
+        return value == null ? "" : value.replace("\r", " ").replace("\n", " ").trim();
     }
 
     private static final class AudioState {

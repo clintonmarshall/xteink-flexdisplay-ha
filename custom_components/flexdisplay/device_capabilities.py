@@ -42,7 +42,13 @@ _ANDROID_ALIASES = frozenset(
         "ECHOSHOW5",
         "ECHOSHOW52019",
         "AMAZONECHOSHOW5",
+        "ANDROID",
+        "ANDROIDPHONE",
+        "ANDROIDCOMPANION",
     }
+)
+_ANDROID_COMPANION_ALIASES = frozenset(
+    {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
 )
 _GENERIC_MARKERS = ("ESP32", "ESP8266", "LCD", "OLED", "TFT")
 
@@ -107,6 +113,19 @@ def is_note4(record: Mapping[str, Any]) -> bool:
     return firmware_provider(record) == "note4"
 
 
+def is_android_receiver(record: Mapping[str, Any]) -> bool:
+    """Return whether the Bridge classifies this device as an Android app."""
+    return firmware_provider(record) == "android_app"
+
+
+def desired_microphone_enabled(record: Mapping[str, Any]) -> bool:
+    """Fail closed for a phone companion until the user explicitly enables it."""
+    value = record.get("desired_microphone_enabled")
+    if isinstance(value, bool):
+        return value
+    return _model_key(record) not in _ANDROID_COMPANION_ALIASES
+
+
 def device_manufacturer(record: Mapping[str, Any]) -> str:
     """Return a family-appropriate Home Assistant manufacturer label."""
     family = str(_descriptor(record).get("family") or record.get("device_family") or "")
@@ -115,6 +134,8 @@ def device_manufacturer(record: Mapping[str, Any]) -> str:
         return "XTEINK / FlexDisplay"
     if provider == "note4":
         return "Zectrix / FlexDisplay"
+    if _model_key(record) in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}:
+        return str(record.get("hardware_manufacturer") or "Android / FlexDisplay")
     if family == "android_receiver" or provider == "android_app":
         return "Amazon / FlexDisplay"
     if family == "generic_embedded" or any(
@@ -186,6 +207,8 @@ def management_supports(record: Mapping[str, Any], capability: str) -> bool:
         return provider == "xteink"
     if capability in {"screen_history", "page_selection"}:
         return provider in {"xteink", "note4", "android_app"}
+    if capability == "audio":
+        return provider in {"note4", "android_app"}
     return False
 
 

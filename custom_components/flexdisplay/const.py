@@ -13,9 +13,11 @@ MESHTASTIC_EVENT_TYPES = ("message_received", "message_sent", "message_failed")
 PLATFORMS = [
     "sensor",
     "binary_sensor",
+    "camera",
     "button",
     "event",
     "image",
+    "media_player",
     "select",
     "number",
     "switch",

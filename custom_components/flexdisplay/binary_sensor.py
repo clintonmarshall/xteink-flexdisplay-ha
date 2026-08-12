@@ -17,6 +17,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .coordinator import FlexDisplayCoordinator
 from .device_capabilities import (
     firmware_manageable,
+    management_supports,
     reports_battery,
     reports_usb_power,
     supports_xteink_ota,
@@ -111,6 +112,15 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("firmware_update_status")
         in {"failed", "cancelled"},
     ),
+    FlexDisplayBinarySensorDescription(
+        key="microphone_available",
+        translation_key="microphone_available",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        value_fn=lambda record: bool(
+            record.get("microphone_available")
+            and record.get("microphone_permission")
+        ),
+    ),
 )
 
 
@@ -139,6 +149,8 @@ class FlexDisplayBinarySensor(FlexDisplayEntity, BinarySensorEntity):
             return reports_battery(record)
         if key == "firmware_update_problem":
             return firmware_manageable(record)
+        if key == "microphone_available":
+            return management_supports(record, "microphone")
         return True
 
     @property
@@ -175,6 +187,10 @@ async def async_setup_entry(
                 or (
                     description.key == "firmware_update_problem"
                     and not firmware_manageable(record)
+                )
+                or (
+                    description.key == "microphone_available"
+                    and not management_supports(record, "microphone")
                 )
             )
         )

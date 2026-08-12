@@ -12,17 +12,23 @@ final class ReceiverConfig {
     final String bridgeUrl;
     final String deviceId;
     final String receiverToken;
+    final boolean microphoneEnabled;
 
     ReceiverConfig(String bridgeUrl, String deviceId) {
-        this(bridgeUrl, deviceId, UUID.randomUUID().toString());
+        this(bridgeUrl, deviceId, UUID.randomUUID().toString(), !BuildConfig.COMPANION);
     }
 
     ReceiverConfig(String bridgeUrl, String deviceId, String receiverToken) {
+        this(bridgeUrl, deviceId, receiverToken, !BuildConfig.COMPANION);
+    }
+
+    ReceiverConfig(String bridgeUrl, String deviceId, String receiverToken, boolean microphoneEnabled) {
         this.bridgeUrl = normalizeUrl(bridgeUrl);
         this.deviceId = deviceId == null ? "" : deviceId.trim().toUpperCase(Locale.ROOT);
         this.receiverToken = receiverToken == null || receiverToken.length() < 20
                 ? UUID.randomUUID().toString()
                 : receiverToken;
+        this.microphoneEnabled = microphoneEnabled;
     }
 
     static ReceiverConfig load(Context context) {
@@ -35,7 +41,8 @@ final class ReceiverConfig {
         ReceiverConfig selected = new ReceiverConfig(
                 preferences.getString("bridge_url", ""),
                 preferences.getString("device_id", generatedId),
-                preferences.getString("receiver_token", ""));
+                preferences.getString("receiver_token", ""),
+                preferences.getBoolean("microphone_enabled", !BuildConfig.COMPANION));
         selected.save(context);
         return selected;
     }
@@ -46,7 +53,12 @@ final class ReceiverConfig {
                 .putString("bridge_url", bridgeUrl)
                 .putString("device_id", deviceId)
                 .putString("receiver_token", receiverToken)
+                .putBoolean("microphone_enabled", microphoneEnabled)
                 .apply();
+    }
+
+    ReceiverConfig withMicrophoneEnabled(boolean enabled) {
+        return new ReceiverConfig(bridgeUrl, deviceId, receiverToken, enabled);
     }
 
     boolean isReady() {

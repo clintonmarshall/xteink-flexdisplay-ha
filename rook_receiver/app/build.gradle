@@ -6,12 +6,27 @@ android {
     namespace "au.com.ldcs.flexdisplay.rook"
     compileSdk 33
 
+    flavorDimensions "receiverMode"
+
     defaultConfig {
         applicationId "au.com.ldcs.flexdisplay.rook"
         minSdk 24
         targetSdk 33
         versionCode 5
         versionName "0.5.0"
+    }
+
+    productFlavors {
+        kiosk {
+            dimension "receiverMode"
+            buildConfigField "boolean", "COMPANION", "false"
+        }
+        companion {
+            dimension "receiverMode"
+            applicationIdSuffix ".companion"
+            versionNameSuffix "-companion"
+            buildConfigField "boolean", "COMPANION", "true"
+        }
     }
 
     buildTypes {

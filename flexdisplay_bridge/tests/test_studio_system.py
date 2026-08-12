@@ -31,6 +31,15 @@ def _firmware(version: str, marker: str) -> FirmwareConfig:
 
 
 def _check_in(client: TestClient, device_id: str, model: str) -> None:
+    android_model = "".join(character for character in model.upper() if character.isalnum()) in {
+        "ROOK",
+        "ECHOSPOT",
+        "CHECKERS",
+        "ECHOSHOW5",
+        "ANDROID",
+        "ANDROIDPHONE",
+        "ANDROIDCOMPANION",
+    }
     response = client.get(
         "/api/v1/screen",
         headers={
@@ -40,6 +49,11 @@ def _check_in(client: TestClient, device_id: str, model: str) -> None:
             "X-FlexDisplay-SD-Ready": "true",
             "X-FlexDisplay-USB-Connected": "true",
             "X-FlexDisplay-Battery-Percent": "100",
+            **(
+                {"X-FlexDisplay-Receiver-Token": f"receiver-{device_id.lower()}"}
+                if android_model
+                else {}
+            ),
         },
     )
     assert response.status_code == 200
@@ -139,6 +153,7 @@ def test_auto_provisioning_filters_defaults_and_reconciles_corrected_identity(
             headers={
                 "X-FlexDisplay-ID": "X3-RECLASS01",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "reclass-receiver-token",
             },
         )
         record = client.app.state.store.get("X3-RECLASS01")
@@ -784,11 +799,15 @@ def test_missing_model_header_preserves_explicit_non_x_identity(
             headers={
                 "X-FlexDisplay-ID": "X3-WAS-ROOK",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "persist-receiver-token",
             },
         )
         missing = client.get(
             "/api/v1/screen",
-            headers={"X-FlexDisplay-ID": "X3-WAS-ROOK"},
+            headers={
+                "X-FlexDisplay-ID": "X3-WAS-ROOK",
+                "X-FlexDisplay-Receiver-Token": "persist-receiver-token",
+            },
         )
         device = client.get("/api/v1/devices/X3-WAS-ROOK").json()
 

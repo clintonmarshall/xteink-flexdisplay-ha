@@ -10,7 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import supported_actions, supports_xteink_ota
+from .device_capabilities import management_supports, supported_actions, supports_xteink_ota
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -131,6 +131,36 @@ class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
     async def async_press(self) -> None:
         """Clear queued commands and their durable retry state."""
         await self.coordinator.client.cancel_commands(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayTakeSnapshotButton(FlexDisplayEntity, ButtonEntity):
+    """Queue one explicit, privacy-sensitive camera snapshot."""
+
+    _attr_translation_key = "take_snapshot"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_take_snapshot"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "camera")
+
+    @property
+    def available(self) -> bool:
+        """Only capture when permission is granted and no command is active."""
+        return (
+            super().available
+            and self.record.get("online") is True
+            and self.record.get("camera_available") is True
+            and self.record.get("camera_permission") is True
+            and not self.record.get("pending_commands")
+            and not self.record.get("dispatched_commands")
+        )
+
+    async def async_press(self) -> None:
+        """Ask the phone to capture a single JPEG."""
+        await self.coordinator.client.request_camera_snapshot(self.device_id)
         await self.coordinator.async_request_refresh()
 
 
@@ -333,6 +363,11 @@ async def async_setup_entry(
         return (
             *command_buttons,
             FlexDisplayCancelCommandsButton(coordinator, device_id),
+            *(
+                (FlexDisplayTakeSnapshotButton(coordinator, device_id),)
+                if management_supports(record, "camera")
+                else ()
+            ),
             *firmware_buttons,
         )
 
