@@ -155,11 +155,45 @@ def test_rook_cannot_receive_esp32_firmware(tmp_path: Path) -> None:
         assert response.json()["detail"] == "No firmware release is configured"
 
 
+def test_checkers_screen_is_landscape_android_png(tmp_path: Path) -> None:
+    with TestClient(create_app(_config(tmp_path))) as client:
+        response = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "CHECKERS-SHOW501",
+                "X-FlexDisplay-Model": "CHECKERS",
+                "X-FlexDisplay-Firmware": "android-0.2.0",
+                "X-FlexDisplay-Width": "960",
+                "X-FlexDisplay-Height": "480",
+                "X-FlexDisplay-Capabilities": "android,color,touch,png,empty-unchanged,kiosk,interactions,notifications,audio",
+                "X-FlexDisplay-SD-Ready": "false",
+            },
+        )
+
+        assert response.status_code == 200
+        assert response.headers["content-type"] == "image/png"
+        assert "X-FlexDisplay-Latest-Firmware" not in response.headers
+        with Image.open(io.BytesIO(response.content)) as image:
+            assert image.size == (960, 480)
+
+        device = client.get("/api/v1/devices/CHECKERS-SHOW501").json()
+        assert device["model"] == "CHECKERS"
+        assert device["display_shape"] == "rectangular"
+        assert device["touch_available"] is True
+        assert device["color_available"] is True
+        assert device["client_platform"] == "android"
+
+        firmware = client.post("/api/v1/devices/CHECKERS-SHOW501/commands/install")
+        assert firmware.status_code == 409
+        assert firmware.json()["detail"] == "No firmware release is configured"
+
+
 def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:
     with TestClient(create_app(_config(tmp_path))) as client:
         studio = client.get("/studio/")
         assert studio.status_code == 200
         assert 'data-model="ROOK"' in studio.text
+        assert 'data-model="CHECKERS"' in studio.text
 
         preview = client.post(
             "/api/v1/studio/preview",
@@ -187,6 +221,52 @@ def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:
         with Image.open(io.BytesIO(preview.content)) as image:
             assert image.size == (480, 480)
             assert image.mode == "RGB"
+
+        checkers_preview = client.post(
+            "/api/v1/studio/preview",
+            json={
+                "model": "CHECKERS",
+                "profile": {
+                    "name": "show5-preview",
+                    "pages": [
+                        {
+                            "title": "HOUSE",
+                            "entities": [
+                                {
+                                    "entity_id": "static.state",
+                                    "label": "Garage",
+                                    "source": "static",
+                                    "value": "Closed",
+                                }
+                            ],
+                        }
+                    ],
+                },
+            },
+        )
+        assert checkers_preview.status_code == 200
+        with Image.open(io.BytesIO(checkers_preview.content)) as image:
+            assert image.size == (960, 480)
+
+
+def test_config_defaults_checkers_dimensions(tmp_path: Path) -> None:
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text(
+        """
+devices:
+  CHECKERS-SHOW501:
+    name: Kitchen Show 5
+    model: CHECKERS
+""",
+        encoding="utf-8",
+    )
+
+    from flexdisplay_bridge.config import load_config
+
+    settings = load_config(config_path)
+    device = settings.devices["CHECKERS-SHOW501"]
+    assert device.width == 960
+    assert device.height == 480
 
 
 def test_rook_mqtt_discovery_removes_embedded_firmware_update() -> None:

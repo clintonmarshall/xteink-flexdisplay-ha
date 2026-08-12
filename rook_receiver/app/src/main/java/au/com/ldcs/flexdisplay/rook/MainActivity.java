@@ -32,6 +32,7 @@ public final class MainActivity extends Activity {
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private final ExecutorService notificationNetwork = Executors.newSingleThreadExecutor();
     private final Runnable scheduledRefresh = () -> refresh(false);
+    private final ReceiverProfile profile = ReceiverProfile.detect();
     private ReceiverConfig config;
     private FlexDisplayClient client;
     private FrameLayout root;
@@ -156,8 +157,8 @@ public final class MainActivity extends Activity {
 
     private FlexDisplayClient.Interaction interactionAt(float viewX, float viewY) {
         if (root.getWidth() <= 0 || root.getHeight() <= 0) return null;
-        float x = viewX * 480f / root.getWidth();
-        float y = viewY * 480f / root.getHeight();
+        float x = viewX * profile.width / root.getWidth();
+        float y = viewY * profile.height / root.getHeight();
         for (FlexDisplayClient.Interaction interaction : interactions) {
             if (interaction.contains(x, y)) return interaction;
         }
@@ -469,13 +470,13 @@ public final class MainActivity extends Activity {
         url.setText(config.bridgeUrl);
         url.setSingleLine(true);
         EditText deviceId = new EditText(this);
-        deviceId.setHint("ROOK-LIVINGROOM");
+        deviceId.setHint(profile.idPrefix + "-LIVINGROOM");
         deviceId.setText(config.deviceId);
         deviceId.setSingleLine(true);
         form.addView(url);
         form.addView(deviceId);
         new AlertDialog.Builder(this)
-                .setTitle("FlexDisplay Spot")
+                .setTitle("FlexDisplay " + profile.label)
                 .setMessage("Enter the LAN address of FlexDisplay Bridge. Hold outside an interactive tile to return here.")
                 .setView(form)
                 .setCancelable(config.isReady())

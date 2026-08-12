@@ -1,13 +1,15 @@
-# FlexDisplay receiver for Echo Spot (rook)
+# FlexDisplay Android receiver
 
-This Android 11 kiosk client turns the original 2017 Echo Spot (`rook`) into a
-managed FlexDisplay target. It uses the same Bridge screen endpoint and device
-record as the XTEINK displays while declaring Android, colour, touch, and round
-screen capabilities.
+This Android 11 kiosk client turns Amazon LineageOS devices into managed
+FlexDisplay targets. It currently supports the original 2017 Echo Spot (`rook`)
+and the 2019 Echo Show 5 (`checkers`). It uses the same Bridge screen endpoint
+and device record as the XTEINK displays while declaring Android, colour, touch,
+and device-specific screen capabilities.
 
 ## Features
 
-- 480 × 480 circular-safe colour dashboards rendered by Dashboard Studio
+- 480 × 480 circular-safe Spot dashboards rendered by Dashboard Studio
+- 960 × 480 landscape Show 5 dashboards rendered by Dashboard Studio
 - automatic Bridge registration and periodic telemetry
 - cached-image and empty-unchanged transfer support
 - swipe left/right for previous/next page and tap empty space to refresh
@@ -41,16 +43,16 @@ The debug APK is written to
 adb install -r app/build/outputs/apk/debug/app-debug.apk
 adb shell am start -n au.com.ldcs.flexdisplay.rook/.MainActivity \
   --es bridge_url http://HOME_ASSISTANT_IP:8099 \
-  --es device_id ROOK-LIVINGROOM
+  --es device_id CHECKERS-SHOW501
 ```
 
-The Bridge must be reachable directly from the Spot over the trusted LAN. A
+The Bridge must be reachable directly from the receiver over the trusted LAN. A
 Home Assistant ingress URL is not suitable because it requires a browser
 session; publish the add-on's TCP port 8099 instead. Confirm with
 `http://HOME_ASSISTANT_IP:8099/healthz` before configuring the receiver.
 
-On first launch Android may ask which Home app to use. Choose **FlexDisplay
-Spot** and select **Always**. Long-press outside an interactive tile to change
+On first launch Android may ask which Home app to use. Choose **FlexDisplay**
+and select **Always**. Long-press outside an interactive tile to change
 the Bridge address later.
 
 ## Touch controls
@@ -95,9 +97,9 @@ Studio page, changing a profile, or issuing a device command wakes the receiver
 immediately instead of waiting for its periodic screen request. If a refresh
 arrives while an image is already downloading, the receiver remembers it and
 fetches once more after the active request completes. The Bridge classifies the
-Spot as `always_on_color`, keeps its sleep plan awake, and ignores battery and
-unchanged-image interval multipliers; the 60-second interval remains only as a
-recovery fallback.
+Android receiver as `always_on_color`, keeps its sleep plan awake, and ignores
+battery and unchanged-image interval multipliers; the 60-second interval remains
+only as a recovery fallback.
 
-The LineageOS rook build is experimental and SELinux-permissive. Keep ADB and
-the Bridge API on a trusted LAN; do not expose either directly to the internet.
+The LineageOS builds are experimental and SELinux-permissive. Keep ADB and the
+Bridge API on a trusted LAN; do not expose either directly to the internet.

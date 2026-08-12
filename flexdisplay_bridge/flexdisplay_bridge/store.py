@@ -23,7 +23,16 @@ PROBLEM_RESET_REASONS = {
 def _is_android_receiver(record: dict[str, Any]) -> bool:
     model = str(record.get("model") or "").upper()
     normalized = "".join(character for character in model if character.isalnum())
-    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+    return normalized in {
+        "ROOK",
+        "ECHOSPOT",
+        "ECHOSPOT2017",
+        "AMAZONECHOSPOT",
+        "CHECKERS",
+        "ECHOSHOW5",
+        "ECHOSHOW52019",
+        "AMAZONECHOSHOW5",
+    }
 
 
 def utc_now() -> str:

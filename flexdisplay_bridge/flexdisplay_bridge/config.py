@@ -337,7 +337,7 @@ def _device(
     explicit = tuple(_entity(item) for item in value.get("entities", []))
     entities = _merge_entities(defaults, profile_entities, explicit)
     model = str(value.get("model") or ("X4" if device_id.startswith("X4-") else "X3"))
-    default_width, default_height = ((480, 800) if model.upper() == "X4" else (528, 792))
+    default_width, default_height = _default_dimensions(model)
     return DeviceConfig(
         name=str(value.get("name") or device_id),
         area=str(value.get("area") or ""),
@@ -368,6 +368,19 @@ def _device(
             "auto",
         ),
     )
+
+
+def _default_dimensions(model: str) -> tuple[int, int]:
+    normalized = "".join(character for character in model.upper() if character.isalnum())
+    if normalized == "X4":
+        return (480, 800)
+    if normalized in {"N4", "ZECTRIXNOTE4"}:
+        return (400, 300)
+    if normalized == "ROOK":
+        return (480, 480)
+    if normalized in {"CHECKERS", "ECHOSHOW5", "ECHOSHOW52019", "AMAZONECHOSHOW5"}:
+        return (960, 480)
+    return (528, 792)
 
 
 def load_config(path: str | Path | None = None) -> BridgeConfig:

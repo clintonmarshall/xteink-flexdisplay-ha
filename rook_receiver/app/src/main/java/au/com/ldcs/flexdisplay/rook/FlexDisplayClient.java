@@ -140,9 +140,11 @@ final class FlexDisplayClient {
     }
 
     private final Context context;
+    private final ReceiverProfile profile;
 
     FlexDisplayClient(Context context) {
         this.context = context.getApplicationContext();
+        this.profile = ReceiverProfile.detect();
     }
 
     Result fetch(
@@ -155,13 +157,11 @@ final class FlexDisplayClient {
         HttpURLConnection connection = open(config, "/api/v1/screen", "GET", 25_000);
         connection.setRequestProperty("Accept", "image/png");
         connection.setRequestProperty("X-FlexDisplay-ID", config.deviceId);
-        connection.setRequestProperty("X-FlexDisplay-Width", "480");
-        connection.setRequestProperty("X-FlexDisplay-Height", "480");
-        connection.setRequestProperty("X-FlexDisplay-Model", "ROOK");
+        connection.setRequestProperty("X-FlexDisplay-Width", Integer.toString(profile.width));
+        connection.setRequestProperty("X-FlexDisplay-Height", Integer.toString(profile.height));
+        connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
         connection.setRequestProperty("X-FlexDisplay-Firmware", "android-0.2.0");
-        connection.setRequestProperty(
-                "X-FlexDisplay-Capabilities",
-                "android,color,touch,round-display,png,empty-unchanged,kiosk,interactions,notifications,audio,always-on-color,long-poll-refresh");
+        connection.setRequestProperty("X-FlexDisplay-Capabilities", profile.capabilities());
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
                 Long.toString(SystemClock.elapsedRealtime() / 1000));
