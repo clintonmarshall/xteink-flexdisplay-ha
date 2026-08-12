@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.46.0
+
+- Add a read-only Bridge & Connections workspace that reports sanitized Home
+  Assistant, MQTT, FlexHub, effective-configuration, and firmware-channel state.
+- Centralize trusted, capability-aware management for X3/X4, Note 4, Android
+  receivers, generic ESP displays, and unknown devices, with incompatible or
+  untrusted actions failing closed.
+- Add saved device groups, non-mutating policy and firmware impact previews,
+  identity provenance, unified audit timelines, configuration-drift alerts,
+  and an authenticated redacted support bundle.
+- Reconcile Home Assistant entities when device capabilities change and keep
+  device ownership, commands, policies, provisioning, and updates specific to
+  each supported family.
+- Upgrade the Android receiver to `0.3.0` with press-and-hold Home Assistant
+  Assist, local PCM playback, clearer text-only responses, and reliable audio
+  draining and volume recovery.
+- Harden FlexHub persistence, provenance, PIN validation, URL handling, and
+  error redaction while preserving legacy X3/X4 check-ins.
+- Keep the packaged X3/X4 and Note 4 firmware artifacts unchanged; this release
+  requires no device firmware flash or OTA rollout.
+
 ## 0.45.1
 
 - Add the Echo Show 5 2019 (`checkers`) as a managed 960 x 480 Android
