@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import is_note4, management_supports, reports_usb_power
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -66,6 +67,18 @@ class FlexDisplayPolicySwitch(FlexDisplayEntity, SwitchEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        key = self.entity_description.key
+        if key in {"live_mode", "auto_start"}:
+            return management_supports(record, "fleet_policy")
+        if key == "intelligent_sleep":
+            return management_supports(record, "sleep_policy")
+        if key == "stay_awake_on_usb":
+            return management_supports(
+                record, "sleep_policy"
+            ) and reports_usb_power(record)
+        return False
+
     @property
     def is_on(self) -> bool:
         """Return the assigned policy state."""
@@ -99,6 +112,9 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_voice_mute"
 
+    def _record_supported(self, record: dict) -> bool:
+        return is_note4(record)
+
     @property
     def is_on(self) -> bool:
         return bool(self.record.get("desired_voice_muted", self.record.get("voice_muted")))
@@ -121,14 +137,27 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
 def _entities_for_device(
     coordinator: FlexDisplayCoordinator, device_id: str
 ) -> tuple[SwitchEntity, ...]:
-    entities: list[SwitchEntity] = [
-        FlexDisplayPolicySwitch(coordinator, device_id, description)
-        for description in DESCRIPTIONS
-    ]
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
-    if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
+    entities: list[SwitchEntity] = [
+        FlexDisplayPolicySwitch(coordinator, device_id, description)
+        for description in DESCRIPTIONS
+        if (
+            description.key in {"live_mode", "auto_start"}
+            and management_supports(record, "fleet_policy")
+        )
+        or (
+            description.key == "intelligent_sleep"
+            and management_supports(record, "sleep_policy")
+        )
+        or (
+            description.key == "stay_awake_on_usb"
+            and management_supports(record, "sleep_policy")
+            and reports_usb_power(record)
+        )
+    ]
+    if is_note4(record):
         entities.append(FlexDisplayVoiceMute(coordinator, device_id))
     return tuple(entities)
 

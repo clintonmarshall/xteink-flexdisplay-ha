@@ -215,6 +215,28 @@ resend on the device's next check-in; normal dashboard or Photo Frame content
 resumes afterwards. History is stored under the App data volume and is bounded
 per device.
 
+## Mixed-fleet lifecycle operations
+
+Fleet Management uses the Bridge capability contract for X3/X4, Note4,
+Amazon Android receivers, and generic embedded displays. Device cards show the
+reported or inferred identity, confidence, firmware owner, and any conflict
+between a device ID prefix and the model reported by the device. **Timeline**
+merges identity, provisioning, command, firmware, reset, and management history
+for one display.
+
+Selected devices can be saved as a reusable group. Policy and X3/X4 firmware
+actions accept that group as their scope, while still excluding unsupported
+families independently. Use **Preview impact** before deploying to see eligible,
+filtered, blocked, excluded, and offline devices without changing Bridge state
+or creating a firmware rollout.
+
+**Bridge & Connections** reports effective configuration and highlights saved
+overrides, disconnected configured services, and release-channel drift. Its
+support-bundle download is authenticated and contains an allowlisted,
+credential-free system and fleet snapshot. Home Assistant re-evaluates entity
+factories when device capabilities change, adds newly eligible controls, and
+makes stale incompatible controls unavailable.
+
 ## Zero-touch provisioning
 
 FlexDisplay 0.10.0 fleet builds register on their first bridge request. Defaults

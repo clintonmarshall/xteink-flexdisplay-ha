@@ -20,6 +20,12 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import (
+    firmware_manageable,
+    is_note4,
+    reports_battery,
+    supports_xteink_ota,
+)
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -345,7 +351,31 @@ def _device_sensors(
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
-    if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
+    battery_keys = {"battery_percent", "battery_voltage"}
+    managed_firmware_keys = {
+        "firmware_update_status",
+        "firmware_update_stage",
+        "firmware_update_percent",
+        "firmware_update_error",
+        "firmware_update_error_at",
+        "firmware_install_blockers",
+    }
+    descriptions = [
+        description
+        for description in descriptions
+        if not (
+            (description.key in battery_keys and not reports_battery(record))
+            or (
+                description.key in managed_firmware_keys
+                and not firmware_manageable(record)
+            )
+            or (
+                description.key == "firmware_rollout_status"
+                and not supports_xteink_ota(record)
+            )
+        )
+    ]
+    if is_note4(record):
         descriptions.extend(VOICE_DESCRIPTIONS)
     return tuple(
         FlexDisplaySensor(coordinator, device_id, description)
@@ -367,6 +397,30 @@ class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
         super().__init__(coordinator, device_id)
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
+
+    def _record_supported(self, record: dict) -> bool:
+        key = self.entity_description.key
+        if key in {"battery_percent", "battery_voltage"}:
+            return reports_battery(record)
+        if key in {
+            "firmware_update_status",
+            "firmware_update_stage",
+            "firmware_update_percent",
+            "firmware_update_error",
+            "firmware_update_error_at",
+            "firmware_install_blockers",
+        }:
+            return firmware_manageable(record)
+        if key == "firmware_rollout_status":
+            return supports_xteink_ota(record)
+        if key.startswith("voice_") or key in {
+            "last_voice_request",
+            "last_voice_response",
+            "last_voice_error",
+            "last_voice_at",
+        }:
+            return is_note4(record)
+        return True
 
     @property
     def native_value(self) -> Any:

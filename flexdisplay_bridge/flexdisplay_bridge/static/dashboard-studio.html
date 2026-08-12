@@ -401,13 +401,18 @@
     .fleet-grid { display: grid; grid-template-columns: repeat(2, minmax(280px, 1fr)); gap: 14px; padding: 20px; }
     .fleet-card { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: #0d151d; }
     .fleet-card-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px; border-bottom: 1px solid var(--line); }
+    .fleet-device-identity { display: grid; min-width: 0; gap: 3px; }
+    .fleet-device-meta { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+    .capability-badge { display: inline-flex; align-items: center; min-height: 20px; padding: 2px 6px; border: 1px solid rgba(103,214,193,.3); border-radius: 999px; color: var(--accent-2); font-size: 9px; font-weight: 800; letter-spacing: .035em; text-transform: uppercase; }
     .fleet-card-body { display: grid; grid-template-columns: 112px 1fr; gap: 12px; padding: 12px; }
     .fleet-preview { width: 112px; aspect-ratio: 3 / 5; object-fit: contain; background: #f4f4ef; border-radius: 6px; }
     .fleet-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; align-content: start; }
     .fleet-fact { padding: 7px; border-radius: 7px; background: var(--panel-2); }
     .fleet-fact strong { display: block; font-size: 12px; }
+    .fleet-fact.not-applicable strong { color: var(--muted); font-weight: 600; }
     .fleet-trends { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 7px; }
     .fleet-trend { padding: 7px; border-radius: 7px; background: var(--panel-2); }
+    .fleet-trend.not-applicable { display: grid; align-content: center; color: var(--muted); }
     .fleet-spark { display: block; width: 100%; height: 28px; margin-top: 4px; }
     .fleet-spark polyline { fill: none; stroke: var(--accent); stroke-width: 2; vector-effect: non-scaling-stroke; }
     .health-badge { padding: 3px 8px; border-radius: 999px; color: #08130f; background: var(--accent-2); font-size: 10px; font-weight: 850; text-transform: uppercase; }
@@ -443,7 +448,10 @@
     .policy-summary strong { display: block; margin-top: 3px; font-size: 18px; }
     .policy-device-list { display: grid; gap: 8px; padding-right: 4px; align-content: start; }
     .policy-device { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: #0d151d; }
+    .policy-device.unsupported { border-style: dashed; }
     .policy-device input { width: auto; min-height: auto; }
+    .policy-device-summary { display: block; color: var(--muted); font-size: 12px; }
+    .policy-device-summary .capability-badge { margin-left: 5px; vertical-align: middle; }
     .management-shell { grid-template-columns: minmax(340px, 410px) minmax(430px, 1fr); }
     .management-group { display: grid; gap: 10px; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: rgba(255,255,255,.015); }
     .management-group h3 { color: var(--accent-2); }
@@ -458,10 +466,22 @@
     .firmware-progress span { display: block; height: 100%; border-radius: inherit; background: var(--accent-2); }
     .firmware-device-actions { display: flex; justify-content: flex-end; gap: 6px; margin-top: 7px; }
     .firmware-device-actions button { min-height: 28px; padding: 3px 8px; font-size: 10px; }
+    .identity-line { display: inline-flex; flex-wrap: wrap; gap: 5px; align-items: center; margin-top: 4px; color: var(--accent-2); }
+    .identity-line.conflict { color: var(--danger); }
+    .fleet-impact-preview { display: grid; gap: 8px; margin: 0 0 12px; padding: 12px; border: 1px solid rgba(255,180,84,.42); border-radius: 10px; background: rgba(255,180,84,.06); font-size: 11px; }
+    .fleet-impact-preview[hidden] { display: none; }
+    .fleet-impact-preview strong { color: var(--accent-2); }
+    .timeline-dialog-body { width: min(720px, calc(100vw - 32px)); max-height: min(820px, calc(100vh - 32px)); overflow: auto; }
+    .timeline-list { display: grid; gap: 8px; }
+    .timeline-event { display: grid; grid-template-columns: 120px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel-2); }
+    .timeline-event time, .timeline-event span { color: var(--muted); font-size: 10px; }
+    .timeline-event p { margin: 3px 0 0; color: var(--muted); font-size: 11px; }
     .firmware-status { margin-top: 4px; color: var(--muted); font-size: 10px; }
     .firmware-status.failed { color: var(--danger); }
+    .firmware-status.not-applicable { color: var(--muted); }
     .sync-badge { padding: 3px 7px; border-radius: 999px; background: var(--accent-2); color: #08130f; font-size: 9px; font-weight: 850; text-transform: uppercase; }
     .sync-badge.pending, .sync-badge.offline { background: var(--danger); color: #24100f; }
+    .sync-badge.not_applicable { border: 1px solid var(--line); background: var(--panel-2); color: var(--muted); }
     .hub-cards { display: grid; grid-template-columns: repeat(2, minmax(220px, 1fr)); gap: 12px; }
     .hub-card { display: grid; gap: 8px; padding: 14px; border: 1px solid var(--line); border-radius: 11px; background: #0d151d; }
     .hub-facts { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; }
@@ -722,6 +742,120 @@
     }
     .settings-card p { margin: 0; color: var(--muted); font-size: 12px; }
     .settings-card button { justify-self: start; }
+    .system-workspace { gap: 24px; }
+    .system-hero-actions { display: flex; align-items: center; gap: 10px; }
+    .system-last-updated { color: var(--muted); font-size: 11px; }
+    .system-notice {
+      display: flex;
+      min-height: 46px;
+      align-items: center;
+      gap: 10px;
+      padding: 11px 14px;
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      background: #0e1720;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .system-notice[hidden] { display: none; }
+    .system-notice.error { border-color: rgba(255, 122, 121, .55); background: rgba(255, 122, 121, .07); color: var(--danger); }
+    .system-notice .live-dot { flex: 0 0 auto; margin: 0; }
+    .system-section { display: grid; gap: 12px; }
+    .system-section-heading { display: flex; align-items: end; justify-content: space-between; gap: 16px; }
+    .system-section-heading h3 { margin-bottom: 2px; font-size: 16px; }
+    .system-section-heading p { margin: 0; color: var(--muted); font-size: 11px; }
+    .system-status-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+    .system-status-card {
+      display: grid;
+      align-content: start;
+      gap: 12px;
+      min-height: 166px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0e1720;
+    }
+    .system-status-card.healthy { border-color: rgba(103, 214, 193, .42); }
+    .system-status-card.warning { border-color: rgba(255, 180, 84, .55); }
+    .system-status-card.offline { border-color: rgba(255, 122, 121, .55); }
+    .system-status-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .system-service-name { display: flex; align-items: center; gap: 8px; font-weight: 800; }
+    .system-service-dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; background: var(--muted); box-shadow: 0 0 0 4px rgba(146, 162, 176, .08); }
+    .system-status-card.healthy .system-service-dot { background: var(--accent-2); box-shadow: 0 0 0 4px rgba(103, 214, 193, .1); }
+    .system-status-card.warning .system-service-dot { background: var(--accent); box-shadow: 0 0 0 4px rgba(255, 180, 84, .1); }
+    .system-status-card.offline .system-service-dot { background: var(--danger); box-shadow: 0 0 0 4px rgba(255, 122, 121, .1); }
+    .system-state-badge {
+      display: inline-flex;
+      width: fit-content;
+      align-items: center;
+      min-height: 24px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #111d27;
+      color: var(--muted);
+      font-size: 10px;
+      font-weight: 800;
+      letter-spacing: .045em;
+      text-transform: uppercase;
+    }
+    .system-state-badge.healthy { border-color: rgba(103, 214, 193, .35); color: var(--accent-2); }
+    .system-state-badge.warning { border-color: rgba(255, 180, 84, .42); color: var(--accent); }
+    .system-state-badge.offline { border-color: rgba(255, 122, 121, .42); color: var(--danger); }
+    .system-status-detail { min-height: 35px; margin: 0; color: var(--muted); font-size: 12px; }
+    .system-status-meta { display: grid; gap: 5px; margin-top: auto; color: var(--muted); font-size: 10px; }
+    .system-status-meta span { display: flex; justify-content: space-between; gap: 10px; }
+    .system-status-meta strong { overflow-wrap: anywhere; color: var(--ink); text-align: right; font-weight: 700; }
+    .system-table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 12px; background: #0e1720; }
+    .system-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+    .system-table th, .system-table td { padding: 11px 13px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    .system-table th { background: #121e28; color: var(--muted); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+    .system-table tbody tr:last-child td { border-bottom: 0; }
+    .system-table td:first-child { min-width: 180px; color: var(--ink); font-weight: 750; }
+    .system-table td:nth-child(2) { min-width: 160px; overflow-wrap: anywhere; }
+    .system-table tr.warning td { background: rgba(255, 180, 84, .035); }
+    .system-table tr.warning td:first-child { box-shadow: inset 3px 0 var(--accent); }
+    .system-table .system-table-empty { padding: 24px; color: var(--muted); text-align: center; font-weight: 500; }
+    .system-setting-value { display: grid; gap: 3px; }
+    .system-setting-value > strong { color: var(--ink); font-weight: 700; }
+    .system-setting-note { color: var(--accent); font-size: 10px; }
+    .system-setting-detail { color: var(--muted); font-size: 10px; }
+    .system-source { color: var(--accent-2); font-weight: 700; }
+    .system-owner { color: var(--muted); }
+    .system-firmware-grid, .system-link-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+    .system-alert-list { display: grid; gap: 8px; }
+    .system-alert { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 11px 13px; border: 1px solid rgba(255,180,84,.42); border-radius: 10px; background: rgba(255,180,84,.06); }
+    .system-alert.info { border-color: var(--line); background: #0e1720; }
+    .system-alert p { margin: 2px 0 0; color: var(--muted); font-size: 11px; }
+    .system-firmware-card, .system-link-card {
+      display: grid;
+      align-content: start;
+      gap: 10px;
+      padding: 16px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #0e1720;
+    }
+    .system-firmware-card p, .system-link-card p { margin: 0; color: var(--muted); font-size: 11px; }
+    .system-firmware-meta { display: grid; gap: 6px; }
+    .system-firmware-meta span { display: flex; justify-content: space-between; gap: 12px; color: var(--muted); font-size: 11px; }
+    .system-firmware-meta strong { color: var(--ink); text-align: right; overflow-wrap: anywhere; }
+    .system-link-card { grid-template-rows: auto 1fr auto; }
+    .system-link-card a { justify-self: start; color: var(--accent-2); font-size: 12px; font-weight: 800; text-decoration: none; }
+    .system-link-card a:hover, .system-link-card a:focus-visible { text-decoration: underline; }
+    .system-empty-card { grid-column: 1 / -1; padding: 24px; border: 1px dashed var(--line); border-radius: 12px; color: var(--muted); text-align: center; }
+    .system-ownership {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      gap: 12px;
+      padding: 16px;
+      border: 1px solid rgba(103, 214, 193, .28);
+      border-radius: 12px;
+      background: rgba(103, 214, 193, .055);
+    }
+    .system-ownership-mark { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 9px; background: rgba(103, 214, 193, .13); color: var(--accent-2); font-weight: 900; }
+    .system-ownership h3 { margin-bottom: 4px; }
+    .system-ownership p { margin: 0; color: var(--muted); font-size: 12px; }
     .inspector > .section-head:first-child {
       position: sticky;
       z-index: 2;
@@ -754,6 +888,8 @@
     @media (max-width: 980px) {
       .mesh-console-shell { grid-template-columns: minmax(220px, .7fr) minmax(340px, 1.3fr); }
       .mesh-console-shell .mesh-panel:last-child { grid-column: 1 / -1; }
+      .system-status-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .system-firmware-grid, .system-link-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     }
     @media (max-width: 720px) {
       .studio-shell { display: block; }
@@ -784,6 +920,10 @@
       .module-row { grid-template-columns: 1fr; gap: 8px; padding: 16px; }
       .module-row button { width: auto; justify-self: start; }
       .settings-grid { grid-template-columns: 1fr; }
+      .system-hero-actions { width: 100%; justify-content: space-between; }
+      .system-status-grid, .system-firmware-grid, .system-link-grid { grid-template-columns: 1fr; }
+      .system-section-heading { align-items: flex-start; flex-direction: column; }
+      .system-ownership { grid-template-columns: 1fr; }
       .guide-strip { grid-template-columns: 1fr; }
       .guide-copy strong, .guide-copy span { white-space: normal; }
       .subapp-header { padding: 16px 16px 0; }
@@ -830,7 +970,7 @@
       <button data-workspace="content">Content</button>
       <button data-workspace="fleet">Fleet</button>
       <button data-workspace="flexhub">FlexHub</button>
-      <button data-workspace="settings">Settings</button>
+      <button data-workspace="settings">Bridge &amp; Connections</button>
     </nav>
 
     <div class="workspace-stage">
@@ -1155,7 +1295,7 @@
             </div>
             <div class="module-row">
               <div class="module-name"><strong>Fleet health</strong><span class="module-version">v0.20</span></div>
-              <div class="module-description">Inspect battery, connectivity, firmware, SD health, screen history, and recent check-in trends.</div>
+              <div class="module-description">Inspect connectivity, software, screen history, and family-specific telemetry such as battery or SD health.</div>
               <button id="openFleetHealth">View health</button>
             </div>
           </div>
@@ -1180,16 +1320,92 @@
       </section>
 
       <section id="workspaceSettings" class="workspace-panel" data-workspace-panel="settings" hidden>
-        <div class="module-workspace">
+        <div class="module-workspace system-workspace">
           <div class="module-hero">
-            <div><div class="eyebrow">Settings workspace</div><h2>Configure how Studio behaves</h2><p class="muted">Jump directly to the relevant contextual settings instead of searching through one long control page.</p></div>
+            <div><div class="eyebrow">Bridge &amp; Connections</div><h2>Understand what is running and who owns it</h2><p class="muted">Read-only operational status for the Bridge, Home Assistant, MQTT, FlexHub, effective configuration, and release channels.</p></div>
+            <div class="system-hero-actions">
+              <span id="systemLastUpdated" class="system-last-updated" aria-live="polite">Not loaded</span>
+              <button id="downloadSupportBundle" type="button">Download support bundle</button>
+              <button id="refreshSystemStatus" type="button">Refresh status</button>
+            </div>
           </div>
-          <div class="settings-grid">
-            <article class="settings-card"><div><h3>Profiles and pages</h3><p>Choose a dashboard profile, organise its pages, and manage profile-level actions.</p></div><button data-studio-target="profileSelect" class="primary">Open in Studio</button></article>
-            <article class="settings-card"><div><h3>Physical-button actions</h3><p>Assign short, double, and long presses and show optional gesture indicators on the display.</p></div><button data-studio-target="physicalButtonSection">Configure buttons</button></article>
-            <article class="settings-card"><div><h3>Fetch-screen identity</h3><p>Set the default company logo, owner, device name, and loading message for the fleet.</p></div><button data-trigger="openLoadingScreen">Design fetch screen</button></article>
-            <article class="settings-card"><div><h3>Bridge authentication</h3><p>The Studio uses the API key configured in the FlexDisplay Bridge App and keeps it only for this browser session.</p></div><button data-studio-target="authPanel">Review connection</button></article>
+
+          <div id="systemWorkspaceNotice" class="system-notice" role="status" aria-live="polite">
+            <span class="live-dot"></span><span>Loading Bridge and connection status…</span>
           </div>
+
+          <section id="systemAlertsSection" class="system-section" aria-labelledby="systemAlertsHeading" hidden>
+            <div class="system-section-heading">
+              <div><h3 id="systemAlertsHeading">Configuration drift and attention</h3><p>Effective overrides, disconnected configured services, and release-channel readiness.</p></div>
+            </div>
+            <div id="systemAlertList" class="system-alert-list"></div>
+          </section>
+
+          <div id="systemAuthPanel" class="auth" hidden>
+            <strong>Bridge key required</strong>
+            <span class="small muted">Enter the API key configured in the FlexDisplay Bridge App to view protected status.</span>
+            <input id="systemApiKey" type="password" autocomplete="off" placeholder="Bridge API key">
+            <button id="systemUnlockButton" class="primary" type="button">Unlock status</button>
+          </div>
+
+          <section class="system-section" aria-labelledby="systemConnectionsHeading">
+            <div class="system-section-heading">
+              <div><h3 id="systemConnectionsHeading">Runtime status</h3><p>Connection health is reported by the Bridge; controls remain with the owning service.</p></div>
+            </div>
+            <div id="systemStatusGrid" class="system-status-grid">
+              <article id="systemStatusBridge" class="system-status-card" data-system-service="bridge" aria-label="Bridge status">
+                <div class="system-status-head"><span class="system-service-name"><i class="system-service-dot" aria-hidden="true"></i>Bridge</span><span class="system-state-badge" data-system-status>Loading</span></div>
+                <p class="system-status-detail" data-system-detail>Reading local runtime health…</p>
+                <div class="system-status-meta" data-system-meta></div>
+              </article>
+              <article id="systemStatusHomeAssistant" class="system-status-card" data-system-service="home_assistant" aria-label="Home Assistant connection status">
+                <div class="system-status-head"><span class="system-service-name"><i class="system-service-dot" aria-hidden="true"></i>Home Assistant</span><span class="system-state-badge" data-system-status>Loading</span></div>
+                <p class="system-status-detail" data-system-detail>Checking Home Assistant API access…</p>
+                <div class="system-status-meta" data-system-meta></div>
+              </article>
+              <article id="systemStatusMqtt" class="system-status-card" data-system-service="mqtt" aria-label="MQTT connection status">
+                <div class="system-status-head"><span class="system-service-name"><i class="system-service-dot" aria-hidden="true"></i>MQTT</span><span class="system-state-badge" data-system-status>Loading</span></div>
+                <p class="system-status-detail" data-system-detail>Checking broker connectivity…</p>
+                <div class="system-status-meta" data-system-meta></div>
+              </article>
+              <article id="systemStatusFlexHub" class="system-status-card" data-system-service="flexhub" aria-label="FlexHub connection status">
+                <div class="system-status-head"><span class="system-service-name"><i class="system-service-dot" aria-hidden="true"></i>FlexHub</span><span class="system-state-badge" data-system-status>Loading</span></div>
+                <p class="system-status-detail" data-system-detail>Checking configured hub connection…</p>
+                <div class="system-status-meta" data-system-meta></div>
+              </article>
+            </div>
+          </section>
+
+          <aside class="system-ownership" aria-labelledby="systemOwnershipHeading">
+            <span class="system-ownership-mark" aria-hidden="true">HA</span>
+            <div><h3 id="systemOwnershipHeading">Home Assistant owns the Bridge lifecycle and credentials</h3><p>Start, stop, upgrade, network, and credential changes belong in the Home Assistant add-on configuration. Studio reports the effective result but never reveals secrets or edits those settings.</p></div>
+          </aside>
+
+          <section class="system-section" aria-labelledby="systemSettingsHeading">
+            <div class="system-section-heading">
+              <div><h3 id="systemSettingsHeading">Effective settings</h3><p>Resolved values with their source, activation state, and operational owner.</p></div>
+            </div>
+            <div class="system-table-wrap">
+              <table class="system-table">
+                <thead><tr><th scope="col">Setting</th><th scope="col">Effective value</th><th scope="col">Source</th><th scope="col">Apply state</th><th scope="col">Owner</th></tr></thead>
+                <tbody id="systemSettingsBody"><tr><td class="system-table-empty" colspan="5">Loading effective settings…</td></tr></tbody>
+              </table>
+            </div>
+          </section>
+
+          <section class="system-section" aria-labelledby="systemFirmwareHeading">
+            <div class="system-section-heading">
+              <div><h3 id="systemFirmwareHeading">Firmware and app channels</h3><p>Release ownership stays separated across X-series firmware, Note4 firmware, and Android receiver applications.</p></div>
+            </div>
+            <div id="systemFirmwareChannels" class="system-firmware-grid"><div class="system-empty-card">Loading release channels…</div></div>
+          </section>
+
+          <section class="system-section" aria-labelledby="systemDiagnosticsHeading">
+            <div class="system-section-heading">
+              <div><h3 id="systemDiagnosticsHeading">Diagnostics and owned configuration</h3><p>Open the appropriate operational surface without copying credentials into Studio. App lifecycle controls and secrets remain in Home Assistant.</p></div>
+            </div>
+            <div id="systemDiagnosticLinks" class="system-link-grid"><div class="system-empty-card">Loading diagnostic links…</div></div>
+          </section>
         </div>
       </section>
     </div>
@@ -1342,7 +1558,7 @@
   </dialog>
   <dialog id="fleetHealthDialog" class="library-dialog">
     <div class="subapp-header">
-      <div><div class="eyebrow">Fleet health v0.20</div><h2>XTEINK devices</h2><p class="subapp-description">See battery, connection, content, and acknowledgement health for every known display.</p></div>
+      <div><div class="eyebrow">Fleet health v0.20</div><h2>Managed display fleet</h2><p class="subapp-description">See connection, content, and capability-aware health for every known display without assuming all families expose the same telemetry.</p></div>
       <div class="button-row">
         <button id="refreshFleetHealth">Refresh</button>
         <button id="closeFleetHealth" class="icon" title="Close">×</button>
@@ -1354,12 +1570,12 @@
   </dialog>
   <dialog id="fleetPolicyDialog" class="library-dialog">
     <div class="subapp-header">
-      <div><div class="eyebrow">Fleet Management v0.33</div><h2>Policies, profiles and safe firmware rollout</h2><p class="subapp-description">Choose a reusable behaviour, select its devices, then deploy settings or firmware with acknowledgement tracking.</p></div>
+      <div><div class="eyebrow">Fleet Management v0.33</div><h2>Policies, profiles and safe firmware rollout</h2><p class="subapp-description">Choose a reusable behaviour and scope. Each deployment action filters that scope against the capabilities reported for each device family.</p></div>
       <div class="button-row"><button id="refreshFleetPolicies">Refresh</button><button id="closeFleetPolicies" class="icon" title="Close">×</button></div>
     </div>
     <div class="guide-strip" aria-label="Fleet management workflow">
       <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Choose behaviour</strong><span>Select an existing policy or build one</span></div></div>
-      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Select the scope</strong><span>All devices, one model, or a selection</span></div></div>
+      <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Select the scope</strong><span>All compatible devices, one model, or a selection</span></div></div>
       <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Deploy safely</strong><span>Track wake, apply, and acknowledgement</span></div></div>
     </div>
     <div class="library-shell management-shell">
@@ -1395,8 +1611,13 @@
         </section>
 
         <section class="management-group">
-          <div><h3>2 · Choose scope and application</h3><span class="small muted">The same selection is used for policy and firmware actions</span></div>
-          <label><span class="field-title">Apply to<button type="button" class="help-tip" data-tooltip="Choose the entire fleet, one hardware model, or Selected devices. The list on the right shows exactly which devices are in scope.">Help</button></span><select id="fleetPolicyScope"><option value="all">Every X3 and X4</option><option value="x3">All X3 displays</option><option value="x4">All X4 displays</option><option value="devices">Selected devices</option></select></label>
+          <div><h3>2 · Choose scope and application</h3><span class="small muted">Policy and firmware actions filter the selection independently by capability</span></div>
+          <label><span class="field-title">Apply to<button type="button" class="help-tip" data-tooltip="Choose the managed fleet, a saved group, one XTEINK model, or Selected devices. Each action safely excludes devices that do not support it.">Help</button></span><select id="fleetPolicyScope"><option value="all">Every compatible managed display</option><option value="group">Saved device group</option><option value="x3">All X3 displays</option><option value="x4">All X4 displays</option><option value="devices">Selected devices</option></select></label>
+          <div id="fleetGroupControls" class="policy-builder" hidden>
+            <label>Saved group<select id="fleetGroupSelect"></select></label>
+            <div class="field-grid"><label>New group name<input id="fleetGroupName" maxlength="64" placeholder="Reception displays"></label><div class="button-row"><button id="saveFleetGroup" type="button">Save selected devices</button><button id="deleteFleetGroup" type="button" class="danger">Delete group</button></div></div>
+            <p class="small muted" style="margin:0">Select devices on the right, give the cohort a name, then save it for repeat policy and rollout previews.</p>
+          </div>
           <label><span class="field-title">Default application<button type="button" class="help-tip" data-tooltip="Controls which application opens after a reboot or wake. Keep current default leaves each device's existing choice unchanged.">Help</button></span><select id="fleetPolicyMode"><option value="unchanged">Keep current default</option><option value="home_assistant">Home Assistant dashboard</option><option value="photo_frame">Photo Frame</option><option value="reader">CrossPoint Reader</option><option value="trmnl">TRMNL</option><option value="opendisplay">OpenDisplay</option></select></label>
           <label>Dashboard profile<select id="fleetPolicyDashboard"><option value="">Keep current dashboard</option></select></label>
           <label>Photo Frame album<select id="fleetPolicyAlbum"><option value="">Do not change album</option></select></label>
@@ -1408,22 +1629,30 @@
               <label>OpenDisplay transport<select id="fleetPolicyOpenDisplayTransport"><option value="unchanged">Keep current transport policy</option><option value="auto">Auto · LAN on USB, BLE on battery</option><option value="lan_preferred">LAN preferred</option><option value="ble_only">BLE only</option></select></label>
             </div>
           </details>
-          <button id="applyFleetPolicy" class="primary">Deploy policy to scope</button>
+          <div class="button-row"><button id="previewFleetPolicy">Preview impact</button><button id="applyFleetPolicy" class="primary">Deploy policy to scope</button></div>
           <p class="helper-callout"><strong>What happens next:</strong> the device wakes, saves the new revision, and confirms it on its following check-in. Waiting to wake and waiting to confirm are shown separately.</p>
         </section>
 
         <section class="management-group">
-          <div class="task-card-title"><div><h3>3 · Firmware rollout</h3><span class="small muted">Canary first, then automatic bounded rollout</span></div><button type="button" class="help-tip" data-tooltip="FlexDisplay updates one eligible USB-powered canary first. The remaining selected devices start only after the canary reboots and acknowledges the new version.">Help</button></div>
+          <div class="task-card-title"><div><h3>3 · X3/X4 firmware rollout</h3><span class="small muted">Only XTEINK OTA-capable devices · canary first</span></div><button type="button" class="help-tip" data-tooltip="FlexDisplay filters the scope to X3/X4 devices that advertise the trusted XTEINK OTA capability, then updates one eligible USB-powered canary first.">Help</button></div>
           <div id="fleetFirmwareRelease" class="firmware-release">Loading configured release…</div>
           <div id="fleetFirmwareRollout" class="small muted"></div>
-          <div class="button-row"><button id="installFleetFirmware" class="primary">Update selected scope</button><button id="resetFleetFirmware">Reset rollout</button></div>
-          <p class="small muted" style="margin:0">The first eligible USB-powered display becomes the canary. After it reboots and acknowledges successfully, the Bridge continues within the configured parallel limit.</p>
+          <div class="button-row"><button id="previewFleetFirmware">Preview impact</button><button id="installFleetFirmware" class="primary">Update selected scope</button><button id="resetFleetFirmware">Reset rollout</button></div>
+          <p class="small muted" style="margin:0">Note4 firmware and Android receiver apps use their own channels. The first eligible USB-powered X3/X4 becomes the canary, then the Bridge continues within the configured parallel limit.</p>
         </section>
       </div>
       <div>
-        <div class="section-head"><div><h2>Devices and acknowledgements</h2><span class="small muted">Policy and firmware state update automatically</span></div><div class="button-row"><button id="selectAllPolicyDevices">Select all</button><button id="clearPolicyDevices">Clear</button></div></div>
+        <div class="section-head"><div><h2>Devices and acknowledgements</h2><span class="small muted">Cards show action-specific eligibility; incompatible actions are not offered</span></div><div class="button-row"><button id="selectAllPolicyDevices">Select all</button><button id="clearPolicyDevices">Clear</button></div></div>
+        <div id="fleetImpactPreview" class="fleet-impact-preview" hidden></div>
         <div id="fleetPolicyDevices" class="policy-device-list"><div class="empty">Loading devices…</div></div>
       </div>
+    </div>
+  </dialog>
+  <dialog id="deviceTimelineDialog">
+    <div class="dialog-body timeline-dialog-body">
+      <div class="section-head"><div><div class="eyebrow">Device audit timeline</div><h2 id="deviceTimelineTitle" style="font-size:20px">Device activity</h2></div><button id="closeDeviceTimeline" class="icon" type="button" title="Close">×</button></div>
+      <div id="deviceTimelineIdentity" class="helper-callout"></div>
+      <div id="deviceTimelineEvents" class="timeline-list"><div class="empty">Loading device activity…</div></div>
     </div>
   </dialog>
   <dialog id="flexHubDialog" class="library-dialog">
@@ -1801,6 +2030,7 @@
       contentChannelDraft: null,
       contentChannelPreviewUrl: "",
       contentExpandedIndex: null,
+      system: {payload: null, loading: false, error: "", loadedAt: ""},
     };
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
@@ -1817,6 +2047,7 @@
       const response = await fetch(API(path), {...options, headers});
       if (response.status === 401) {
         $("#authPanel").hidden = false;
+        $("#systemAuthPanel").hidden = state.workspace !== "settings";
         throw new Error("Bridge API key required");
       }
       if (!response.ok) {
@@ -1851,6 +2082,9 @@
         panel.hidden = !active;
         panel.classList.toggle("active", active);
       });
+      if (selected === "settings" && !state.system.loading) {
+        loadSystemStatus({quiet: Boolean(state.system.payload)});
+      }
       window.scrollTo({top: 0, behavior: "smooth"});
     }
 
@@ -1872,6 +2106,360 @@
       $("#headerSyncDetail").textContent = selected?.last_seen ? `Last seen ${selected.last_seen}` : "Local preview";
       $("#headerAssignProfile").disabled = !selected;
       $("#fleetWorkspaceStatus").innerHTML = `<span class="live-dot"></span>${online} online · ${state.devices.length} total`;
+    }
+
+    const SYSTEM_SECRET_KEY = /(password|passphrase|secret|token|api[_-]?key|credential|private[_-]?key|client[_-]?secret|authorization|cookie)/i;
+    const SYSTEM_POSITIVE_STATES = new Set(["ok", "healthy", "ready", "running", "online", "connected", "available", "active", "configured", "current", "applied", "effective", "synced"]);
+    const SYSTEM_WARNING_STATES = new Set(["warning", "degraded", "pending", "starting", "connecting", "stale", "resolved_override", "saved_override", "saved_disconnect", "restart_required", "reload_required", "queued"]);
+    const SYSTEM_OFFLINE_STATES = new Set(["error", "failed", "offline", "disconnected", "unavailable", "unhealthy", "blocked"]);
+
+    function systemTitle(value) {
+      return String(value || "")
+        .replace(/[-_]+/g, " ")
+        .replace(/\b\w/g, (letter) => letter.toUpperCase());
+    }
+
+    function safeSystemText(value, fallback = "") {
+      if (value === undefined || value === null || value === "") return fallback;
+      return String(value)
+        .replace(/\bBearer\s+[^\s,;]+/gi, "Bearer [hidden]")
+        .replace(/\b(password|passphrase|secret|token|api[_-]?key|credential|authorization)\b(\s*[:=]\s*)[^\s,;]+/gi, "$1$2[hidden]")
+        .slice(0, 500);
+    }
+
+    function safeSystemEndpoint(value) {
+      const raw = safeSystemText(value);
+      if (!raw) return "";
+      if (!/^https?:\/\//i.test(raw) && !raw.startsWith("/")) {
+        return raw.includes("@") ? "[protected endpoint]" : raw;
+      }
+      try {
+        const selected = new URL(raw, window.location.href);
+        if (!["http:", "https:"].includes(selected.protocol)) return "";
+        selected.username = "";
+        selected.password = "";
+        [...selected.searchParams.keys()].forEach((name) => {
+          if (SYSTEM_SECRET_KEY.test(name)) selected.searchParams.delete(name);
+        });
+        selected.hash = "";
+        return selected.origin === window.location.origin
+          ? `${selected.pathname}${selected.search}`
+          : selected.toString();
+      } catch (_) {
+        return raw.includes("@") ? "[protected endpoint]" : raw;
+      }
+    }
+
+    function safeSystemHref(value) {
+      const raw = String(value || "").trim();
+      if (!raw) return "";
+      try {
+        const selected = new URL(raw, window.location.href);
+        if (!["http:", "https:"].includes(selected.protocol)) return "";
+        selected.username = "";
+        selected.password = "";
+        [...selected.searchParams.keys()].forEach((name) => {
+          if (SYSTEM_SECRET_KEY.test(name)) selected.searchParams.delete(name);
+        });
+        selected.hash = "";
+        return selected.toString();
+      } catch (_) {
+        return "";
+      }
+    }
+
+    function systemItems(value) {
+      if (Array.isArray(value)) {
+        return value.map((item, index) => item && typeof item === "object"
+          ? {...item, _key: item.key || item.id || item.name || String(index)}
+          : {_key: String(index), value: item});
+      }
+      if (!value || typeof value !== "object") return [];
+      return Object.entries(value).map(([entryKey, item]) => item && typeof item === "object" && !Array.isArray(item)
+        ? {...item, _key: item.key || item.id || entryKey}
+        : {_key: entryKey, value: item});
+    }
+
+    function systemConnection(connections, service) {
+      const aliases = {
+        home_assistant: new Set(["homeassistant", "home_assistant", "ha"]),
+        mqtt: new Set(["mqtt", "broker", "mosquitto"]),
+        flexhub: new Set(["flexhub", "flex_hub", "hub"]),
+      }[service] || new Set([service]);
+      return systemItems(connections).find((entry) => {
+        const identity = String(entry.id || entry.key || entry.name || entry.service || entry._key || "").toLowerCase().replace(/[\s-]+/g, "_");
+        return aliases.has(identity) || aliases.has(identity.replaceAll("_", ""));
+      }) || null;
+    }
+
+    function systemStatus(record, service = "") {
+      if (record === true) return {label: service === "bridge" ? "Running" : "Connected", tone: "healthy"};
+      if (record === false) return {label: service === "bridge" ? "Unavailable" : "Disconnected", tone: "offline"};
+      const selected = record && typeof record === "object" ? record : {};
+      if (selected.configured === false) return {label: "Not configured", tone: "unknown"};
+      if (selected.enabled === false) return {label: "Disabled", tone: "unknown"};
+      if (selected.value === true) return {label: service === "bridge" ? "Running" : "Connected", tone: "healthy"};
+      if (selected.value === false) return {label: service === "bridge" ? "Unavailable" : "Disconnected", tone: "offline"};
+      let raw = String(
+        typeof record === "string" ? record
+          : selected.status || selected.state || selected.health
+            || (typeof selected.value === "string" ? selected.value : "")
+      ).trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (!raw) {
+        if (selected.connected === true || selected.healthy === true || selected.ready === true || selected.available === true) raw = "connected";
+        else if (selected.connected === false || selected.healthy === false || selected.ready === false || selected.available === false) raw = "disconnected";
+      }
+      const tone = SYSTEM_POSITIVE_STATES.has(raw) ? "healthy"
+        : SYSTEM_WARNING_STATES.has(raw) ? "warning"
+        : SYSTEM_OFFLINE_STATES.has(raw) ? "offline" : "unknown";
+      return {label: raw ? systemTitle(raw) : "Unknown", tone};
+    }
+
+    function systemDuration(value) {
+      const seconds = Number(value);
+      if (!Number.isFinite(seconds) || seconds < 0) return "";
+      if (seconds >= 86400) return `${(seconds / 86400).toFixed(seconds >= 864000 ? 0 : 1)} days`;
+      if (seconds >= 3600) return `${(seconds / 3600).toFixed(seconds >= 36000 ? 0 : 1)} hours`;
+      if (seconds >= 60) return `${Math.round(seconds / 60)} minutes`;
+      return `${Math.round(seconds)} seconds`;
+    }
+
+    function systemTimestamp(value) {
+      if (!value) return "";
+      const selected = new Date(value);
+      return Number.isNaN(selected.getTime()) ? safeSystemText(value) : selected.toLocaleString();
+    }
+
+    function renderSystemService(service, record) {
+      const card = document.querySelector(`[data-system-service="${service}"]`);
+      if (!card) return;
+      const selected = record && typeof record === "object" ? record : {};
+      const status = systemStatus(record, service);
+      card.className = `system-status-card ${status.tone}`;
+      const badge = card.querySelector("[data-system-status]");
+      badge.className = `system-state-badge ${status.tone}`;
+      badge.textContent = status.label;
+      const detail = safeSystemText(selected.detail || selected.summary || selected.message || selected.error,
+        status.tone === "healthy" ? "Operational and reporting normally."
+          : status.label.toLowerCase() === "not configured" ? "This optional connection is not configured."
+          : "No additional status detail was reported.");
+      card.querySelector("[data-system-detail]").textContent = detail;
+      const endpoint = safeSystemEndpoint(selected.display_url || selected.base_url || selected.endpoint || selected.url || selected.host);
+      const metadata = [
+        ["Version", selected.version || selected.app_version],
+        ["Uptime", systemDuration(selected.uptime_seconds)],
+        ["Endpoint", endpoint],
+        ["Latency", Number.isFinite(Number(selected.latency_ms)) ? `${Number(selected.latency_ms)} ms` : ""],
+        ["Last check", systemTimestamp(selected.checked_at || selected.updated_at || selected.last_seen)],
+        ["Owner", selected.owner || selected.managed_by],
+      ].filter(([, value]) => value !== undefined && value !== null && value !== "");
+      card.querySelector("[data-system-meta]").innerHTML = metadata.length
+        ? metadata.slice(0, 3).map(([label, value]) => `<span>${escapeHtml(label)}<strong>${escapeHtml(safeSystemText(value))}</strong></span>`).join("")
+        : '<span>Details<strong>Awaiting telemetry</strong></span>';
+      const serviceName = card.querySelector(".system-service-name")?.textContent?.trim() || systemTitle(service);
+      card.setAttribute("aria-label", `${serviceName} status: ${status.label}`);
+    }
+
+    function systemSettingSensitive(entry, settingKey) {
+      return Boolean(entry.sensitive || entry.secret || entry.redacted || SYSTEM_SECRET_KEY.test(settingKey));
+    }
+
+    function systemSettingDisplayValue(value) {
+      if (value === undefined || value === null || value === "") return "Not set";
+      if (typeof value === "boolean") return value ? "Enabled" : "Disabled";
+      if (Array.isArray(value)) return value.map((item) => typeof item === "object" ? "Configured item" : safeSystemText(item)).join(", ") || "Empty";
+      if (typeof value === "object") return "Configured structured value";
+      return safeSystemText(value);
+    }
+
+    function systemSettingValue(entry, settingKey) {
+      if (systemSettingSensitive(entry, settingKey)) return "Protected — managed by owner";
+      const value = Object.prototype.hasOwnProperty.call(entry, "value") ? entry.value : entry.effective_value;
+      return systemSettingDisplayValue(value);
+    }
+
+    function systemSettingValuesEqual(left, right) {
+      if (Object.is(left, right)) return true;
+      try { return JSON.stringify(left) === JSON.stringify(right); } catch (_) { return String(left) === String(right); }
+    }
+
+    function renderSystemSettings(settings) {
+      const entries = systemItems(settings);
+      const body = $("#systemSettingsBody");
+      if (!entries.length) {
+        body.innerHTML = '<tr><td class="system-table-empty" colspan="5">No effective settings were reported. Configuration remains owned by the Bridge and Home Assistant.</td></tr>';
+        return;
+      }
+      body.innerHTML = entries.map((entry) => {
+        const settingKey = String(entry.key || entry.id || entry.name || entry._key || "setting");
+        const label = safeSystemText(entry.label || systemTitle(settingKey), "Setting");
+        const source = safeSystemText(entry.source || entry.origin, "Bridge default");
+        const applyState = safeSystemText(entry.apply_state || entry.application_state || "effective", "Effective");
+        const owner = safeSystemText(entry.owner || entry.managed_by, "Bridge");
+        const status = systemStatus({status: applyState});
+        const sensitive = systemSettingSensitive(entry, settingKey);
+        const effectiveValue = Object.prototype.hasOwnProperty.call(entry, "value") ? entry.value : entry.effective_value;
+        const hasConfiguredValue = Object.prototype.hasOwnProperty.call(entry, "configured_value");
+        const configuredDiffers = !sensitive && hasConfiguredValue
+          && entry.configured_value !== "" && entry.configured_value !== null
+          && !systemSettingValuesEqual(entry.configured_value, effectiveValue);
+        const savedOption = configuredDiffers
+          ? `<span class="system-setting-note">${escapeHtml(safeSystemText(entry.configured_label || "Saved option"))}: ${escapeHtml(systemSettingDisplayValue(entry.configured_value))}</span>`
+          : "";
+        const detail = !sensitive && entry.detail
+          ? `<span class="system-setting-detail">${escapeHtml(safeSystemText(entry.detail))}</span>`
+          : "";
+        return `<tr class="${status.tone === "warning" ? "warning" : ""}" data-system-setting="${escapeHtml(settingKey)}">
+          <td>${escapeHtml(label)}</td>
+          <td><div class="system-setting-value"><strong>${escapeHtml(systemSettingValue(entry, settingKey))}</strong>${savedOption}${detail}</div></td>
+          <td><span class="system-source">${escapeHtml(source)}</span></td>
+          <td><span class="system-state-badge ${status.tone}">${escapeHtml(applyState)}</span></td>
+          <td><span class="system-owner">${escapeHtml(owner)}</span></td>
+        </tr>`;
+      }).join("");
+    }
+
+    function renderSystemFirmware(channels) {
+      const entries = systemItems(channels);
+      const container = $("#systemFirmwareChannels");
+      if (!entries.length) {
+        container.innerHTML = '<div class="system-empty-card">No firmware or receiver-app channels were reported.</div>';
+        return;
+      }
+      container.innerHTML = entries.map((entry) => {
+        const channelKey = String(entry.id || entry.key || entry.channel || entry._key || "release");
+        const label = safeSystemText(entry.label || entry.name || systemTitle(channelKey), "Release channel");
+        const status = systemStatus(entry);
+        const family = Array.isArray(entry.models || entry.families)
+          ? (entry.models || entry.families).map((value) => safeSystemText(value)).join(", ")
+          : safeSystemText(entry.family || entry.device_family || entry.platform, "Defined by device capabilities");
+        const version = safeSystemText(entry.version || entry.target_version || entry.current_version, "Not configured");
+        const track = safeSystemText(entry.release_channel || entry.channel || entry.track, channelKey);
+        const owner = safeSystemText(entry.owner || entry.managed_by, entry.platform === "android" ? "Android receiver app" : "Bridge release configuration");
+        const detail = safeSystemText(entry.detail || entry.description || entry.message, "Only compatible device families are eligible for this channel.");
+        return `<article class="system-firmware-card" data-system-firmware-channel="${escapeHtml(channelKey)}">
+          <div class="system-status-head"><h3>${escapeHtml(label)}</h3><span class="system-state-badge ${status.tone}">${escapeHtml(status.label)}</span></div>
+          <p>${escapeHtml(detail)}</p>
+          <div class="system-firmware-meta">
+            <span>Family<strong>${escapeHtml(family)}</strong></span>
+            <span>Track<strong>${escapeHtml(track)}</strong></span>
+            <span>Effective version<strong>${escapeHtml(version)}</strong></span>
+            <span>Owner<strong>${escapeHtml(owner)}</strong></span>
+          </div>
+        </article>`;
+      }).join("");
+    }
+
+    function renderSystemLinks(links) {
+      const entries = systemItems(links).map((entry) => ({
+        ...entry,
+        safeHref: safeSystemHref(entry.href || entry.url || entry.value),
+      })).filter((entry) => entry.safeHref);
+      const container = $("#systemDiagnosticLinks");
+      if (!entries.length) {
+        container.innerHTML = '<div class="system-empty-card">No diagnostic links were reported. Use Home Assistant add-on controls for lifecycle and credential changes.</div>';
+        return;
+      }
+      container.innerHTML = entries.map((entry) => {
+        const linkKey = String(entry.id || entry.key || entry.name || entry._key || "diagnostic");
+        const label = safeSystemText(entry.label || entry.name || systemTitle(linkKey), "Open diagnostic");
+        const description = safeSystemText(entry.description || entry.detail, `Open ${label} in its owning operational surface.`);
+        const owner = safeSystemText(entry.owner || entry.managed_by, "External owner");
+        let external = true;
+        try { external = new URL(entry.safeHref).origin !== window.location.origin; } catch (_) {}
+        const target = entry.external === false || !external ? "" : ' target="_blank" rel="noopener noreferrer"';
+        return `<article class="system-link-card" data-system-link="${escapeHtml(linkKey)}">
+          <div><h3>${escapeHtml(label)}</h3><span class="small muted">${escapeHtml(owner)}</span></div>
+          <p>${escapeHtml(description)}</p>
+          <a href="${escapeHtml(entry.safeHref)}"${target}>Open ${escapeHtml(label)}${external ? " ↗" : ""}</a>
+        </article>`;
+      }).join("");
+    }
+
+    function renderSystemAlerts(alerts) {
+      const entries = Array.isArray(alerts) ? alerts : [];
+      const section = $("#systemAlertsSection");
+      section.hidden = !entries.length;
+      $("#systemAlertList").innerHTML = entries.map((entry) => {
+        const severity = String(entry.severity || "warning").toLowerCase();
+        return `<article class="system-alert ${severity === "info" ? "info" : "warning"}">
+          <span class="system-state-badge ${severity === "info" ? "unknown" : "warning"}">${escapeHtml(systemTitle(severity))}</span>
+          <div><strong>${escapeHtml(safeSystemText(entry.title, "Bridge attention required"))}</strong><p>${escapeHtml(safeSystemText(entry.detail))}</p></div>
+          <span class="small muted">${escapeHtml(safeSystemText(entry.owner, "FlexDisplay Bridge"))}</span>
+        </article>`;
+      }).join("");
+    }
+
+    function renderSystemWorkspace(payload) {
+      const selected = payload && typeof payload === "object" ? payload : {};
+      renderSystemService("bridge", selected.bridge || null);
+      renderSystemService("home_assistant", systemConnection(selected.connections, "home_assistant"));
+      renderSystemService("mqtt", systemConnection(selected.connections, "mqtt"));
+      renderSystemService("flexhub", systemConnection(selected.connections, "flexhub"));
+      renderSystemSettings(selected.effective_settings);
+      renderSystemFirmware(selected.firmware_channels);
+      renderSystemLinks(selected.links);
+      renderSystemAlerts(selected.alerts);
+    }
+
+    async function downloadSupportBundle() {
+      const button = $("#downloadSupportBundle");
+      button.disabled = true;
+      button.textContent = "Preparing…";
+      try {
+        const response = await api("system/support-bundle");
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "flexdisplay-support-bundle.json";
+        link.click();
+        setTimeout(() => URL.revokeObjectURL(url), 1000);
+        toast("Redacted support bundle downloaded.");
+      } catch (error) { toast(error.message, true); }
+      finally {
+        button.disabled = false;
+        button.textContent = "Download support bundle";
+      }
+    }
+
+    function setSystemNotice(message = "", error = false) {
+      const notice = $("#systemWorkspaceNotice");
+      notice.hidden = !message;
+      notice.classList.toggle("error", error);
+      notice.innerHTML = message
+        ? `${error ? "" : '<span class="live-dot"></span>'}<span>${escapeHtml(safeSystemText(message))}</span>`
+        : "";
+    }
+
+    async function loadSystemStatus({quiet = false} = {}) {
+      if (state.system.loading) return;
+      state.system.loading = true;
+      const refresh = $("#refreshSystemStatus");
+      refresh.disabled = true;
+      refresh.textContent = "Refreshing…";
+      if (!quiet || !state.system.payload) setSystemNotice("Loading Bridge and connection status…");
+      try {
+        const response = await api("system");
+        const payload = await response.json();
+        state.system.payload = payload && typeof payload === "object" ? payload : {};
+        state.system.error = "";
+        state.system.loadedAt = new Date().toISOString();
+        renderSystemWorkspace(state.system.payload);
+        const hasData = ["bridge", "connections", "effective_settings", "firmware_channels", "links"]
+          .some((key) => state.system.payload[key] !== undefined && state.system.payload[key] !== null);
+        setSystemNotice(hasData ? "" : "The Bridge returned no operational status yet. Refresh after it finishes starting.");
+        $("#systemLastUpdated").textContent = `Updated ${new Date(state.system.loadedAt).toLocaleTimeString()}`;
+      } catch (error) {
+        state.system.error = safeSystemText(error.message, "System status is unavailable");
+        if (!state.system.payload) renderSystemWorkspace({});
+        setSystemNotice(`System status unavailable: ${state.system.error}${state.system.payload ? ". Showing the last successful result." : ""}`, true);
+        $("#systemLastUpdated").textContent = state.system.payload ? "Last result may be stale" : "Unavailable";
+      } finally {
+        state.system.loading = false;
+        refresh.disabled = false;
+        refresh.textContent = "Refresh status";
+      }
     }
 
     function setPreviewZoom(value) {
@@ -1902,6 +2490,95 @@
       return `<svg class="fleet-spark" viewBox="0 0 100 30" preserveAspectRatio="none" aria-hidden="true"><polyline points="${points}"></polyline></svg>`;
     }
 
+    function deviceCapabilityDescriptor(device) {
+      return device?.device_capabilities && typeof device.device_capabilities === "object"
+        ? device.device_capabilities : null;
+    }
+
+    function deviceCapabilityFlag(device, group, name, legacyFallback = true) {
+      const value = deviceCapabilityDescriptor(device)?.[group]?.[name];
+      return typeof value === "boolean" ? value : legacyFallback;
+    }
+
+    function deviceFamily(device) {
+      return String(device?.device_family || deviceCapabilityDescriptor(device)?.family || "");
+    }
+
+    function deviceFamilyLabel(device) {
+      const family = deviceFamily(device);
+      return ({
+        xteink_eink: "XTEINK e-ink",
+        note4_eink: "Note4 e-ink",
+        android_receiver: "Android receiver",
+        generic_embedded: "Generic embedded",
+        unknown: "Unclassified",
+      })[family] || (family ? systemTitle(family) : "Legacy device");
+    }
+
+    function deviceFirmwareProvider(device) {
+      return String(device?.firmware_provider || deviceCapabilityDescriptor(device)?.firmware?.provider || "");
+    }
+
+    function deviceSupportsXteinkOta(device) {
+      const descriptor = deviceCapabilityDescriptor(device);
+      const provider = deviceFirmwareProvider(device);
+      const supports = descriptor?.firmware?.supports_xteink_ota;
+      if (provider) return provider === "xteink" && supports !== false;
+      if (typeof supports === "boolean") return supports;
+      return true;
+    }
+
+    function deviceSupportsManagement(device, name, legacyFallback = true) {
+      return deviceCapabilityFlag(device, "management", name, legacyFallback);
+    }
+
+    function deviceSupportsAction(device, action, legacyFallback = true) {
+      const descriptorActions = deviceCapabilityDescriptor(device)?.management?.actions;
+      const actions = Array.isArray(descriptorActions)
+        ? descriptorActions : Array.isArray(device?.supported_actions) ? device.supported_actions : null;
+      return actions ? actions.includes(action) : legacyFallback;
+    }
+
+    function deviceSupportsSdHealth(device) {
+      if (!deviceCapabilityDescriptor(device) && !deviceFirmwareProvider(device)) return true;
+      return deviceFirmwareProvider(device) === "xteink" || deviceFamily(device) === "xteink_eink";
+    }
+
+    function deviceReportsBattery(device) {
+      return deviceCapabilityFlag(device, "power", "reports_battery", true);
+    }
+
+    function deviceBatteryManaged(device) {
+      return deviceCapabilityFlag(device, "power", "battery_managed", true);
+    }
+
+    function deviceSupportsSleep(device) {
+      return deviceCapabilityFlag(device, "power", "supports_sleep",
+        deviceSupportsManagement(device, "supports_sleep_policy", true));
+    }
+
+    function deviceSupportsOpenDisplay(device) {
+      const descriptor = deviceCapabilityDescriptor(device);
+      if (!descriptor) return true;
+      return descriptor.delivery?.supports_opendisplay === true
+        || descriptor.management?.supports_opendisplay_policy === true;
+    }
+
+    function deviceFirmwareOwnership(device) {
+      const provider = deviceFirmwareProvider(device);
+      if (!provider) return "Legacy X3/X4 firmware";
+      return ({
+        xteink: "X3/X4 OTA",
+        note4: "Note4 firmware channel",
+        android_app: "Android receiver app",
+        none: "Firmware externally managed",
+      })[provider] || `${systemTitle(provider)} channel`;
+    }
+
+    function fleetFact(label, value, applicable = true) {
+      return `<div class="fleet-fact ${applicable ? "" : "not-applicable"}"><span class="small muted">${escapeHtml(label)}</span><strong>${applicable ? value : "Not applicable"}</strong></div>`;
+    }
+
     async function loadFleetHealth() {
       const grid = $("#fleetHealthGrid");
       grid.innerHTML = '<div class="empty">Loading fleet health…</div>';
@@ -1910,6 +2587,9 @@
         const payload = await response.json();
         state.devices = payload.devices || [];
         const histories = await Promise.all(state.devices.map(async (device) => {
+          if (!deviceSupportsManagement(device, "supports_screen_history", true)) {
+            return [device.device_id, []];
+          }
           try {
             const result = await api(`devices/${encodeURIComponent(device.device_id)}/screens`);
             return [device.device_id, (await result.json()).screens || []];
@@ -1925,58 +2605,71 @@
         grid.innerHTML = state.devices.map((device) => {
           const id = escapeHtml(device.device_id);
           const history = historyByDevice[device.device_id] || [];
-          const preview = history[0]
+          const supportsScreenHistory = deviceSupportsManagement(device, "supports_screen_history", true);
+          const canResendScreen = supportsScreenHistory && deviceSupportsAction(device, "refresh", true);
+          const preview = supportsScreenHistory && history[0]
             ? `<img class="fleet-preview" src="${API(`devices/${encodeURIComponent(device.device_id)}/screens/current`)}" alt="Current ${id} screen">`
-            : '<div class="fleet-preview empty">No screen yet</div>';
+            : `<div class="fleet-preview empty">${supportsScreenHistory ? "No screen yet" : "Screen history not supported"}</div>`;
           const screens = history.map((item) => `
-            <button class="screen-thumb" data-resend-device="${id}" data-resend-screen="${escapeHtml(item.id)}" title="Resend ${escapeHtml(item.title || item.captured_at)}">
+            <${canResendScreen ? "button" : "span"} class="screen-thumb" ${canResendScreen ? `data-resend-device="${id}" data-resend-screen="${escapeHtml(item.id)}" title="Resend ${escapeHtml(item.title || item.captured_at)}"` : `title="${escapeHtml(item.title || item.captured_at)}"`}>
               <img src="${API(`devices/${encodeURIComponent(device.device_id)}/screens/${encodeURIComponent(item.id)}`)}" alt="${escapeHtml(item.title || "Saved screen")}">
-            </button>`).join("");
+            </${canResendScreen ? "button" : "span"}>`).join("");
+          const reportsBattery = deviceReportsBattery(device);
+          const batteryManaged = deviceBatteryManaged(device);
+          const supportsSleep = deviceSupportsSleep(device);
+          const supportsSd = deviceSupportsSdHealth(device);
+          const supportsXteinkOta = deviceSupportsXteinkOta(device);
           const runtime = Number(device.estimated_battery_runtime_hours);
-          const runtimeLabel = Number.isFinite(runtime)
+          const runtimeLabel = batteryManaged && Number.isFinite(runtime)
             ? `${runtime >= 48 ? (runtime / 24).toFixed(1) + " d" : runtime.toFixed(1) + " h"} est.`
             : "learning";
+          const batteryPercent = Number(device.battery_percent);
+          const batteryLabel = Number.isFinite(batteryPercent)
+            ? `${Math.round(batteryPercent)}%${batteryManaged ? ` · ${runtimeLabel}` : ""}`
+            : "Awaiting telemetry";
           const wifiArrow = device.wifi_trend === "improving"
             ? "↗"
             : device.wifi_trend === "declining"
             ? "↘"
             : "→";
-          const maintenance = device.firmware_maintenance_window_open
+          const maintenance = supportsXteinkOta && device.firmware_maintenance_window_open
             ? "open"
             : `${device.firmware_maintenance_start || "—"}–${device.firmware_maintenance_end || "—"}`;
+          const commands = [
+            ["refresh", "Refresh"], ["next", "Next"], ["restart", "Restart"],
+          ].filter(([command]) => deviceSupportsAction(device, command, true))
+            .map(([command, label]) => `<button data-fleet-command="${command}" data-fleet-device="${id}">${label}</button>`)
+            .join("");
+          const softwareLabel = deviceFirmwareProvider(device) === "android_app" ? "Receiver app" : "Firmware";
           return `
             <article class="fleet-card">
               <div class="fleet-card-head">
-                <div><strong>${escapeHtml(device.name || device.device_id)}</strong><div class="small muted">${id} · ${escapeHtml(device.model || "X3")}</div></div>
+                <div class="fleet-device-identity"><strong>${escapeHtml(device.name || device.device_id)}</strong><div class="fleet-device-meta"><span class="small muted">${id} · ${escapeHtml(device.model || (deviceCapabilityDescriptor(device) ? "Unknown" : "X3"))}</span><span class="capability-badge">${escapeHtml(deviceFamilyLabel(device))}</span></div></div>
                 <span class="health-badge ${escapeHtml(device.health_state)}">${escapeHtml(device.health_state || "unknown")}</span>
               </div>
               <div class="fleet-card-body">
                 ${preview}
                 <div>
                   <div class="fleet-facts">
-                    <div class="fleet-fact"><span class="small muted">Battery</span><strong>${escapeHtml(device.battery_percent ?? "—")}% · ${escapeHtml(runtimeLabel)}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Wi-Fi</span><strong>${escapeHtml(device.rssi ?? "—")} dBm · ${wifiArrow} ${escapeHtml(device.wifi_trend || "learning")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Power</span><strong>${escapeHtml(device.power_state || "unknown")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Firmware</span><strong>${escapeHtml(device.firmware || "unknown")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Page</span><strong>${escapeHtml(device.dashboard_page_title || device.photo_filename || "—")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Next wake</span><strong>${escapeHtml(device.next_wake_at || "manual")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Check-ins</span><strong>${escapeHtml(device.checkin_health || "learning")} · ${escapeHtml(device.missed_checkins || 0)} missed</strong></div>
-                    <div class="fleet-fact"><span class="small muted">Last reset</span><strong>${escapeHtml(device.reset_reason || "awaiting v0.24")}</strong></div>
-                    <div class="fleet-fact"><span class="small muted">SD failures</span><strong>${escapeHtml(device.sd_failure_events || 0)} events</strong></div>
-                    <div class="fleet-fact"><span class="small muted">OTA window</span><strong>${escapeHtml(maintenance)}</strong></div>
+                    ${fleetFact("Battery", escapeHtml(batteryLabel), reportsBattery)}
+                    ${fleetFact("Wi-Fi", `${escapeHtml(device.rssi ?? "—")} dBm · ${wifiArrow} ${escapeHtml(device.wifi_trend || "learning")}`)}
+                    ${fleetFact("Power", escapeHtml(device.power_state || deviceCapabilityDescriptor(device)?.power?.power_class || "unknown"))}
+                    ${fleetFact(softwareLabel, `${escapeHtml(device.firmware || "unknown")} · ${escapeHtml(deviceFirmwareOwnership(device))}`)}
+                    ${fleetFact("Page", escapeHtml(device.dashboard_page_title || device.photo_filename || "—"), deviceSupportsManagement(device, "supports_dashboard_profiles", true))}
+                    ${fleetFact("Next wake", escapeHtml(device.next_wake_at || "manual"), supportsSleep)}
+                    ${fleetFact("Check-ins", `${escapeHtml(device.checkin_health || "learning")} · ${escapeHtml(device.missed_checkins || 0)} missed`)}
+                    ${fleetFact("Last reset", escapeHtml(device.reset_reason || "not reported"))}
+                    ${fleetFact("SD failures", `${escapeHtml(device.sd_failure_events || 0)} events`, supportsSd)}
+                    ${fleetFact("X3/X4 OTA window", escapeHtml(maintenance), supportsXteinkOta)}
                   </div>
                   <div class="fleet-trends">
-                    <div class="fleet-trend"><span class="small muted">Battery history</span>${sparkline(device.checkin_history, "battery_percent")}</div>
+                    ${reportsBattery ? `<div class="fleet-trend"><span class="small muted">Battery history</span>${sparkline(device.checkin_history, "battery_percent")}</div>` : '<div class="fleet-trend not-applicable"><span class="small muted">Battery history</span><strong>Not reported by this family</strong></div>'}
                     <div class="fleet-trend"><span class="small muted">Wi-Fi history</span>${sparkline(device.checkin_history, "rssi")}</div>
                   </div>
-                  <div class="button-row" style="margin-top:10px">
-                    <button data-fleet-command="refresh" data-fleet-device="${id}">Refresh</button>
-                    <button data-fleet-command="next" data-fleet-device="${id}">Next</button>
-                    <button data-fleet-command="restart" data-fleet-device="${id}">Restart</button>
-                  </div>
+                  <div class="button-row" style="margin-top:10px">${commands || '<span class="small muted">No compatible remote actions advertised.</span>'}</div>
                 </div>
               </div>
-              <div class="screen-strip">${screens || '<span class="small muted">Screen history will appear after the next refresh.</span>'}</div>
+              <div class="screen-strip">${screens || `<span class="small muted">${supportsScreenHistory ? "Screen history will appear after the next refresh." : "Screen history is not supported by this family."}</span>`}</div>
             </article>`;
         }).join("");
         populateDevices();
@@ -1988,6 +2681,127 @@
 
     function selectedFleetDeviceIds() {
       return [...document.querySelectorAll("[data-policy-device]:checked")].map((node) => node.value);
+    }
+
+    function selectedFleetScopeDevices() {
+      const devices = state.fleetPolicies.devices || [];
+      const scope = $("#fleetPolicyScope").value;
+      if (scope === "devices") {
+        const selected = new Set(selectedFleetDeviceIds());
+        return devices.filter((device) => selected.has(device.device_id));
+      }
+      if (scope === "x3" || scope === "x4") {
+        return devices.filter((device) => String(device.model || "").toLowerCase().includes(scope));
+      }
+      if (scope === "group") {
+        const group = (state.fleetPolicies.groups || []).find((item) => item.id === $("#fleetGroupSelect").value);
+        const selected = new Set(group?.resolved_device_ids || []);
+        return devices.filter((device) => selected.has(device.device_id));
+      }
+      return devices;
+    }
+
+    function renderFleetGroups(preferredGroup = "") {
+      const select = $("#fleetGroupSelect");
+      const previous = preferredGroup || select.value;
+      const groups = state.fleetPolicies.groups || [];
+      select.innerHTML = groups.length
+        ? groups.map((group) => `<option value="${escapeHtml(group.id)}">${escapeHtml(group.label)} · ${escapeHtml(group.resolved_count || 0)} devices</option>`).join("")
+        : '<option value="">No saved groups yet</option>';
+      if (groups.some((group) => group.id === previous)) select.value = previous;
+      $("#fleetGroupControls").hidden = !["devices", "group"].includes($("#fleetPolicyScope").value);
+      $("#deleteFleetGroup").disabled = !select.value;
+    }
+
+    function fleetGroupId(label) {
+      return String(label || "").toLowerCase().trim().replace(/[^a-z0-9_-]+/g, "-").replace(/^-+|-+$/g, "").slice(0, 48);
+    }
+
+    async function saveFleetGroup() {
+      const label = $("#fleetGroupName").value.trim();
+      const deviceIds = selectedFleetDeviceIds();
+      const groupId = fleetGroupId(label);
+      if (groupId.length < 2) return toast("Enter a name for the device group.", true);
+      if (!deviceIds.length) return toast("Select at least one device before saving a group.", true);
+      try {
+        await api(`fleet/groups/${encodeURIComponent(groupId)}`, {method: "PUT", body: {
+          label,
+          device_ids: deviceIds,
+        }});
+        $("#fleetPolicyScope").value = "group";
+        await loadFleetPolicies("", groupId);
+        toast(`${label} saved with ${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}.`);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function deleteFleetGroup() {
+      const groupId = $("#fleetGroupSelect").value;
+      const group = (state.fleetPolicies.groups || []).find((item) => item.id === groupId);
+      if (!groupId || !confirm(`Delete saved group ${group?.label || groupId}?`)) return;
+      try {
+        await api(`fleet/groups/${encodeURIComponent(groupId)}`, {method: "DELETE"});
+        $("#fleetPolicyScope").value = "devices";
+        await loadFleetPolicies();
+        toast(`Saved group ${group?.label || groupId} deleted.`);
+      } catch (error) { toast(error.message, true); }
+    }
+
+    function fleetScopePayload() {
+      return {
+        scope: $("#fleetPolicyScope").value,
+        group_id: $("#fleetPolicyScope").value === "group" ? $("#fleetGroupSelect").value : "",
+        device_ids: selectedFleetDeviceIds(),
+      };
+    }
+
+    function fleetPolicyPayload() {
+      return {
+        ...fleetScopePayload(),
+        profile: $("#fleetPolicyProfile").value,
+        mode: $("#fleetPolicyMode").value,
+        dashboard_profile: $("#fleetPolicyDashboard").value,
+        photo_album: $("#fleetPolicyAlbum").value,
+        overrides: {
+          ...($("#fleetPolicyRendering").value === "unchanged" ? {} : {rendering_profile: $("#fleetPolicyRendering").value}),
+          ...($("#fleetPolicyOpenDisplayTransport").value === "unchanged" ? {} : {open_display_transport_policy: $("#fleetPolicyOpenDisplayTransport").value}),
+        },
+        delivery: $("#fleetPolicyDelivery").value,
+      };
+    }
+
+    function renderFleetImpact(title, details) {
+      const node = $("#fleetImpactPreview");
+      node.hidden = false;
+      node.innerHTML = `<strong>${escapeHtml(title)}</strong><span>${escapeHtml(details)}</span>`;
+      node.scrollIntoView({behavior: "smooth", block: "nearest"});
+    }
+
+    async function previewFleetPolicy() {
+      const payload = fleetPolicyPayload();
+      if (payload.scope === "devices" && !payload.device_ids.length) return toast("Select at least one device.", true);
+      if (payload.scope === "group" && !payload.group_id) return toast("Choose a saved device group.", true);
+      try {
+        const response = await api("fleet/policy/preview", {method: "POST", body: payload});
+        const result = await response.json();
+        renderFleetImpact(
+          `Policy preview · ${result.target_count} compatible target${result.target_count === 1 ? "" : "s"}`,
+          `${Object.keys(result.excluded || {}).length} excluded · ${Object.keys(result.filtered_fields || {}).length} capability-filtered · ${(result.offline || []).length} currently offline. No settings were changed.`,
+        );
+      } catch (error) { toast(error.message, true); }
+    }
+
+    async function previewFleetFirmware() {
+      const payload = fleetScopePayload();
+      if (payload.scope === "devices" && !payload.device_ids.length) return toast("Select at least one device.", true);
+      if (payload.scope === "group" && !payload.group_id) return toast("Choose a saved device group.", true);
+      try {
+        const response = await api("fleet/firmware/preview", {method: "POST", body: payload});
+        const result = await response.json();
+        renderFleetImpact(
+          `X3/X4 rollout preview · ${(result.ready || []).length} ready`,
+          `${result.eligible.length} eligible · ${Object.keys(result.blocked || {}).length} blocked by preflight · ${Object.keys(result.excluded || {}).length} safely excluded · ${(result.offline || []).length} offline. No rollout was created.`,
+        );
+      } catch (error) { toast(error.message, true); }
     }
 
     function renderFleetPolicyProfile() {
@@ -2091,17 +2905,22 @@
       const rollout = firmware.rollout || {};
       const mirror = firmware.mirror || {};
       const maintenance = firmware.maintenance || {};
+      const devices = state.fleetPolicies.devices || [];
+      const eligibleDevices = devices.filter(deviceSupportsXteinkOta);
+      const eligibleScopeDevices = selectedFleetScopeDevices().filter(deviceSupportsXteinkOta);
       const size = firmware.size ? `${(firmware.size / 1048576).toFixed(1)} MB` : "size unavailable";
       $("#fleetFirmwareRelease").innerHTML = firmware.version
-        ? `<span class="small muted">Configured X3/X4 release</span><strong>${escapeHtml(firmware.version)}</strong><span class="small muted">${escapeHtml(size)} · mirror ${mirror.ready ? "verified" : "not ready"} · ${firmware.canary_required ? "USB canary required" : "direct rollout"}</span>`
+        ? `<span class="small muted">Configured X3/X4 release · ${eligibleDevices.length} compatible device${eligibleDevices.length === 1 ? "" : "s"}</span><strong>${escapeHtml(firmware.version)}</strong><span class="small muted">${escapeHtml(size)} · mirror ${mirror.ready ? "verified" : "not ready"} · ${firmware.canary_required ? "USB canary required" : "direct rollout"}</span>`
         : "No firmware release is configured.";
       const planned = rollout.planned_devices || [], updated = rollout.updated_devices || [];
       $("#fleetFirmwareRollout").innerHTML = rollout.target_version
         ? `<strong>Status: ${escapeHtml(rollout.status || "not started")}</strong><br>Target ${escapeHtml(rollout.target_version)} · planned ${planned.length} · verified ${updated.length} · parallel limit ${escapeHtml(firmware.max_parallel || 1)}<br>Maintenance window ${maintenance.open ? "open" : "closed"}${rollout.last_failed_device_id ? `<br><span style="color:var(--danger)">Paused on ${escapeHtml(rollout.last_failed_device_id)}: ${escapeHtml(rollout.last_failure || "failed")}</span>` : ""}`
         : `No rollout has started. Maintenance window is ${maintenance.open ? "open" : "closed"}.`;
-      const updates = (state.fleetPolicies.devices || []).filter((device) => device.update_available).length;
+      const updates = eligibleScopeDevices.filter((device) => device.update_available).length;
       $("#installFleetFirmware").disabled = !firmware.version || updates === 0;
-      $("#installFleetFirmware").textContent = rollout.target_version === firmware.version ? `Continue update · ${updates} remaining` : `Update selected scope · ${updates} available`;
+      $("#installFleetFirmware").textContent = updates === 0
+        ? "No compatible X3/X4 updates"
+        : rollout.target_version === firmware.version ? `Continue X3/X4 update · ${updates} remaining` : `Update compatible X3/X4 · ${updates} available`;
       $("#resetFleetFirmware").disabled = !rollout.target_version;
     }
 
@@ -2112,36 +2931,49 @@
       const devices = state.fleetPolicies.devices || [];
       const selectable = $("#fleetPolicyScope").value === "devices";
       $("#fleetPolicyDevices").innerHTML = devices.length ? devices.map((device) => {
+        const descriptor = deviceCapabilityDescriptor(device);
+        const supportsPolicy = deviceSupportsManagement(device, "supports_fleet_policy", true);
+        const supportsXteinkOta = deviceSupportsXteinkOta(device);
+        const supportsOpenDisplay = deviceSupportsOpenDisplay(device);
+        const supportsBatteryPolicy = deviceSupportsManagement(device, "supports_battery_policy", true);
+        const supportsSleepPolicy = deviceSupportsManagement(device, "supports_sleep_policy", true);
+        const selectableForAction = supportsPolicy || supportsXteinkOta;
         const updateStatus = device.firmware_update_status || "idle";
-        const updateActive = ["queued", "preflight", "downloading", "validating", "flashing", "rebooting"].includes(updateStatus);
-        const updateDetail = device.update_available
+        const updateActive = supportsXteinkOta && ["queued", "preflight", "downloading", "validating", "flashing", "rebooting"].includes(updateStatus);
+        const updateDetail = !supportsXteinkOta
+          ? `${deviceFirmwareOwnership(device)} · X3/X4 OTA not applicable`
+          : device.update_available
           ? device.firmware_install_ready ? "Ready for update" : (device.firmware_install_blockers || []).join(" · ")
           : `Firmware ${device.firmware || "unknown"} is current`;
         const progress = updateActive ? Math.max(0, Math.min(100, Number(device.firmware_update_percent || 0))) : 0;
-        const battery = Number.isFinite(Number(device.battery_percent))
+        const battery = deviceReportsBattery(device) && device.battery_percent !== null && device.battery_percent !== undefined && Number.isFinite(Number(device.battery_percent))
           ? `${Math.round(Number(device.battery_percent))}% battery`
-          : "battery unavailable";
-        const syncState = device.policy_sync_state || "not_managed";
+          : deviceReportsBattery(device) ? "battery unavailable" : "battery not reported";
+        const syncState = supportsPolicy ? device.policy_sync_state || "not_managed" : "not_applicable";
         const policyDelivered = device.last_seen && device.provisioning_updated_at
           && device.last_seen >= device.provisioning_updated_at;
-        const syncLabel = syncState === "synced" ? "Applied"
+        const syncLabel = !supportsPolicy ? "Not applicable" : syncState === "synced" ? "Applied"
           : syncState === "pending" ? (policyDelivered ? "Confirming" : "Waiting for wake")
           : syncState === "mismatch" ? "Needs review" : "Unmanaged";
-        const syncDetail = syncState === "synced"
+        const syncDetail = !supportsPolicy ? "This device family does not advertise compatible fleet policy management" : syncState === "synced"
           ? `Policy revision ${device.policy_revision || 0} confirmed`
           : syncState === "pending"
             ? policyDelivered ? "Policy delivered; waiting for the device to confirm it" : "Policy queued until the next device wake"
             : syncState === "mismatch" ? "Device reported a newer or different revision" : "No fleet policy has been assigned";
+        const identity = device.identity || {};
+        const identitySummary = identity.conflict
+          ? identity.conflict_detail || "Reported identity conflicts with the device ID prefix"
+          : `${systemTitle(identity.source || "unclassified")} identity · ${systemTitle(identity.confidence || "unknown")} confidence · ${deviceFirmwareOwnership(device)}`;
         return `
-        <div class="policy-device">
-          <input type="checkbox" data-policy-device value="${escapeHtml(device.device_id)}" ${selectable ? "" : "disabled"} ${selectedDeviceIds.has(device.device_id) ? "checked" : ""}>
-          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="small muted" style="display:block">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || "X3")} · ${device.online ? "online" : "sleeping/offline"} · ${escapeHtml(battery)}<br>${escapeHtml(device.policy_name || "custom")} · ${escapeHtml(syncDetail)} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}<br>OpenDisplay ${escapeHtml(device.open_display_transport_policy || "auto")} · last ${escapeHtml(device.open_display_last_transport || "none")}${device.open_display_fallback ? ` · fallback ${escapeHtml(device.open_display_fallback)}` : ""}${device.open_display_lan_memory_blocked ? " · LAN memory guard active" : ""}${device.open_display_min_free_heap ? ` · min heap ${escapeHtml(device.open_display_min_free_heap)} B` : ""}</span><div class="firmware-status ${updateStatus === "failed" ? "failed" : ""}"><strong>${escapeHtml(updateActive ? updateStatus : updateStatus === "verified" ? "complete" : updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ${escapeHtml(updateDetail)}</div>${updateActive ? `<div class="firmware-progress"><span style="width:${progress}%"></span></div>` : ""}<div class="firmware-device-actions">${device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry OTA</button>` : ""}${updateActive ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel</button>` : ""}<button type="button" class="danger" data-remove-device="${escapeHtml(device.device_id)}">Remove</button></div></span>
+        <div class="policy-device ${selectableForAction ? "" : "unsupported"}">
+          <input type="checkbox" data-policy-device value="${escapeHtml(device.device_id)}" ${selectable && selectableForAction ? "" : "disabled"} ${selectableForAction && selectedDeviceIds.has(device.device_id) ? "checked" : ""} aria-label="Select ${escapeHtml(device.name || device.device_id)} for compatible fleet actions">
+          <span><strong>${escapeHtml(device.name || device.device_id)}</strong><span class="policy-device-summary">${escapeHtml(device.device_id)} · ${escapeHtml(device.model || (descriptor ? "Unknown" : "X3"))}<span class="capability-badge">${escapeHtml(deviceFamilyLabel(device))}</span> · ${device.online ? "online" : deviceSupportsSleep(device) ? "sleeping/offline" : "offline"} · ${escapeHtml(battery)}<br>${supportsPolicy ? `${escapeHtml(device.policy_name || "custom")} · ${escapeHtml(syncDetail)} · desired r${escapeHtml(device.policy_revision || 0)} / reported r${escapeHtml(device.reported_policy_revision || 0)}` : "Fleet policy · not applicable"}<br>Battery policy · ${supportsBatteryPolicy ? "supported" : "not applicable"} · Sleep policy · ${supportsSleepPolicy ? "supported" : "not applicable"}<br>${supportsOpenDisplay ? `OpenDisplay ${escapeHtml(device.open_display_transport_policy || "auto")} · last ${escapeHtml(device.open_display_last_transport || "none")}${device.open_display_fallback ? ` · fallback ${escapeHtml(device.open_display_fallback)}` : ""}${device.open_display_lan_memory_blocked ? " · LAN memory guard active" : ""}${device.open_display_min_free_heap ? ` · min heap ${escapeHtml(device.open_display_min_free_heap)} B` : ""}` : "OpenDisplay · not applicable"}<br><span class="identity-line ${identity.conflict ? "conflict" : ""}">${escapeHtml(identitySummary)}</span></span><div class="firmware-status ${!supportsXteinkOta ? "not-applicable" : updateStatus === "failed" ? "failed" : ""}">${supportsXteinkOta ? `<strong>${escapeHtml(updateActive ? updateStatus : updateStatus === "verified" ? "complete" : updateStatus)}${device.firmware_update_stage && device.firmware_update_stage !== updateStatus ? ` · ${escapeHtml(device.firmware_update_stage)}` : ""}</strong> · ` : ""}${escapeHtml(updateDetail)}</div>${updateActive ? `<div class="firmware-progress"><span style="width:${progress}%"></span></div>` : ""}<div class="firmware-device-actions">${supportsXteinkOta && device.firmware_retry_ready ? `<button type="button" data-firmware-retry="${escapeHtml(device.device_id)}">Retry X3/X4 OTA</button>` : ""}${supportsXteinkOta && updateActive ? `<button type="button" data-firmware-cancel="${escapeHtml(device.device_id)}">Cancel OTA</button>` : ""}<button type="button" data-device-timeline="${escapeHtml(device.device_id)}">Timeline</button><button type="button" class="danger" data-remove-device="${escapeHtml(device.device_id)}">Remove</button></div></span>
           <span class="sync-badge ${escapeHtml(syncState)}" title="${escapeHtml(syncDetail)}">${escapeHtml(syncLabel)}</span>
         </div>`;
       }).join("") : '<div class="empty">No FlexDisplay device has checked in yet.</div>';
     }
 
-    async function loadFleetPolicies(preferredProfile = "") {
+    async function loadFleetPolicies(preferredProfile = "", preferredGroup = "") {
       try {
         const previousProfile = preferredProfile || $("#fleetPolicyProfile").value;
         const response = await api("fleet/policies");
@@ -2156,6 +2988,7 @@
         $("#fleetPolicyProfile").value = (state.fleetPolicies.profiles || []).some((item) => item.id === previousProfile) ? previousProfile : "balanced";
         $("#fleetPolicyDashboard").innerHTML = '<option value="">Keep current dashboard</option>' + (state.fleetPolicies.dashboard_profiles || []).map((name) => `<option value="${escapeHtml(name)}">${escapeHtml(name)}</option>`).join("");
         $("#fleetPolicyAlbum").innerHTML = '<option value="">Do not change album</option>' + (state.fleetPolicies.photo_albums || []).map((album) => `<option value="${escapeHtml(album.id)}">${escapeHtml(album.name)} · ${escapeHtml(album.item_count)} images</option>`).join("");
+        renderFleetGroups(preferredGroup);
         renderFleetPolicyProfile();
         renderFleetFirmware();
         renderFleetPolicyDevices();
@@ -2163,44 +2996,34 @@
     }
 
     async function applyFleetPolicy() {
-      const scope = $("#fleetPolicyScope").value;
-      const deviceIds = [...document.querySelectorAll("[data-policy-device]:checked")].map((node) => node.value);
-      if (scope === "devices" && !deviceIds.length) return toast("Select at least one device.", true);
+      const payload = fleetPolicyPayload();
+      if (payload.scope === "devices" && !payload.device_ids.length) return toast("Select at least one device.", true);
+      if (payload.scope === "group" && !payload.group_id) return toast("Choose a saved device group.", true);
       try {
-        const response = await api("fleet/policy", {method: "PUT", body: {
-          profile: $("#fleetPolicyProfile").value,
-          scope,
-          device_ids: deviceIds,
-          mode: $("#fleetPolicyMode").value,
-          dashboard_profile: $("#fleetPolicyDashboard").value,
-          photo_album: $("#fleetPolicyAlbum").value,
-          overrides: {
-            ...($("#fleetPolicyRendering").value === "unchanged" ? {} : {rendering_profile: $("#fleetPolicyRendering").value}),
-            ...($("#fleetPolicyOpenDisplayTransport").value === "unchanged" ? {} : {open_display_transport_policy: $("#fleetPolicyOpenDisplayTransport").value}),
-          },
-          delivery: $("#fleetPolicyDelivery").value,
-        }});
+        const response = await api("fleet/policy", {method: "PUT", body: payload});
         const result = await response.json();
-        toast(`Policy revision ${result.revision} assigned to ${result.targets.length} device${result.targets.length === 1 ? "" : "s"}.`);
+        const excluded = Object.keys(result.excluded || {}).length;
+        const filtered = Object.keys(result.filtered_fields || {}).length;
+        toast(`Policy revision ${result.revision} assigned to ${result.targets.length} compatible device${result.targets.length === 1 ? "" : "s"}.${filtered ? ` ${filtered} device${filtered === 1 ? " received" : "s received"} only the settings supported by its family.` : ""}${excluded ? ` ${excluded} incompatible device${excluded === 1 ? " was" : "s were"} safely excluded.` : ""}`);
         await loadFleetPolicies();
       } catch (error) { toast(error.message, true); }
     }
 
     async function installFleetFirmware() {
       const firmware = state.fleetPolicies.firmware || {};
-      const scope = $("#fleetPolicyScope").value;
-      const deviceIds = selectedFleetDeviceIds();
-      if (scope === "devices" && !deviceIds.length) return toast("Select at least one device.", true);
+      const scopePayload = fleetScopePayload();
+      if (scopePayload.scope === "devices" && !scopePayload.device_ids.length) return toast("Select at least one device.", true);
+      if (scopePayload.scope === "group" && !scopePayload.group_id) return toast("Choose a saved device group.", true);
       if (!firmware.version) return toast("No firmware release is configured.", true);
-      if (!confirm(`Start or continue the safe OTA rollout of ${firmware.version} to the selected scope? The Bridge will use a canary and stop automatically on failure.`)) return;
+      if (!confirm(`Start or continue the safe X3/X4 OTA rollout of ${firmware.version}? The Bridge will filter this scope to XTEINK OTA-capable devices, use a canary, and stop automatically on failure.`)) return;
       try {
         const response = await api("fleet/firmware/install", {method: "POST", body: {
-          scope,
-          device_ids: deviceIds,
+          ...scopePayload,
           confirm_version: firmware.version,
         }});
         const result = await response.json();
-        toast(`Firmware plan accepted for ${result.targets.length} device${result.targets.length === 1 ? "" : "s"}; ${result.queued.length} currently queued.`);
+        const excluded = Object.keys(result.excluded || {}).length;
+        toast(`X3/X4 firmware plan accepted for ${result.targets.length} compatible device${result.targets.length === 1 ? "" : "s"}; ${(result.queued || []).length} currently queued.${excluded ? ` ${excluded} incompatible device${excluded === 1 ? " was" : "s were"} safely excluded.` : ""}`);
         await loadFleetPolicies();
       } catch (error) { toast(error.message, true); }
     }
@@ -2230,6 +3053,27 @@
         toast(`${deviceId} was removed from the fleet registry and MQTT discovery.`);
         await loadFleetPolicies();
       } catch (error) { toast(error.message, true); }
+    }
+
+    async function openDeviceTimeline(deviceId) {
+      $("#deviceTimelineTitle").textContent = deviceId;
+      $("#deviceTimelineIdentity").textContent = "Loading identity and ownership…";
+      $("#deviceTimelineEvents").innerHTML = '<div class="empty">Loading device activity…</div>';
+      $("#deviceTimelineDialog").showModal();
+      try {
+        const response = await api(`devices/${encodeURIComponent(deviceId)}/timeline?limit=80`);
+        const payload = await response.json();
+        const identity = payload.identity || {};
+        $("#deviceTimelineIdentity").innerHTML = `<strong>${escapeHtml(identity.label || identity.model || "Unclassified device")}</strong><br>${escapeHtml(systemTitle(identity.source || "unclassified"))} identity · ${escapeHtml(systemTitle(identity.confidence || "unknown"))} confidence · firmware owned by ${escapeHtml(systemTitle(identity.firmware_owner || "none"))}${identity.conflict ? `<br><span style="color:var(--danger)">${escapeHtml(identity.conflict_detail)}</span>` : ""}`;
+        const events = payload.events || [];
+        $("#deviceTimelineEvents").innerHTML = events.length ? events.map((event) => `<article class="timeline-event">
+          <time>${escapeHtml(systemTimestamp(event.at) || "Unknown time")}</time>
+          <div><strong>${escapeHtml(event.title || systemTitle(event.type))}</strong>${event.detail ? `<p>${escapeHtml(safeSystemText(event.detail))}</p>` : ""}</div>
+          <span>${escapeHtml(systemTitle(event.status || event.type))}</span>
+        </article>`).join("") : '<div class="empty">No management, identity, command, firmware, or reset events are recorded yet.</div>';
+      } catch (error) {
+        $("#deviceTimelineEvents").innerHTML = `<div class="empty">${escapeHtml(error.message)}</div>`;
+      }
     }
 
     function renderFlexHub(summary) {
@@ -4960,7 +5804,18 @@
     $("#unlockButton").addEventListener("click", () => {
       sessionStorage.setItem("flexdisplayBridgeKey", $("#apiKey").value);
       load();
+      if (state.workspace === "settings") loadSystemStatus();
     });
+    $("#systemUnlockButton").addEventListener("click", () => {
+      const supplied = $("#systemApiKey").value;
+      sessionStorage.setItem("flexdisplayBridgeKey", supplied);
+      $("#apiKey").value = supplied;
+      $("#systemAuthPanel").hidden = true;
+      loadSystemStatus();
+      load();
+    });
+    $("#refreshSystemStatus").addEventListener("click", () => loadSystemStatus());
+    $("#downloadSupportBundle").addEventListener("click", downloadSupportBundle);
     $("#headerSaveProfile").addEventListener("click", saveProfile);
     $("#headerAssignProfile").addEventListener("click", assignProfile);
     $("#pageSearch").addEventListener("input", renderPages);
@@ -5099,18 +5954,34 @@
     $("#saveFleetPolicyProfile").addEventListener("click", saveFleetPolicyProfile);
     $("#deleteFleetPolicyProfile").addEventListener("click", deleteFleetPolicyProfile);
     $("#cancelFleetPolicyEdit").addEventListener("click", renderFleetPolicyProfile);
-    $("#fleetPolicyScope").addEventListener("change", renderFleetPolicyDevices);
-    $("#selectAllPolicyDevices").addEventListener("click", () => {
-      $("#fleetPolicyScope").value = "devices";
+    $("#fleetPolicyScope").addEventListener("change", () => {
+      renderFleetGroups();
       renderFleetPolicyDevices();
-      document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = true; });
+      renderFleetFirmware();
+      $("#fleetImpactPreview").hidden = true;
+    });
+    $("#fleetGroupSelect").addEventListener("change", () => {
+      renderFleetPolicyDevices();
+      renderFleetFirmware();
+      $("#fleetImpactPreview").hidden = true;
+    });
+    $("#saveFleetGroup").addEventListener("click", saveFleetGroup);
+    $("#deleteFleetGroup").addEventListener("click", deleteFleetGroup);
+      $("#selectAllPolicyDevices").addEventListener("click", () => {
+        $("#fleetPolicyScope").value = "devices";
+        renderFleetPolicyDevices();
+        document.querySelectorAll("[data-policy-device]:not(:disabled)").forEach((node) => { node.checked = true; });
+        renderFleetFirmware();
     });
     $("#clearPolicyDevices").addEventListener("click", () => {
       $("#fleetPolicyScope").value = "devices";
       renderFleetPolicyDevices();
       document.querySelectorAll("[data-policy-device]").forEach((node) => { node.checked = false; });
+      renderFleetFirmware();
     });
     $("#applyFleetPolicy").addEventListener("click", applyFleetPolicy);
+    $("#previewFleetPolicy").addEventListener("click", previewFleetPolicy);
+    $("#previewFleetFirmware").addEventListener("click", previewFleetFirmware);
     $("#installFleetFirmware").addEventListener("click", installFleetFirmware);
     $("#resetFleetFirmware").addEventListener("click", resetFleetFirmware);
     $("#fleetPolicyDevices").addEventListener("click", (event) => {
@@ -5120,7 +5991,13 @@
       if (cancel) return fleetFirmwareDeviceAction(cancel.dataset.firmwareCancel, "cancel");
       const remove = event.target.closest("[data-remove-device]");
       if (remove) return removeFleetDevice(remove.dataset.removeDevice);
+      const timeline = event.target.closest("[data-device-timeline]");
+      if (timeline) return openDeviceTimeline(timeline.dataset.deviceTimeline);
     });
+    $("#fleetPolicyDevices").addEventListener("change", (event) => {
+      if (event.target.matches("[data-policy-device]")) renderFleetFirmware();
+    });
+    $("#closeDeviceTimeline").addEventListener("click", () => $("#deviceTimelineDialog").close());
     $("#openFlexHub").addEventListener("click", () => { $("#flexHubDialog").showModal(); startMeshConsole(); });
     $("#refreshFlexHub").addEventListener("click", async () => {
       await Promise.all([loadFlexHub(true), loadMeshNodes()]);

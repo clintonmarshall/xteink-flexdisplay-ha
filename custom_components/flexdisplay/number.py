@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import is_note4, management_supports
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -111,6 +112,18 @@ class FlexDisplayNumber(FlexDisplayEntity, NumberEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        key = self.entity_description.key
+        if key == "refresh_interval":
+            return management_supports(record, "fleet_policy")
+        if key in {"manual_sleep_duration", "manual_wake_grace"}:
+            return management_supports(record, "sleep_policy")
+        if key in {"critical_battery", "low_battery", "low_battery_multiplier"}:
+            return management_supports(record, "battery_policy")
+        if key == "unchanged_image_multiplier":
+            return management_supports(record, "rendering_profile")
+        return False
+
     @property
     def native_value(self) -> float | None:
         """Return the assigned policy value."""
@@ -141,6 +154,9 @@ class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_voice_volume"
 
+    def _record_supported(self, record: dict) -> bool:
+        return is_note4(record)
+
     @property
     def native_value(self) -> float | None:
         value = self.record.get("desired_voice_volume", self.record.get("voice_volume"))
@@ -156,14 +172,31 @@ class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
 def _entities_for_device(
     coordinator: FlexDisplayCoordinator, device_id: str
 ) -> tuple[NumberEntity, ...]:
-    entities: list[NumberEntity] = [
-        FlexDisplayNumber(coordinator, device_id, description)
-        for description in DESCRIPTIONS
-    ]
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
-    if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
+    entities: list[NumberEntity] = [
+        FlexDisplayNumber(coordinator, device_id, description)
+        for description in DESCRIPTIONS
+        if (
+            description.key == "refresh_interval"
+            and management_supports(record, "fleet_policy")
+        )
+        or (
+            description.key in {"manual_sleep_duration", "manual_wake_grace"}
+            and management_supports(record, "sleep_policy")
+        )
+        or (
+            description.key
+            in {"critical_battery", "low_battery", "low_battery_multiplier"}
+            and management_supports(record, "battery_policy")
+        )
+        or (
+            description.key == "unchanged_image_multiplier"
+            and management_supports(record, "rendering_profile")
+        )
+    ]
+    if is_note4(record):
         entities.append(FlexDisplayVoiceVolume(coordinator, device_id))
     return tuple(entities)
 

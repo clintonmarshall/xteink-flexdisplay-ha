@@ -11,6 +11,7 @@ from typing import Any
 
 CHECKIN_HISTORY_LIMIT = 48
 RESET_HISTORY_LIMIT = 24
+IDENTITY_HISTORY_LIMIT = 24
 PROBLEM_RESET_REASONS = {
     "panic",
     "interrupt_watchdog",
@@ -172,10 +173,33 @@ class DeviceStore:
             is_checkin = "firmware" in telemetry and "model" in telemetry
             previous_sd_ready = record.get("sd_ready")
             previous_boot_id = str(record.get("boot_id") or "")
+            previous_model = str(record.get("model") or "")
+            previous_model_reported = record.get("model_reported") is True
             now = utc_now()
             record.update({key: value for key, value in telemetry.items() if value is not None})
             record["last_seen"] = now
             if is_checkin:
+                current_model = str(record.get("model") or "")
+                current_model_reported = record.get("model_reported") is True
+                if current_model and (
+                    current_model != previous_model
+                    or current_model_reported != previous_model_reported
+                ):
+                    identity = {
+                        "at": now,
+                        "from_model": previous_model,
+                        "to_model": current_model,
+                        "source": (
+                            "reported" if current_model_reported else "inferred"
+                        ),
+                    }
+                    identity_history = record.setdefault("identity_history", [])
+                    identity_history.append(identity)
+                    record["identity_history"] = identity_history[
+                        -IDENTITY_HISTORY_LIMIT:
+                    ]
+                    record["last_identity_changed_at"] = now
+                    record["last_identity_previous_model"] = previous_model
                 record["checkin_count"] = int(record.get("checkin_count") or 0) + 1
                 history = record.setdefault("checkin_history", [])
                 point = {
@@ -293,6 +317,30 @@ class DeviceStore:
             self._save()
             return deepcopy(record)
 
+    def remove_provisioning_fields(
+        self,
+        device_id: str,
+        fields: set[str],
+        *,
+        reason: str = "capability-reconciled",
+    ) -> dict[str, Any] | None:
+        """Drop assignments that a corrected device identity cannot apply."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            removed = sorted(field for field in fields if field in record)
+            if not removed:
+                return deepcopy(record)
+            for field in removed:
+                record.pop(field, None)
+            record["provisioning_capability_reconciled_at"] = utc_now()
+            record["provisioning_capability_reconciled_reason"] = str(reason)[:96]
+            record["provisioning_capability_removed_fields"] = removed
+            record["render_revision"] = int(record.get("render_revision", 0)) + 1
+            self._save()
+            return deepcopy(record)
+
     def next_policy_revision(self) -> int:
         """Allocate one monotonic revision for an atomic fleet policy change."""
         with self._lock:
@@ -305,6 +353,48 @@ class DeviceStore:
         """Return operator-created fleet policy profiles."""
         with self._lock:
             return deepcopy(self._state.get("custom_policy_profiles") or {})
+
+    def fleet_groups(self) -> dict[str, dict[str, Any]]:
+        """Return saved explicit or filter-based device cohorts."""
+        with self._lock:
+            return deepcopy(self._state.get("fleet_groups") or {})
+
+    def put_fleet_group(
+        self,
+        group_id: str,
+        *,
+        label: str,
+        description: str,
+        device_ids: list[str],
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create or replace a reusable fleet cohort."""
+        with self._lock:
+            groups = self._state.setdefault("fleet_groups", {})
+            now = utc_now()
+            previous = groups.get(group_id) or {}
+            group = {
+                "id": group_id,
+                "label": label,
+                "description": description,
+                "device_ids": sorted(set(device_ids)),
+                "filters": deepcopy(filters),
+                "created_at": previous.get("created_at") or now,
+                "updated_at": now,
+            }
+            groups[group_id] = group
+            self._save()
+            return deepcopy(group)
+
+    def delete_fleet_group(self, group_id: str) -> bool:
+        """Delete a saved fleet cohort."""
+        with self._lock:
+            groups = self._state.get("fleet_groups") or {}
+            if group_id not in groups:
+                return False
+            del groups[group_id]
+            self._save()
+            return True
 
     def put_custom_policy_profile(
         self,
@@ -421,6 +511,53 @@ class DeviceStore:
                 record["firmware_update_error_at"] = now
                 rollout = self._state.get("firmware_rollout") or {}
                 if rollout.get("target_version") == record.get("firmware_update_target"):
+                    rollout["last_cancelled_device_id"] = device_id
+                    rollout["last_cancelled_at"] = now
+                    if rollout.get("canary_device_id") == device_id:
+                        rollout["status"] = "awaiting_canary"
+                        rollout.pop("canary_device_id", None)
+                        rollout.pop("canary_started_at", None)
+            self._save()
+            return deepcopy(record)
+
+    def remove_command(
+        self,
+        device_id: str,
+        command: str,
+        *,
+        reason: str = "capability-excluded",
+    ) -> dict[str, Any] | None:
+        """Remove one unsafe queued/dispatched command without losing others."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            pending = list(record.get("pending_commands") or [])
+            dispatched = list(record.get("dispatched_commands") or [])
+            if command not in pending and command not in dispatched:
+                return deepcopy(record)
+            record["pending_commands"] = [item for item in pending if item != command]
+            record["dispatched_commands"] = [
+                item for item in dispatched if item != command
+            ]
+            if not record["pending_commands"]:
+                record.pop("pending_command_id", None)
+            if not record["dispatched_commands"]:
+                record.pop("dispatched_command_id", None)
+            now = utc_now()
+            record["commands_cancelled_at"] = now
+            record["last_cancelled_commands"] = [command]
+            if command == "install":
+                record["firmware_update_status"] = "cancelled"
+                record["firmware_update_stage"] = "cancelled"
+                record["firmware_update_percent"] = 0
+                record["firmware_update_stage_at"] = now
+                record["firmware_update_error"] = f"install:{reason}"[:160]
+                record["firmware_update_error_at"] = now
+                rollout = self._state.get("firmware_rollout") or {}
+                if rollout.get("target_version") == record.get(
+                    "firmware_update_target"
+                ):
                     rollout["last_cancelled_device_id"] = device_id
                     rollout["last_cancelled_at"] = now
                     if rollout.get("canary_device_id") == device_id:
@@ -1167,6 +1304,7 @@ class DeviceStore:
             record = self._state["devices"][device_id]
             is_canary = rollout.get("canary_device_id") == device_id
             record["firmware_update_role"] = "canary" if is_canary else "fleet"
+            record["firmware_update_provider"] = "xteink"
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
             record["firmware_update_stage"] = "queued"
@@ -1185,6 +1323,8 @@ class DeviceStore:
         self,
         device_id: str,
         target_version: str,
+        *,
+        firmware_provider: str,
     ) -> dict[str, Any]:
         """Queue a model-specific OTA without changing the X3/X4 fleet rollout."""
         with self._lock:
@@ -1200,6 +1340,7 @@ class DeviceStore:
             self.queue_command(device_id, "install")
             record = self._state["devices"][device_id]
             record["firmware_update_role"] = "device"
+            record["firmware_update_provider"] = str(firmware_provider or "")[:32]
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
             record["firmware_update_stage"] = "queued"

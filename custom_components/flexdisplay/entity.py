@@ -12,6 +12,8 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .const import DOMAIN
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import device_manufacturer, device_model_label
+from .entity_lifecycle import collect_new_entities
 
 EntityFactory = Callable[[FlexDisplayCoordinator, str], Iterable[Entity]]
 FlexHubEntityFactory = Callable[[FlexDisplayCoordinator], Iterable[Entity]]
@@ -24,16 +26,15 @@ def setup_dynamic_entities(
 ) -> None:
     """Add entities now and whenever a new fleet device checks in."""
     coordinator: FlexDisplayCoordinator = entry.runtime_data
-    known_device_ids: set[str] = set()
+    known_entity_ids: set[str] = set()
 
     def add_new_devices() -> None:
-        entities: list[Entity] = []
-        for record in coordinator.data or []:
-            device_id = str(record.get("device_id") or "")
-            if not device_id or device_id in known_device_ids:
-                continue
-            known_device_ids.add(device_id)
-            entities.extend(factory(coordinator, device_id))
+        entities = collect_new_entities(
+            coordinator,
+            coordinator.data or [],
+            factory,
+            known_entity_ids,
+        )
         if entities:
             async_add_entities(entities)
 
@@ -78,14 +79,24 @@ class FlexDisplayEntity(CoordinatorEntity[FlexDisplayCoordinator]):
                 return record
         return {}
 
+    def _record_supported(self, record: dict) -> bool:
+        """Return whether this entity still applies to the current identity."""
+        return True
+
+    @property
+    def available(self) -> bool:
+        """Hide stale controls immediately after a capability correction."""
+        record = self.record
+        return super().available and bool(record) and self._record_supported(record)
+
     @property
     def device_info(self) -> DeviceInfo:
         """Describe this FlexDisplay device."""
         record = self.record
         return DeviceInfo(
             identifiers={(DOMAIN, self.device_id)},
-            manufacturer="XTEINK / FlexDisplay",
-            model=str(record.get("model") or "XTEINK"),
+            manufacturer=device_manufacturer(record),
+            model=device_model_label(record),
             name=str(record.get("name") or self.device_id),
             serial_number=self.device_id,
             suggested_area=str(record.get("area") or "") or None,

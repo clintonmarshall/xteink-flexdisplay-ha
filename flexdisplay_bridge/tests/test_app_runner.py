@@ -1,4 +1,5 @@
 import hashlib
+import json
 from pathlib import Path
 
 from app_runner import (
@@ -174,3 +175,36 @@ def test_mqtt_options_preserves_explicit_hacs_and_broker_settings() -> None:
         "password": "custom-password",
         "entity_source": "hacs",
     }
+
+
+def test_main_records_configured_and_effective_firmware_sources(
+    tmp_path: Path, monkeypatch
+) -> None:
+    import app_runner
+
+    legacy = next(
+        dict(release)
+        for release in LEGACY_PACKAGED_FIRMWARE
+        if release["firmware_version"] == "1.4.1-flexdisplay.0.24.0"
+    )
+    options_path = tmp_path / "options.json"
+    options_path.write_text(json.dumps(legacy), encoding="utf-8")
+    config_path = tmp_path / "config.yaml"
+    config_path.write_text("dashboard: {}\n", encoding="utf-8")
+    monkeypatch.setattr(app_runner, "OPTIONS_PATH", options_path)
+    monkeypatch.setattr(app_runner, "CONFIG_PATH", config_path)
+    monkeypatch.setattr(app_runner.uvicorn, "run", lambda *args, **kwargs: None)
+    environment: dict[str, str] = {}
+    monkeypatch.setattr(app_runner.os, "environ", environment)
+
+    app_runner.main()
+
+    assert environment["FLEXDISPLAY_FIRMWARE_CONFIGURED_VERSION"] == (
+        legacy["firmware_version"]
+    )
+    assert environment["FLEXDISPLAY_FIRMWARE_VERSION"] == str(
+        DEFAULT_FIRMWARE["firmware_version"]
+    )
+    assert environment["FLEXDISPLAY_FIRMWARE_CONFIG_SOURCE"] == (
+        "packaged_release"
+    )

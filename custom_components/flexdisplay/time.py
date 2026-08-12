@@ -12,6 +12,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import management_supports
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -55,6 +56,9 @@ class FlexDisplayActiveTime(FlexDisplayEntity, TimeEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "sleep_policy")
+
     @property
     def native_value(self) -> time | None:
         """Return the assigned local time."""
@@ -80,11 +84,23 @@ async def async_setup_entry(
 ) -> None:
     """Create active-hours controls for registered devices."""
     del hass
+
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[FlexDisplayActiveTime, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        if not management_supports(record, "sleep_policy"):
+            return ()
+        return tuple(
+            FlexDisplayActiveTime(coordinator, device_id, description)
+            for description in DESCRIPTIONS
+        )
+
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplayActiveTime(coordinator, device_id, description)
-            for description in DESCRIPTIONS
-        ),
+        entities_for_device,
     )

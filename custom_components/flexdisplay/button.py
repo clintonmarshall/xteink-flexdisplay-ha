@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import supported_actions, supports_xteink_ota
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -67,6 +68,14 @@ class FlexDisplayCommandButton(FlexDisplayEntity, ButtonEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    @property
+    def available(self) -> bool:
+        """Hide commands if a later check-in changes the device capability set."""
+        return (
+            super().available
+            and self.entity_description.command in supported_actions(self.record)
+        )
+
     async def async_press(self) -> None:
         """Queue the described command."""
         await self.coordinator.client.command(
@@ -110,7 +119,11 @@ class FlexDisplayRetryFirmwareButton(FlexDisplayEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Expose retry only after the Bridge's backoff and safety checks pass."""
-        return super().available and bool(self.record.get("firmware_retry_ready"))
+        return (
+            super().available
+            and supports_xteink_ota(self.record)
+            and bool(self.record.get("firmware_retry_ready"))
+        )
 
     async def async_press(self) -> None:
         """Retry the configured release for this device."""
@@ -130,8 +143,10 @@ class FlexDisplayResetRolloutButton(FlexDisplayEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Expose reset only while the configured rollout needs intervention."""
-        return super().available and bool(
-            self.record.get("firmware_rollout_reset_ready")
+        return (
+            super().available
+            and supports_xteink_ota(self.record)
+            and bool(self.record.get("firmware_rollout_reset_ready"))
         )
 
     async def async_press(self) -> None:
@@ -152,8 +167,10 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
     @property
     def available(self) -> bool:
         """Expose the action only while every Bridge safety condition passes."""
-        return super().available and bool(
-            self.record.get("usb_recovery_verification_ready")
+        return (
+            super().available
+            and supports_xteink_ota(self.record)
+            and bool(self.record.get("usb_recovery_verification_ready"))
         )
 
     async def async_press(self) -> None:
@@ -239,19 +256,37 @@ async def async_setup_entry(
 ) -> None:
     """Create refresh buttons for registered devices."""
     del hass
+
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[ButtonEntity, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        actions = supported_actions(record)
+        command_buttons = tuple(
+            FlexDisplayCommandButton(coordinator, device_id, description)
+            for description in DESCRIPTIONS
+            if description.command in actions
+        )
+        firmware_buttons: tuple[ButtonEntity, ...] = ()
+        if supports_xteink_ota(record):
+            firmware_buttons = (
+                FlexDisplayRetryFirmwareButton(coordinator, device_id),
+                FlexDisplayResetRolloutButton(coordinator, device_id),
+                FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
+            )
+        return (
+            *command_buttons,
+            FlexDisplayCancelCommandsButton(coordinator, device_id),
+            *firmware_buttons,
+        )
+
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            *(
-                FlexDisplayCommandButton(coordinator, device_id, description)
-                for description in DESCRIPTIONS
-            ),
-            FlexDisplayCancelCommandsButton(coordinator, device_id),
-            FlexDisplayRetryFirmwareButton(coordinator, device_id),
-            FlexDisplayResetRolloutButton(coordinator, device_id),
-            FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
-        ),
+        entities_for_device,
     )
     setup_flexhub_entities(
         entry,

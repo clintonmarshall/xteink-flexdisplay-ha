@@ -14,6 +14,7 @@ from flexdisplay_bridge.config import (
     EntityConfig,
     MqttConfig,
 )
+from flexdisplay_bridge.device_capabilities import resolve_device_capabilities
 from flexdisplay_bridge.mqtt_service import MqttService
 from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
 from PIL import Image
@@ -308,6 +309,134 @@ def test_rook_mqtt_discovery_removes_embedded_firmware_update() -> None:
     assert retained["homeassistant/binary_sensor/rook_mqtt01/repeated_sd_failure/config"] == ""
     assert retained["homeassistant/binary_sensor/rook_mqtt01/sd_ready/config"] == ""
     assert "homeassistant/image/rook_mqtt01/current_screen/config" in retained
+
+
+def test_checkers_mqtt_discovery_removes_embedded_firmware_and_sd_entities() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+    service = MqttService(
+        MqttConfig(enabled=True, entity_source="mqtt"),
+        lambda device_id, command, payload: None,
+    )
+    client = FakeClient()
+    service.client = client
+    service.connected = True
+    state = {
+        "device_id": "CHECKERS-MQTT01",
+        "model": "CHECKERS",
+        "firmware": "android-0.1.0",
+        "available_profiles": ["home"],
+        "available_modes": ["home_assistant"],
+    }
+
+    service.publish_device(
+        "CHECKERS-MQTT01",
+        DeviceConfig(
+            name="Kitchen Show 5",
+            # Persisted profiles may lag a corrected receiver check-in. The
+            # observed model must win so X-series controls cannot reappear.
+            model="XTEINK_X3",
+            width=960,
+            height=480,
+        ),
+        state,
+    )
+
+    retained = {
+        topic: payload
+        for topic, payload, retain in client.messages
+        if retain
+    }
+    assert retained["homeassistant/update/checkers_mqtt01/firmware/config"] == ""
+    assert retained["homeassistant/sensor/checkers_mqtt01/sd_failure_events/config"] == ""
+    assert retained[
+        "homeassistant/binary_sensor/checkers_mqtt01/repeated_sd_failure/config"
+    ] == ""
+    assert retained["homeassistant/binary_sensor/checkers_mqtt01/sd_ready/config"] == ""
+    assert retained["homeassistant/sensor/checkers_mqtt01/battery/config"] == ""
+    assert retained[
+        "homeassistant/binary_sensor/checkers_mqtt01/firmware_update_problem/config"
+    ] == ""
+    assert retained["homeassistant/button/checkers_mqtt01/firmware_retry/config"] == ""
+    assert retained["homeassistant/button/checkers_mqtt01/rollout_reset/config"] == ""
+
+
+def test_generic_mqtt_discovery_clears_unsupported_command_controls() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+    service = MqttService(
+        MqttConfig(enabled=True, entity_source="mqtt"),
+        lambda device_id, command, payload: None,
+    )
+    client = FakeClient()
+    service.client = client
+    service.connected = True
+    service.publish_device(
+        "ESP-MQTT01",
+        DeviceConfig(name="Generic LCD", model="XTEINK_X3"),
+        {
+            "device_id": "ESP-MQTT01",
+            "model": "ESP32-S3-LCD",
+            "firmware": "1.0.0",
+            "available_modes": ["home_assistant"],
+        },
+    )
+
+    retained = {
+        topic: payload
+        for topic, payload, retain in client.messages
+        if retain
+    }
+    assert retained["homeassistant/button/esp_mqtt01/restart/config"] == ""
+    assert retained["homeassistant/button/esp_mqtt01/full_refresh/config"] == ""
+    assert retained["homeassistant/button/esp_mqtt01/refresh/config"] != ""
+    assert retained["homeassistant/update/esp_mqtt01/firmware/config"] == ""
+
+
+def test_mqtt_prefers_the_authoritative_decorated_capability_contract() -> None:
+    class FakeClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+    service = MqttService(
+        MqttConfig(enabled=True, entity_source="mqtt"),
+        lambda device_id, command, payload: None,
+    )
+    client = FakeClient()
+    service.client = client
+    service.connected = True
+    unknown_contract = resolve_device_capabilities("").to_dict()
+    service.publish_device(
+        "LEGACY-NOMODEL",
+        DeviceConfig(name="Legacy", model="XTEINK_X3"),
+        {
+            "device_id": "LEGACY-NOMODEL",
+            "model": "XTEINK_X3",
+            "model_reported": False,
+            "device_capabilities": unknown_contract,
+        },
+    )
+
+    retained = {
+        topic: payload
+        for topic, payload, retain in client.messages
+        if retain
+    }
+    assert retained["homeassistant/update/legacy_nomodel/firmware/config"] == ""
+    assert retained["homeassistant/button/legacy_nomodel/restart/config"] == ""
 
 
 def test_mqtt_screen_refresh_event_is_non_retained() -> None:

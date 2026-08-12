@@ -10,14 +10,82 @@ import paho.mqtt.client as mqtt
 
 from . import __version__
 from .config import DeviceConfig, MqttConfig
+from .device_capabilities import (
+    DeliveryCapabilities,
+    DeviceCapabilityDescriptor,
+    DisplayCapabilities,
+    FirmwareCapabilities,
+    ManagementCapabilities,
+    PowerCapabilities,
+    resolve_device_capabilities,
+)
 
 LOGGER = logging.getLogger(__name__)
 
 
+def _device_descriptor(
+    profile: DeviceConfig, state: dict[str, Any]
+) -> DeviceCapabilityDescriptor:
+    reported = state.get("device_capabilities")
+    if isinstance(reported, dict):
+        try:
+            display = reported["display"]
+            power = reported["power"]
+            delivery = reported["delivery"]
+            firmware = reported["firmware"]
+            management = reported["management"]
+            return DeviceCapabilityDescriptor(
+                family=str(reported.get("family") or "unknown"),
+                model_key=str(reported.get("model_key") or "unknown"),
+                label=str(reported.get("label") or "Unknown display"),
+                known_model=bool(reported.get("known_model")),
+                display=DisplayCapabilities(
+                    width=display.get("width"),
+                    height=display.get("height"),
+                    technology=str(display.get("technology") or "unknown"),
+                    color=bool(display.get("color")),
+                    shape=str(display.get("shape") or "rectangular"),
+                    image_format=str(display.get("image_format") or "png"),
+                    touch=bool(display.get("touch")),
+                ),
+                power=PowerCapabilities(**power),
+                delivery=DeliveryCapabilities(**delivery),
+                firmware=FirmwareCapabilities(**firmware),
+                management=ManagementCapabilities(
+                    **{
+                        **management,
+                        "actions": tuple(management.get("actions") or ()),
+                        "modes": tuple(management.get("modes") or ()),
+                    }
+                ),
+                reported_capabilities=tuple(
+                    reported.get("reported_capabilities") or ()
+                ),
+            )
+        except (KeyError, TypeError, ValueError):
+            # An incomplete contract must not grant a trusted identity.
+            return resolve_device_capabilities("")
+
+    model = str(state.get("model") or profile.model or "")
+    if state.get("model_reported") is False:
+        return resolve_device_capabilities("")
+
+    def dimension(name: str) -> int | None:
+        try:
+            return int(state[name]) if state.get(name) is not None else None
+        except (TypeError, ValueError):
+            return None
+
+    return resolve_device_capabilities(
+        model,
+        capabilities=state.get("transfer_capabilities") or (),
+        width=dimension("width"),
+        height=dimension("height"),
+    )
+
+
 def _is_android_receiver(profile: DeviceConfig, state: dict[str, Any]) -> bool:
-    model = str(profile.model or state.get("model") or "").upper()
-    normalized = "".join(character for character in model if character.isalnum())
-    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+    return _device_descriptor(profile, state).family == "android_receiver"
 
 
 CommandHandler = Callable[[str, str, str], None]
@@ -164,6 +232,7 @@ class MqttService:
         profile: DeviceConfig,
         state: dict[str, Any],
     ) -> list[tuple[str, dict[str, Any]]]:
+        descriptor = _device_descriptor(profile, state)
         slug = _slug(device_id)
         state_topic = f"{self.config.topic_prefix}/{device_id}/state"
         command_root = f"{self.config.topic_prefix}/{device_id}/command"
@@ -171,7 +240,7 @@ class MqttService:
             "identifiers": [f"flexdisplay_{device_id}"],
             "name": profile.name,
             "manufacturer": "XTEINK / FlexDisplay",
-            "model": profile.model or state.get("model") or "XTEINK",
+            "model": state.get("model") or profile.model or "XTEINK",
             "serial_number": device_id,
             "sw_version": state.get("firmware") or "unknown",
         }
@@ -463,8 +532,20 @@ class MqttService:
                 "entity_category": "diagnostic",
             },
         }
-        if _is_android_receiver(profile, state):
+        if descriptor.firmware.provider != "xteink":
             sensors.pop("sd_failure_events", None)
+        if not descriptor.power.reports_battery:
+            for key in ("battery", "battery_voltage", "battery_runtime", "battery_drain"):
+                sensors.pop(key, None)
+        if not descriptor.firmware.manageable:
+            for key in (
+                "firmware_stage",
+                "firmware_progress",
+                "firmware_error",
+                "firmware_rollout",
+                "firmware_install_blockers",
+            ):
+                sensors.pop(key, None)
         for key, extra in sensors.items():
             payload = {
                 **self._base(
@@ -559,9 +640,14 @@ class MqttService:
                 ),
             },
         }
-        if _is_android_receiver(profile, state):
+        if descriptor.firmware.provider != "xteink":
             binary_sensors.pop("repeated_sd_failure", None)
             binary_sensors.pop("sd_ready", None)
+        if not descriptor.power.reports_battery:
+            binary_sensors.pop("low_battery", None)
+        if not descriptor.firmware.manageable:
+            binary_sensors.pop("firmware_update_available", None)
+            binary_sensors.pop("firmware_update_problem", None)
         for key, extra in binary_sensors.items():
             payload = {
                 **self._base(
@@ -590,6 +676,21 @@ class MqttService:
             "rollout_reset": ("Reset firmware rollout", "rollout-reset"),
             "resend_screen": ("Resend current screen", "resend-screen"),
         }
+        buttons = {
+            key: value
+            for key, value in buttons.items()
+            if value[1] in descriptor.management.actions
+            or value[1] == "cancel"
+            or (
+                value[1] in {"firmware-retry", "rollout-reset"}
+                and descriptor.supports_xteink_ota
+            )
+            or (
+                value[1] == "resend-screen"
+                and "refresh" in descriptor.management.actions
+                and descriptor.management.supports_screen_history
+            )
+        }
         for key, (name, command) in buttons.items():
             payload = {
                 **self._base(device=device, unique_id=f"flexdisplay_{slug}_{key}"),
@@ -616,6 +717,23 @@ class MqttService:
                 "assigned_stay_awake_on_usb",
                 "set-stay-awake-on-usb",
             ),
+        }
+        switches = {
+            key: value
+            for key, value in switches.items()
+            if (
+                key in {"auto_start", "live_mode"}
+                and descriptor.management.supports_fleet_policy
+            )
+            or (
+                key == "intelligent_sleep"
+                and descriptor.management.supports_sleep_policy
+            )
+            or (
+                key == "stay_awake_on_usb"
+                and descriptor.management.supports_sleep_policy
+                and descriptor.power.reports_usb_power
+            )
         }
         for key, (name, field, command) in switches.items():
             payload = {
@@ -700,6 +818,28 @@ class MqttService:
                 "s",
             ),
         }
+        numbers = {
+            key: value
+            for key, value in numbers.items()
+            if (key == "refresh_interval" and descriptor.management.supports_fleet_policy)
+            or (
+                key in {"manual_sleep", "manual_wake_grace"}
+                and descriptor.management.supports_sleep_policy
+            )
+            or (
+                key
+                in {
+                    "critical_battery",
+                    "low_battery",
+                    "low_battery_multiplier",
+                }
+                and descriptor.management.supports_battery_policy
+            )
+            or (
+                key == "unchanged_multiplier"
+                and descriptor.management.supports_rendering_profile
+            )
+        }
         for key, (
             name,
             field,
@@ -756,6 +896,20 @@ class MqttService:
                 ["auto", "lan_preferred", "ble_only"],
             ),
         }
+        selects = {
+            key: value
+            for key, value in selects.items()
+            if (key == "mode" and bool(descriptor.management.modes))
+            or (
+                key == "profile"
+                and descriptor.management.supports_dashboard_profiles
+            )
+            or (key == "policy" and descriptor.management.supports_fleet_policy)
+            or (
+                key == "open_display_transport"
+                and descriptor.management.supports_opendisplay_policy
+            )
+        }
         for key, (name, field, command, options) in selects.items():
             payload = {
                 **self._base(
@@ -795,6 +949,18 @@ class MqttService:
                 5,
             ),
         }
+        texts = {
+            key: value
+            for key, value in texts.items()
+            if (
+                key in {"name", "area"}
+                and descriptor.management.supports_provisioning
+            )
+            or (
+                key in {"timezone", "active_start", "active_end"}
+                and descriptor.management.supports_sleep_policy
+            )
+        }
         for key, (name, field, command, maximum) in texts.items():
             payload = {
                 **self._base(
@@ -812,7 +978,7 @@ class MqttService:
             }
             configs.append((f"text/{slug}/{key}", payload))
 
-        if not _is_android_receiver(profile, state):
+        if descriptor.firmware.manageable:
             update = {
                 **self._base(
                     device=device,
@@ -868,20 +1034,101 @@ class MqttService:
         if not self.client or not self.connected:
             return
         configs = self._configs(device_id, profile, state)
-        if _is_android_receiver(profile, state):
-            # Clear retained embedded-device entities published by an older Bridge.
+        descriptor = _device_descriptor(profile, state)
+        if descriptor.firmware.provider != "xteink" or not descriptor.firmware.manageable:
+            # Clear retained inapplicable entities published by an older Bridge.
             slug = _slug(device_id)
-            for topic_suffix in (
-                f"update/{slug}/firmware",
-                f"sensor/{slug}/sd_failure_events",
-                f"binary_sensor/{slug}/repeated_sd_failure",
-                f"binary_sensor/{slug}/sd_ready",
-            ):
+            topic_suffixes = []
+            if not descriptor.firmware.manageable:
+                topic_suffixes.extend(
+                    (
+                        f"update/{slug}/firmware",
+                        f"sensor/{slug}/firmware_stage",
+                        f"sensor/{slug}/firmware_progress",
+                        f"sensor/{slug}/firmware_error",
+                        f"sensor/{slug}/firmware_rollout",
+                        f"sensor/{slug}/firmware_install_blockers",
+                        f"binary_sensor/{slug}/firmware_update_available",
+                        f"binary_sensor/{slug}/firmware_update_problem",
+                    )
+                )
+            if descriptor.firmware.provider != "xteink":
+                topic_suffixes.extend(
+                    (
+                        f"sensor/{slug}/sd_failure_events",
+                        f"binary_sensor/{slug}/repeated_sd_failure",
+                        f"binary_sensor/{slug}/sd_ready",
+                    )
+                )
+            if not descriptor.power.reports_battery:
+                topic_suffixes.extend(
+                    (
+                        f"sensor/{slug}/battery",
+                        f"sensor/{slug}/battery_voltage",
+                        f"sensor/{slug}/battery_runtime",
+                        f"sensor/{slug}/battery_drain",
+                        f"binary_sensor/{slug}/low_battery",
+                    )
+                )
+            for topic_suffix in topic_suffixes:
                 self.client.publish(
                     f"{self.config.discovery_prefix}/{topic_suffix}/config",
                     "",
                     retain=True,
                 )
+        slug = _slug(device_id)
+        published_topics = {topic_suffix for topic_suffix, _payload in configs}
+        capability_topics = {
+            *(f"button/{slug}/{key}" for key in (
+                "refresh",
+                "full_refresh",
+                "previous",
+                "next",
+                "overview",
+                "clear",
+                "sleep",
+                "power_off",
+                "restart",
+                "cancel",
+                "firmware_retry",
+                "rollout_reset",
+                "resend_screen",
+            )),
+            *(f"switch/{slug}/{key}" for key in (
+                "auto_start",
+                "live_mode",
+                "intelligent_sleep",
+                "stay_awake_on_usb",
+            )),
+            *(f"number/{slug}/{key}" for key in (
+                "refresh_interval",
+                "manual_sleep",
+                "critical_battery",
+                "low_battery",
+                "low_battery_multiplier",
+                "unchanged_multiplier",
+                "manual_wake_grace",
+            )),
+            *(f"select/{slug}/{key}" for key in (
+                "mode",
+                "profile",
+                "policy",
+                "open_display_transport",
+            )),
+            *(f"text/{slug}/{key}" for key in (
+                "name",
+                "area",
+                "timezone",
+                "active_start",
+                "active_end",
+            )),
+        }
+        for topic_suffix in capability_topics - published_topics:
+            self.client.publish(
+                f"{self.config.discovery_prefix}/{topic_suffix}/config",
+                "",
+                retain=True,
+            )
         for topic_suffix, payload in configs:
             topic = f"{self.config.discovery_prefix}/{topic_suffix}/config"
             self.client.publish(
