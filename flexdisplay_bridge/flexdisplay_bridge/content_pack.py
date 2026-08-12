@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import base64
+import binascii
 import hashlib
 import io
 import json
@@ -16,11 +18,13 @@ from typing import Any
 MAX_PACK_BYTES = 32 * 1024 * 1024
 MAX_FILE_BYTES = 12 * 1024 * 1024
 MAX_FILES = 64
+MAX_CARDS = 32
 VERSION_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 MANAGED_PREFIXES = (
     "/factory-content/",
     "/photos/flexdisplay/",
     "/books/flexdisplay/",
+    "/cards/flexdisplay/",
     "/.crosspoint/fleet/",
 )
 
@@ -56,7 +60,11 @@ class ContentPackStore:
         self.state_path = state_path
         self.content_root = content_root
         self._lock = threading.RLock()
-        self._state: dict[str, Any] = {"packs": {}, "assignments": {}}
+        self._state: dict[str, Any] = {
+            "packs": {},
+            "assignments": {},
+            "deployments": [],
+        }
         self._load()
 
     def _load(self) -> None:
@@ -66,6 +74,7 @@ class ContentPackStore:
                 self._state = {
                     "packs": loaded.get("packs") or {},
                     "assignments": loaded.get("assignments") or {},
+                    "deployments": loaded.get("deployments") or [],
                 }
         except (OSError, json.JSONDecodeError):
             pass
@@ -154,6 +163,7 @@ class ContentPackStore:
             "version": version,
             "name": str(supplied.get("name") or version)[:120],
             "description": str(supplied.get("description") or "")[:500],
+            "kind": str(supplied.get("kind") or "assets")[:32],
             "created_at": now(),
             "file_count": len(files),
             "size": total,
@@ -164,18 +174,169 @@ class ContentPackStore:
             self._save()
         return deepcopy(record)
 
-    def assign(self, version: str, device_ids: list[str]) -> dict[str, Any]:
+    def build_quick_cards(self, payload: dict[str, Any]) -> dict[str, Any]:
+        """Build an offline Quick Cards content pack without requiring a ZIP tool."""
+        version = str(payload.get("version") or "").strip()
+        if not VERSION_PATTERN.fullmatch(version):
+            raise ContentPackError("Content pack version is invalid")
+        cards = payload.get("cards")
+        if not isinstance(cards, list) or not cards:
+            raise ContentPackError("Add at least one Quick Card")
+        if len(cards) > MAX_CARDS:
+            raise ContentPackError(f"Quick Card packs support at most {MAX_CARDS} cards")
+
+        normalised_cards: list[dict[str, Any]] = []
+        seen_ids: set[str] = set()
+        allowed_types = {"id_badge", "contact", "wifi", "message", "emergency", "image"}
+        for supplied in cards:
+            if not isinstance(supplied, dict):
+                raise ContentPackError("Every Quick Card must be an object")
+            card_id = str(supplied.get("id") or "").strip()
+            card_type = str(supplied.get("type") or "message").strip().lower()
+            if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,47}", card_id):
+                raise ContentPackError("Every Quick Card needs a safe, unique ID")
+            if card_id in seen_ids:
+                raise ContentPackError(f"Duplicate Quick Card ID: {card_id}")
+            if card_type not in allowed_types:
+                raise ContentPackError(f"Unsupported Quick Card type: {card_type}")
+            seen_ids.add(card_id)
+            card = {"id": card_id, "type": card_type}
+            for field, limit in {
+                "title": 80,
+                "subtitle": 120,
+                "body": 512,
+                "footer": 120,
+                "qr_payload": 800,
+                "qr_label": 80,
+                "image_path": 180,
+                "expires": 40,
+            }.items():
+                value = str(supplied.get(field) or "").strip()
+                if value:
+                    card[field] = value[:limit]
+            if not card.get("title"):
+                raise ContentPackError(f"Quick Card {card_id} needs a title")
+            image_path = str(card.get("image_path") or "")
+            if image_path and (
+                not image_path.startswith("/cards/flexdisplay/") or ".." in image_path
+            ):
+                raise ContentPackError(
+                    f"Quick Card {card_id} image must use /cards/flexdisplay/"
+                )
+            if bool(supplied.get("favourite")):
+                card["favourite"] = True
+            normalised_cards.append(card)
+
+        assets = payload.get("assets") or []
+        if not isinstance(assets, list):
+            raise ContentPackError("Quick Card assets must be a list")
+        files: dict[str, bytes] = {
+            "quick-cards/cards.json": (
+                json.dumps(
+                    {
+                        "schema_version": 1,
+                        "version": version,
+                        "title": str(payload.get("name") or version)[:80],
+                        "cards": normalised_cards,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+                + "\n"
+            ).encode("utf-8")
+        }
+        manifest_files: list[dict[str, str]] = [
+            {
+                "source": "quick-cards/cards.json",
+                "target": "/cards/flexdisplay/cards.json",
+            }
+        ]
+        for supplied in assets:
+            if not isinstance(supplied, dict):
+                raise ContentPackError("Every Quick Card asset must be an object")
+            filename = _safe_source(supplied.get("filename"))
+            if "/" in filename:
+                raise ContentPackError("Quick Card asset filenames cannot contain folders")
+            if not filename.lower().endswith(".bmp"):
+                raise ContentPackError("Quick Card assets must be BMP files")
+            encoded = str(supplied.get("data_base64") or "")
+            try:
+                content = base64.b64decode(encoded, validate=True)
+            except (ValueError, binascii.Error) as err:
+                raise ContentPackError(f"{filename} is not valid base64") from err
+            if not content.startswith(b"BM"):
+                raise ContentPackError(f"{filename} is not a BMP file")
+            source = f"quick-cards/assets/{filename}"
+            files[source] = content
+            manifest_files.append(
+                {
+                    "source": source,
+                    "target": f"/cards/flexdisplay/assets/{filename}",
+                }
+            )
+
+        descriptor = {
+            "version": version,
+            "name": str(payload.get("name") or version)[:120],
+            "description": str(payload.get("description") or "Offline Quick Cards")[:500],
+            "kind": "quick_cards",
+            "files": manifest_files,
+        }
+        archive = io.BytesIO()
+        with zipfile.ZipFile(archive, "w", compression=zipfile.ZIP_DEFLATED) as bundle:
+            bundle.writestr("content-pack.json", json.dumps(descriptor))
+            for source, content in files.items():
+                bundle.writestr(source, content)
+        record = self.install(archive.getvalue())
+        with self._lock:
+            record = self._state["packs"][version]
+            record["kind"] = "quick_cards"
+            record["card_count"] = len(normalised_cards)
+            self._save()
+            return deepcopy(record)
+
+    def assign(
+        self,
+        version: str,
+        device_ids: list[str],
+        *,
+        scope: str = "devices",
+        scheduled_for: str = "",
+    ) -> dict[str, Any]:
         with self._lock:
             if version not in self._state["packs"]:
                 raise ContentPackError("Unknown content pack")
+            scheduled = scheduled_for.strip()
+            if scheduled:
+                try:
+                    parsed = datetime.fromisoformat(scheduled.replace("Z", "+00:00"))
+                    if parsed.tzinfo is None:
+                        parsed = parsed.replace(tzinfo=UTC)
+                    scheduled = parsed.astimezone(UTC).isoformat(timespec="seconds")
+                except ValueError as err:
+                    raise ContentPackError("Scheduled time must be an ISO-8601 date") from err
+            deployment = {
+                "id": hashlib.sha256(
+                    f"{version}:{','.join(sorted(device_ids))}:{now()}".encode()
+                ).hexdigest()[:16],
+                "version": version,
+                "scope": scope,
+                "device_ids": list(device_ids),
+                "scheduled_for": scheduled or None,
+                "created_at": now(),
+            }
             for device_id in device_ids:
                 self._state["assignments"][device_id] = {
                     "desired_version": version,
-                    "status": "pending",
+                    "status": "scheduled" if scheduled else "pending",
                     "error": "",
+                    "deployment_id": deployment["id"],
+                    "scheduled_for": scheduled or None,
                     "assigned_at": now(),
                     "updated_at": now(),
                 }
+            self._state["deployments"].append(deployment)
+            self._state["deployments"] = self._state["deployments"][-50:]
             self._save()
             return deepcopy(self._state["assignments"])
 
@@ -203,6 +364,13 @@ class ContentPackStore:
             assignment = self._state["assignments"].get(device_id)
             if not assignment:
                 return None
+            scheduled_for = str(assignment.get("scheduled_for") or "")
+            if scheduled_for:
+                try:
+                    if datetime.fromisoformat(scheduled_for) > datetime.now(UTC):
+                        return None
+                except ValueError:
+                    pass
             if (
                 assignment.get("installed_version") == assignment.get("desired_version")
                 and assignment.get("status") == "installed"

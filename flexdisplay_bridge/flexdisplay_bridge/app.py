@@ -1278,10 +1278,18 @@ def _decorate_device(
         health_issues.append("offline")
     if result.get("sd_ready") is False and not _is_android_display(result):
         health_issues.append("sd_card")
+    if (
+        result.get("sd_writable") is False
+        and result.get("sd_ready") is True
+        and not _is_android_display(result)
+    ):
+        health_issues.append("sd_write")
     if result.get("ha_error"):
         health_issues.append("home_assistant")
     if result.get("image_conversion_error"):
         health_issues.append("image_conversion")
+    if result.get("dashboard_fetch_error"):
+        health_issues.append("dashboard_fetch")
     if result.get("firmware_update_status") in {"failed", "cancelled"}:
         health_issues.append("firmware_update")
     if result["low_battery"]:
@@ -5588,15 +5596,36 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail=str(err)) from err
         return {"pack": pack}
 
+    @app.post("/api/v1/content-packs/quick-cards")
+    def build_quick_card_pack(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        """Create a device-ready Quick Cards pack directly from Studio."""
+        authorize(request)
+        try:
+            pack = content_packs.build_quick_cards(payload)
+        except ContentPackError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"pack": pack}
+
     @app.post("/api/v1/content-packs/{version}/rollout")
     def rollout_content_pack(
         version: str, payload: dict[str, Any], request: Request
     ) -> dict[str, Any]:
         authorize(request)
-        selected = payload.get("device_ids")
-        if not isinstance(selected, list) or not selected:
+        scope = str(payload.get("scope") or "devices").lower()
+        selected = payload.get("device_ids") or []
+        if not isinstance(selected, list):
+            raise HTTPException(status_code=400, detail="Device IDs must be a list")
+        if scope not in {"all", "x3", "x4", "devices"}:
+            raise HTTPException(status_code=400, detail="Unsupported content scope")
+        if scope == "devices" and not selected:
             raise HTTPException(status_code=400, detail="Select at least one device")
-        device_ids = [_device_id(str(value)) for value in selected]
+        requested_ids = {_device_id(str(value)) for value in selected}
+        scoped = fleet_scope_records(scope, requested_ids)
+        device_ids = [str(record.get("device_id") or "") for record in scoped]
+        if not device_ids:
+            raise HTTPException(status_code=404, detail="No devices matched the content scope")
         known = {str(item.get("device_id") or "") for item in store.all()}
         missing = [device_id for device_id in device_ids if device_id not in known]
         if missing:
@@ -5604,13 +5633,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 status_code=404, detail=f"Unknown devices: {', '.join(missing)}"
             )
         try:
-            assignments = content_packs.assign(version, device_ids)
+            assignments = content_packs.assign(
+                version,
+                device_ids,
+                scope=scope,
+                scheduled_for=str(payload.get("scheduled_for") or ""),
+            )
         except ContentPackError as err:
             raise HTTPException(status_code=404, detail=str(err)) from err
-        for device_id in device_ids:
-            store.queue_command(device_id, "refresh")
+        if not payload.get("scheduled_for"):
+            for device_id in device_ids:
+                store.queue_command(device_id, "refresh")
         return {
             "version": version,
+            "scope": scope,
             "device_ids": device_ids,
             "assignments": assignments,
         }
@@ -5662,6 +5698,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_free_heap: str | None = Header(default=None),
         x_flexdisplay_min_free_heap: str | None = Header(default=None),
         x_flexdisplay_sd_ready: str | None = Header(default=None),
+        x_flexdisplay_sd_writable: str | None = Header(default=None),
+        x_flexdisplay_sd_diagnostic: str | None = Header(default=None),
         x_flexdisplay_wake_reason: str | None = Header(default=None),
         x_flexdisplay_reset_reason: str | None = Header(default=None),
         x_flexdisplay_boot_id: str | None = Header(default=None),
@@ -5669,6 +5707,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_image_sha256: str | None = Header(default=None),
         x_flexdisplay_image_cached: str | None = Header(default=None),
         x_flexdisplay_last_image_error: str | None = Header(default=None),
+        x_flexdisplay_last_fetch_error: str | None = Header(default=None),
         x_flexdisplay_capabilities: str | None = Header(default=None),
         x_flexdisplay_content_version: str | None = Header(default=None),
         x_flexdisplay_content_status: str | None = Header(default=None),
@@ -5712,6 +5751,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if x_flexdisplay_last_image_error is not None
             else None
         )
+        last_fetch_error = (
+            _header_value(x_flexdisplay_last_fetch_error).strip()
+            if x_flexdisplay_last_fetch_error is not None
+            else None
+        )
         one_bit_bytes = ((width + 7) // 8) * height
         model_source_reported = bool(x_flexdisplay_model)
         model_source_inferred = bool(
@@ -5751,6 +5795,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 x_flexdisplay_min_free_heap, 0, 1_000_000
             ),
             "sd_ready": _boolean(x_flexdisplay_sd_ready),
+            "sd_writable": _boolean(x_flexdisplay_sd_writable),
+            "sd_diagnostic": _header_value(x_flexdisplay_sd_diagnostic) or None,
             "wake_reason": x_flexdisplay_wake_reason or None,
             "reset_reason": x_flexdisplay_reset_reason or None,
             "boot_id": x_flexdisplay_boot_id or None,
@@ -5800,6 +5846,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # proves a subsequent delivery converted successfully, so clear
             # only the active fault while retaining its history and timestamp.
             telemetry["image_conversion_error"] = False
+        if last_fetch_error is not None:
+            telemetry["dashboard_fetch_error"] = bool(last_fetch_error)
+            if last_fetch_error:
+                telemetry["last_fetch_error"] = last_fetch_error
+                telemetry["last_fetch_error_at"] = datetime.now(UTC).isoformat(
+                    timespec="seconds"
+                )
+        elif image_cached:
+            telemetry["dashboard_fetch_error"] = False
         record = store.touch(device_id, telemetry)
         content_assignment = content_packs.observe(
             device_id,

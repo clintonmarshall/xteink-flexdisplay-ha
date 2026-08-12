@@ -671,6 +671,100 @@ def test_v022_content_pack_rollout_is_acknowledged_per_device(tmp_path: Path) ->
         assert state["assignments"]["X3-CONTENT"]["status"] == "installed"
 
 
+def test_content_manager_builds_quick_cards_and_scopes_scheduled_rollout(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    with TestClient(create_app(config)) as client:
+        for device_id in ("X3-CARD01", "X4-CARD02"):
+            assert client.get(
+                "/api/v1/screen", headers={"X-FlexDisplay-ID": device_id}
+            ).status_code == 200
+
+        built = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "wallet-1",
+                "name": "Visitor wallet",
+                "cards": [
+                    {
+                        "id": "visitor",
+                        "type": "id_badge",
+                        "title": "Visitor",
+                        "body": "Please report to reception",
+                        "qr_payload": "https://example.test/check-in",
+                        "image_path": "/cards/flexdisplay/assets/profile.bmp",
+                    }
+                ],
+                "assets": [
+                    {
+                        "filename": "profile.bmp",
+                        "data_base64": "Qk0AAAAA",
+                    }
+                ],
+            },
+        )
+        assert built.status_code == 200
+        assert built.json()["pack"]["kind"] == "quick_cards"
+        assert built.json()["pack"]["card_count"] == 1
+        card_manifest = client.get(
+            "/api/v1/content-packs/wallet-1/files/quick-cards/cards.json"
+        )
+        assert card_manifest.status_code == 200
+        assert card_manifest.json()["schema_version"] == 1
+        assert card_manifest.json()["cards"][0]["qr_payload"].startswith("https://")
+
+        scheduled_for = (datetime.now(UTC) + timedelta(hours=1)).isoformat()
+        rollout = client.post(
+            "/api/v1/content-packs/wallet-1/rollout",
+            json={"scope": "x3", "scheduled_for": scheduled_for},
+        )
+        assert rollout.status_code == 200
+        assert rollout.json()["device_ids"] == ["X3-CARD01"]
+        state = client.get("/api/v1/content-packs").json()
+        assert state["assignments"]["X3-CARD01"]["status"] == "scheduled"
+        assert state["deployments"][-1]["scope"] == "x3"
+
+        waiting = client.get(
+            "/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-CARD01"}
+        )
+        assert "x-flexdisplay-content-version" not in waiting.headers
+
+
+def test_quick_card_builder_rejects_unsafe_image_paths(tmp_path: Path) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        response = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "unsafe-1",
+                "cards": [
+                    {
+                        "id": "unsafe",
+                        "type": "image",
+                        "title": "Unsafe",
+                        "image_path": "/books/private.bmp",
+                    }
+                ],
+            },
+        )
+        assert response.status_code == 400
+        assert "/cards/flexdisplay/" in response.json()["detail"]
+
+
+def test_quick_card_builder_rejects_non_bmp_assets(tmp_path: Path) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        response = client.post(
+            "/api/v1/content-packs/quick-cards",
+            json={
+                "version": "unsafe-asset-1",
+                "cards": [{"id": "badge", "type": "id_badge", "title": "Badge"}],
+                "assets": [{"filename": "profile.png", "data_base64": "iVBORw=="}],
+            },
+        )
+        assert response.status_code == 400
+        assert "BMP" in response.json()["detail"]
+
+
 def test_v021_screen_advertises_cached_branded_fetch_asset(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",
@@ -1881,6 +1975,47 @@ def test_device_image_conversion_diagnostic_is_bounded_and_clears_active_fault(
         assert device["image_conversion_error"] is False
         assert device["last_image_error"] == detail[:160]
         assert "image_conversion" not in device["health_issues"]
+
+
+def test_device_sd_write_and_fetch_diagnostics_are_actionable_and_recover(
+    tmp_path: Path,
+) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        failed = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-RUNTIME",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-SD-Writable": "false",
+                "X-FlexDisplay-SD-Diagnostic": "write-failed",
+                "X-FlexDisplay-Last-Fetch-Error": "fetch:download_failed",
+                "X-FlexDisplay-Image-Cached": "true",
+            },
+        )
+        assert failed.status_code == 200
+        device = client.get("/api/v1/devices/X4-RUNTIME").json()
+        assert device["sd_writable"] is False
+        assert device["sd_diagnostic"] == "write-failed"
+        assert device["dashboard_fetch_error"] is True
+        assert "sd_write" in device["health_issues"]
+        assert "dashboard_fetch" in device["health_issues"]
+
+        recovered = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "X4-RUNTIME",
+                "X-FlexDisplay-SD-Ready": "true",
+                "X-FlexDisplay-SD-Writable": "true",
+                "X-FlexDisplay-SD-Diagnostic": "ok",
+                "X-FlexDisplay-Image-Cached": "true",
+            },
+        )
+        assert recovered.status_code == 200
+        device = client.get("/api/v1/devices/X4-RUNTIME").json()
+        assert device["sd_writable"] is True
+        assert device["dashboard_fetch_error"] is False
+        assert "sd_write" not in device["health_issues"]
+        assert "dashboard_fetch" not in device["health_issues"]
 
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
