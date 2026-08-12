@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.45.1
+
+- Add the Echo Show 5 2019 (`checkers`) as a managed 960 x 480 Android
+  receiver with Studio preview support and Android receiver firmware exclusion.
+- Reuse the Android receiver's always-on long-poll refresh path for Show 5
+  devices while preserving the Echo Spot round-display behavior.
+
 ## 0.45.0
 
 - Add immediate, durable screen refresh for the Echo Spot over its authenticated
