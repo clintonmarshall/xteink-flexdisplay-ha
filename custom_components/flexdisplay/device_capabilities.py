@@ -93,6 +93,36 @@ def firmware_provider(record: Mapping[str, Any]) -> str:
     return "none"
 
 
+def is_note4(record: Mapping[str, Any]) -> bool:
+    """Return whether the normalized device family owns Note4 features."""
+    return firmware_provider(record) == "note4"
+
+
+def device_manufacturer(record: Mapping[str, Any]) -> str:
+    """Return a family-appropriate Home Assistant manufacturer label."""
+    family = str(_descriptor(record).get("family") or record.get("device_family") or "")
+    provider = firmware_provider(record)
+    if provider == "xteink":
+        return "XTEINK / FlexDisplay"
+    if provider == "note4":
+        return "Zectrix / FlexDisplay"
+    if family == "android_receiver" or provider == "android_app":
+        return "Amazon / FlexDisplay"
+    if family == "generic_embedded" or any(
+        marker in _model_key(record) for marker in _GENERIC_MARKERS
+    ):
+        return "ESP / FlexDisplay"
+    return "FlexDisplay"
+
+
+def device_model_label(record: Mapping[str, Any]) -> str:
+    """Return the descriptor label while preserving useful legacy models."""
+    label = str(_descriptor(record).get("label") or "").strip()
+    if label:
+        return label
+    return str(record.get("model") or "Unknown display")
+
+
 def firmware_manageable(record: Mapping[str, Any]) -> bool:
     """Return whether Home Assistant may offer a firmware Update entity."""
     manageable = _section(record, "firmware").get("manageable")

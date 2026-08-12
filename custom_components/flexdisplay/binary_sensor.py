@@ -92,6 +92,18 @@ class FlexDisplayBinarySensor(FlexDisplayEntity, BinarySensorEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        key = self.entity_description.key
+        if key == "usb_connected":
+            return reports_usb_power(record)
+        if key == "sd_ready":
+            return firmware_provider(record) == "xteink"
+        if key == "low_battery":
+            return reports_battery(record)
+        if key == "firmware_update_problem":
+            return firmware_manageable(record)
+        return True
+
     @property
     def is_on(self) -> bool:
         """Return the recent-check-in state."""

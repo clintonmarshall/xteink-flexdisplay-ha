@@ -417,6 +417,153 @@ def _device_capabilities(record: dict[str, Any] | str):
     return descriptor
 
 
+def _device_identity(record: dict[str, Any]) -> dict[str, Any]:
+    """Describe how Bridge identity was established and whether it conflicts."""
+    descriptor = _device_capabilities(record)
+    device_id = str(record.get("device_id") or "").upper()
+    prefix_model = (
+        "x3"
+        if device_id.startswith("X3-")
+        else "x4"
+        if device_id.startswith("X4-")
+        else "note4"
+        if device_id.startswith("N4-")
+        else ""
+    )
+    reported = record.get("model_reported") is True
+    source = (
+        "reported"
+        if reported
+        else "configured"
+        if record.get("last_seen") is None and descriptor.known_model
+        else "inferred_id"
+        if prefix_model and prefix_model == descriptor.model_key
+        else "capability_inferred"
+        if descriptor.family == "generic_embedded"
+        else "unclassified"
+    )
+    confidence = (
+        "authoritative"
+        if reported
+        else "configured"
+        if source == "configured"
+        else "legacy_inferred"
+        if source in {"inferred_id", "capability_inferred"}
+        else "unknown"
+    )
+    conflict = bool(reported and prefix_model and prefix_model != descriptor.model_key)
+    return {
+        "source": source,
+        "confidence": confidence,
+        "reported": reported,
+        "model": str(record.get("model") or "UNKNOWN"),
+        "model_key": descriptor.model_key,
+        "family": descriptor.family,
+        "label": descriptor.label,
+        "firmware_owner": descriptor.firmware.provider,
+        "id_prefix_model": prefix_model,
+        "conflict": conflict,
+        "conflict_detail": (
+            f"Device ID suggests {prefix_model}, but the device reported "
+            f"{descriptor.model_key}. Reported identity is authoritative."
+            if conflict
+            else ""
+        ),
+        "last_changed_at": record.get("last_identity_changed_at"),
+        "previous_model": str(record.get("last_identity_previous_model") or ""),
+    }
+
+
+def _device_timeline(
+    record: dict[str, Any],
+    *,
+    include_checkins: bool = False,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    """Merge bounded device histories into one reverse-chronological timeline."""
+    events: list[dict[str, Any]] = []
+    for item in record.get("identity_history") or []:
+        events.append(
+            {
+                "type": "identity",
+                "at": item.get("at"),
+                "title": "Device identity changed",
+                "status": item.get("source") or "observed",
+                "detail": (
+                    f"{item.get('from_model') or 'Unclassified'} to "
+                    f"{item.get('to_model') or 'Unknown'}"
+                ),
+            }
+        )
+    for item in record.get("management_history") or []:
+        events.append(
+            {
+                "type": "management",
+                "at": item.get("at"),
+                "title": str(item.get("action") or "Management action"),
+                "status": "succeeded" if item.get("success") else "failed",
+                "detail": str(item.get("detail") or ""),
+            }
+        )
+    for item in record.get("command_history") or []:
+        events.append(
+            {
+                "type": "command",
+                "at": item.get("completed_at"),
+                "title": "Device command completed",
+                "status": str(item.get("result") or "completed").split(":", 1)[0],
+                "detail": str(item.get("result") or ""),
+                "command_id": str(item.get("command_id") or ""),
+            }
+        )
+    for item in record.get("firmware_progress_history") or []:
+        events.append(
+            {
+                "type": "firmware",
+                "at": item.get("at"),
+                "title": "Firmware update",
+                "status": str(item.get("stage") or "unknown"),
+                "detail": str(item.get("detail") or ""),
+                "percent": item.get("percent"),
+                "command_id": str(item.get("command_id") or ""),
+            }
+        )
+    for item in record.get("reset_history") or []:
+        events.append(
+            {
+                "type": "reset",
+                "at": item.get("at"),
+                "title": "Device restarted",
+                "status": str(item.get("reason") or "unknown"),
+                "detail": str(item.get("wake_reason") or ""),
+                "boot_id": str(item.get("boot_id") or ""),
+            }
+        )
+    if include_checkins:
+        for item in record.get("checkin_history") or []:
+            events.append(
+                {
+                    "type": "checkin",
+                    "at": item.get("at"),
+                    "title": "Device check-in",
+                    "status": "online",
+                    "detail": "Telemetry received by the Bridge.",
+                }
+            )
+    if record.get("provisioning_updated_at"):
+        events.append(
+            {
+                "type": "provisioning",
+                "at": record.get("provisioning_updated_at"),
+                "title": "Provisioning updated",
+                "status": str(record.get("assigned_policy_name") or "custom"),
+                "detail": "Bridge-backed assignments changed.",
+            }
+        )
+    events.sort(key=lambda item: str(item.get("at") or ""), reverse=True)
+    return events[: max(1, min(200, int(limit)))]
+
+
 def _capability_normalized_config(
     config: DeviceConfig,
     descriptor: DeviceCapabilityDescriptor,
@@ -900,6 +1047,7 @@ def _decorate_device(
     result["device_family"] = descriptor.family
     result["firmware_provider"] = descriptor.firmware.provider
     result["supported_actions"] = list(descriptor.management.actions)
+    result["identity"] = _device_identity(result)
     result.update(_display_runtime(result))
     last_seen = result.get("last_seen")
     online = False
@@ -1769,11 +1917,48 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def fleet_scope_records(
         scope: str,
         requested_ids: set[str],
+        group_id: str = "",
     ) -> list[dict[str, Any]]:
-        if scope not in {"all", "x3", "x4", "devices"}:
+        if scope not in {"all", "x3", "x4", "devices", "group"}:
             raise HTTPException(status_code=400, detail="Unsupported fleet scope")
         if scope == "devices" and not requested_ids:
             raise HTTPException(status_code=400, detail="Select at least one device")
+        selected_group: dict[str, Any] = {}
+        group_ids: set[str] = set()
+        group_filters: dict[str, Any] = {}
+        if scope == "group":
+            selected_group = store.fleet_groups().get(group_id) or {}
+            if not selected_group:
+                raise HTTPException(status_code=404, detail="Fleet group not found")
+            group_ids = {
+                str(device_id) for device_id in selected_group.get("device_ids") or []
+            }
+            group_filters = (
+                selected_group.get("filters")
+                if isinstance(selected_group.get("filters"), dict)
+                else {}
+            )
+
+        def group_matches(record: dict[str, Any]) -> bool:
+            device_id = str(record.get("device_id") or "")
+            if device_id in group_ids:
+                return True
+            if not group_filters:
+                return False
+            descriptor = _device_capabilities(record)
+            values: dict[str, Any] = {
+                "family": descriptor.family,
+                "firmware_provider": descriptor.firmware.provider,
+                "model_key": descriptor.model_key,
+                "area": str(record.get("assigned_area") or record.get("area") or ""),
+                "power_class": descriptor.power.power_class,
+            }
+            if "online" in group_filters:
+                values["online"] = bool(
+                    _decorate_device(record, settings, store).get("online")
+                )
+            return all(values.get(key) == value for key, value in group_filters.items())
+
         records: list[dict[str, Any]] = []
         for record in store.all():
             device_id = str(record.get("device_id") or "")
@@ -1783,9 +1968,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 or (scope == "x3" and descriptor.model_key == "x3")
                 or (scope == "x4" and descriptor.model_key == "x4")
                 or (scope == "devices" and device_id in requested_ids)
+                or (scope == "group" and group_matches(record))
             ):
                 records.append(record)
         return records
+
+    def group_payload(group: dict[str, Any]) -> dict[str, Any]:
+        resolved = fleet_scope_records("group", set(), str(group.get("id") or ""))
+        return {
+            **group,
+            "resolved_device_ids": [str(item.get("device_id") or "") for item in resolved],
+            "resolved_count": len(resolved),
+        }
 
     def advance_firmware_rollout() -> dict[str, Any]:
         rollout = store.firmware_rollout()
@@ -2826,7 +3020,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             },
         }
 
-        return {
+        system_payload = {
             "bridge": {
                 "status": "running",
                 "version": __version__,
@@ -2975,6 +3169,75 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 },
             },
         }
+
+        alerts: list[dict[str, Any]] = []
+        for setting_id, entry in effective_settings.items():
+            apply_state = str(entry.get("apply_state") or "effective")
+            if apply_state == "effective":
+                continue
+            alerts.append(
+                {
+                    "id": f"setting-{setting_id}",
+                    "severity": "warning",
+                    "category": "configuration_drift",
+                    "title": f"{entry.get('label') or setting_id} is overridden",
+                    "detail": str(
+                        entry.get("detail")
+                        or "The effective value differs from the saved configuration."
+                    ),
+                    "owner": str(entry.get("owner") or "FlexDisplay Bridge"),
+                }
+            )
+        if settings.mqtt.enabled and not mqtt.connected:
+            alerts.append(
+                {
+                    "id": "mqtt-disconnected",
+                    "severity": "warning",
+                    "category": "connection",
+                    "title": "MQTT is disconnected",
+                    "detail": "The Bridge is configured for MQTT but is not connected to the broker.",
+                    "owner": "Home Assistant App",
+                }
+            )
+        if flexhub_health.get("configured") and not flexhub_health.get("connected"):
+            alerts.append(
+                {
+                    "id": "flexhub-disconnected",
+                    "severity": "warning",
+                    "category": "connection",
+                    "title": "FlexHub is disconnected",
+                    "detail": "The configured FlexHub is not currently reachable.",
+                    "owner": "FlexDisplay Bridge",
+                }
+            )
+        if not ha.configured:
+            alerts.append(
+                {
+                    "id": "home-assistant-not-configured",
+                    "severity": "info",
+                    "category": "connection",
+                    "title": "Home Assistant API is not configured",
+                    "detail": "Entity-backed dashboard content is unavailable until Home Assistant credentials are configured.",
+                    "owner": "Home Assistant App",
+                }
+            )
+        x_channel = system_payload["firmware_channels"]["x_series"]
+        if x_channel["status"] not in {"ready", "configured"}:
+            alerts.append(
+                {
+                    "id": "x-series-firmware-not-ready",
+                    "severity": "warning",
+                    "category": "firmware",
+                    "title": "X3/X4 firmware channel is not ready",
+                    "detail": str(
+                        x_channel.get("detail")
+                        or "Review the release channel configuration."
+                    ),
+                    "owner": str(x_channel.get("owner") or "FlexDisplay Bridge"),
+                }
+            )
+        system_payload["alerts"] = alerts
+        return system_payload
 
     @app.post("/api/v1/devices/{device_id}/assist")
     def run_device_assist(
@@ -3270,6 +3533,86 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             **_decorate_device(record, settings, store, dashboards.names()),
             "screen_history_count": len(screen_history.list(selected)),
         }
+
+    @app.get("/api/v1/devices/{device_id}/timeline")
+    def device_timeline(
+        device_id: str,
+        request: Request,
+        limit: int = 50,
+        include_checkins: bool = False,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record:
+            raise HTTPException(status_code=404, detail="Device not found")
+        return {
+            "device_id": selected,
+            "identity": _device_identity(record),
+            "events": _device_timeline(
+                record,
+                include_checkins=include_checkins,
+                limit=limit,
+            ),
+        }
+
+    @app.get("/api/v1/system/support-bundle")
+    def system_support_bundle(request: Request) -> Response:
+        """Download a compact, allowlisted diagnostic snapshot for support."""
+        authorize(request)
+        system = system_status(request)
+        devices: list[dict[str, Any]] = []
+        for record in store.all():
+            decorated = _decorate_device(record, settings, store, dashboards.names())
+            devices.append(
+                {
+                    "device_id": decorated.get("device_id"),
+                    "name": decorated.get("name"),
+                    "area": decorated.get("area"),
+                    "model": decorated.get("model"),
+                    "identity": decorated.get("identity"),
+                    "family": decorated.get("device_family"),
+                    "firmware_provider": decorated.get("firmware_provider"),
+                    "firmware": decorated.get("firmware"),
+                    "latest_firmware": decorated.get("latest_firmware"),
+                    "online": bool(decorated.get("online")),
+                    "health_state": decorated.get("health_state"),
+                    "last_seen": decorated.get("last_seen"),
+                    "policy_name": decorated.get("policy_name"),
+                    "policy_sync_status": decorated.get("policy_sync_status"),
+                    "timeline": [
+                        {
+                            "type": event.get("type"),
+                            "at": event.get("at"),
+                            "title": event.get("title"),
+                            "status": event.get("status"),
+                        }
+                        for event in _device_timeline(record, limit=20)
+                    ],
+                }
+            )
+        bundle = {
+            "schema_version": 1,
+            "generated_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "system": system,
+            "fleet": {
+                "device_count": len(devices),
+                "groups": [
+                    group_payload(group)
+                    for group in store.fleet_groups().values()
+                ],
+                "devices": devices,
+            },
+        }
+        return Response(
+            json.dumps(bundle, indent=2, sort_keys=True),
+            media_type="application/json",
+            headers={
+                "Content-Disposition": (
+                    "attachment; filename=flexdisplay-support-bundle.json"
+                )
+            },
+        )
 
     @app.delete("/api/v1/devices/{device_id}")
     def delete_device(device_id: str, request: Request) -> dict[str, Any]:
@@ -4622,6 +4965,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 }
                 for album_id, album in photo_library.get("albums", {}).items()
             ],
+            "groups": [
+                group_payload(group)
+                for group in store.fleet_groups().values()
+            ],
             "summary": {
                 "devices": len(records),
                 "online": sum(bool(record.get("online")) for record in records),
@@ -4645,6 +4992,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "model": record.get("model"),
                     "device_family": record.get("device_family"),
                     "firmware_provider": record.get("firmware_provider"),
+                    "identity": record.get("identity") or {},
                     "supported_actions": record.get("supported_actions") or [],
                     "device_capabilities": record.get("device_capabilities") or {},
                     "online": record.get("online"),
@@ -4777,6 +5125,202 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=404, detail="Policy profile not found")
         return {"deleted": selected}
 
+    @app.get("/api/v1/fleet/groups")
+    def list_fleet_groups(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return {
+            "groups": [
+                group_payload(group)
+                for group in store.fleet_groups().values()
+            ]
+        }
+
+    @app.put("/api/v1/fleet/groups/{group_id}")
+    def save_fleet_group(
+        group_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = str(group_id or "").strip().lower()
+        if not re.fullmatch(r"[a-z0-9][a-z0-9_-]{1,47}", selected):
+            raise HTTPException(status_code=400, detail="Invalid fleet group ID")
+        raw_ids = payload.get("device_ids") or []
+        if not isinstance(raw_ids, list):
+            raise HTTPException(status_code=400, detail="device_ids must be an array")
+        device_ids = [_device_id(str(device_id)) for device_id in raw_ids]
+        filters = payload.get("filters") or {}
+        if not isinstance(filters, dict):
+            raise HTTPException(status_code=400, detail="filters must be an object")
+        allowed_filters = {
+            "family",
+            "firmware_provider",
+            "model_key",
+            "area",
+            "power_class",
+            "online",
+        }
+        unexpected = sorted(set(filters) - allowed_filters)
+        if unexpected:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported group filters: {', '.join(unexpected)}",
+            )
+        if "online" in filters and not isinstance(filters["online"], bool):
+            raise HTTPException(status_code=400, detail="online filter must be boolean")
+        if not device_ids and not filters:
+            raise HTTPException(
+                status_code=400,
+                detail="Select devices or configure at least one group filter",
+            )
+        group = store.put_fleet_group(
+            selected,
+            label=_header_value(payload.get("label"))[:64]
+            or selected.replace("_", " ").title(),
+            description=_header_value(payload.get("description"))[:180],
+            device_ids=device_ids,
+            filters={key: value for key, value in filters.items() if value != ""},
+        )
+        return {"saved": True, "group": group_payload(group)}
+
+    @app.delete("/api/v1/fleet/groups/{group_id}")
+    def delete_fleet_group(group_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        selected = str(group_id or "").strip().lower()
+        if not store.delete_fleet_group(selected):
+            raise HTTPException(status_code=404, detail="Fleet group not found")
+        return {"deleted": selected}
+
+    @app.post("/api/v1/fleet/policy/preview")
+    def preview_fleet_policy(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        policy_id = str(payload.get("profile") or "")
+        preset = fleet_policy_profiles().get(policy_id)
+        if not preset:
+            raise HTTPException(status_code=400, detail="Unknown fleet policy profile")
+        scope = str(payload.get("scope") or "all").lower()
+        group_id = str(payload.get("group_id") or "").strip().lower()
+        requested_ids = {
+            _device_id(str(device_id)) for device_id in payload.get("device_ids") or []
+        }
+        records = fleet_scope_records(scope, requested_ids, group_id)
+        overrides = payload.get("overrides") or {}
+        if not isinstance(overrides, dict):
+            raise HTTPException(status_code=400, detail="Policy overrides must be an object")
+        merged = {**preset["settings"], **overrides}
+        selected_mode = str(payload.get("mode") or "").strip().lower()
+        if selected_mode and selected_mode != "unchanged":
+            if selected_mode not in SUPPORTED_MODES:
+                raise HTTPException(status_code=400, detail="Unsupported default application")
+            merged["mode"] = selected_mode
+        dashboard_profile = str(payload.get("dashboard_profile") or "").strip()
+        if dashboard_profile:
+            if dashboard_profile not in dashboards.names():
+                raise HTTPException(status_code=400, detail="Unknown dashboard profile")
+            merged["profile"] = dashboard_profile
+        photo_album = str(payload.get("photo_album") or "").strip()
+        if photo_album:
+            if photo_album not in photo_frames.payload().get("albums", {}):
+                raise HTTPException(status_code=400, detail="Unknown photo-frame album")
+            merged["mode"] = "photo_frame"
+        targets: list[dict[str, Any]] = []
+        excluded: dict[str, str] = {}
+        filtered_fields: dict[str, list[str]] = {}
+        offline: list[str] = []
+        for record in records:
+            device_id = str(record.get("device_id") or "")
+            descriptor = _device_capabilities(record)
+            if not descriptor.management.supports_fleet_policy:
+                excluded[device_id] = "Fleet policy is not supported by this family"
+                continue
+            assignment = _provisioning_assignment(merged, device_id, dashboards.names())
+            assignment, skipped = _filter_provisioning_assignment(assignment, descriptor)
+            if "mode" in skipped:
+                excluded[device_id] = "Selected mode is not supported by this family"
+                continue
+            if skipped:
+                filtered_fields[device_id] = sorted(skipped)
+            decorated = _decorate_device(record, settings, store)
+            if not decorated.get("online"):
+                offline.append(device_id)
+            targets.append(
+                {
+                    "device_id": device_id,
+                    "family": descriptor.family,
+                    "identity_source": decorated["identity"]["source"],
+                    "online": bool(decorated.get("online")),
+                    "would_change": sorted(
+                        key.removeprefix("assigned_")
+                        for key, value in assignment.items()
+                        if record.get(key) != value
+                    ),
+                }
+            )
+        return {
+            "preview": True,
+            "profile": policy_id,
+            "scope": scope,
+            "group_id": group_id,
+            "targets": targets,
+            "target_count": len(targets),
+            "excluded": excluded,
+            "filtered_fields": filtered_fields,
+            "offline": offline,
+        }
+
+    @app.post("/api/v1/fleet/firmware/preview")
+    def preview_fleet_firmware(
+        payload: dict[str, Any], request: Request
+    ) -> dict[str, Any]:
+        authorize(request)
+        scope = str(payload.get("scope") or "all").lower()
+        group_id = str(payload.get("group_id") or "").strip().lower()
+        requested_ids = {
+            _device_id(str(device_id)) for device_id in payload.get("device_ids") or []
+        }
+        records = fleet_scope_records(scope, requested_ids, group_id)
+        target = settings.firmware.version
+        channel_error = _firmware_metadata_error(settings)
+        eligible: list[str] = []
+        ready: list[str] = []
+        blocked: dict[str, list[str]] = {}
+        excluded: dict[str, str] = {}
+        offline: list[str] = []
+        for record in records:
+            device_id = str(record.get("device_id") or "")
+            descriptor = _device_capabilities(record)
+            if not descriptor.supports_xteink_ota:
+                excluded[device_id] = "Not eligible for the X3/X4 firmware channel"
+                continue
+            if _firmware_version(target) <= _firmware_version(str(record.get("firmware") or "")):
+                excluded[device_id] = "Already running this release or newer"
+                continue
+            eligible.append(device_id)
+            blockers = [channel_error] if channel_error else _firmware_install_blockers(
+                record, settings, store
+            )
+            if blockers:
+                blocked[device_id] = blockers
+            else:
+                ready.append(device_id)
+            if not _decorate_device(record, settings, store).get("online"):
+                offline.append(device_id)
+        return {
+            "preview": True,
+            "target_version": target,
+            "scope": scope,
+            "group_id": group_id,
+            "channel_ready": not channel_error,
+            "channel_error": channel_error,
+            "eligible": eligible,
+            "ready": ready,
+            "blocked": blocked,
+            "excluded": excluded,
+            "offline": offline,
+        }
+
     @app.put("/api/v1/fleet/policy")
     def apply_fleet_policy(payload: dict[str, Any], request: Request) -> dict[str, Any]:
         authorize(request)
@@ -4786,11 +5330,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             raise HTTPException(status_code=400, detail="Unknown fleet policy profile")
 
         scope = str(payload.get("scope") or "all").lower()
+        group_id = str(payload.get("group_id") or "").strip().lower()
         requested_ids = {
             _device_id(str(device_id))
             for device_id in (payload.get("device_ids") or [])
         }
-        scoped_records = fleet_scope_records(scope, requested_ids)
+        scoped_records = fleet_scope_records(scope, requested_ids, group_id)
         excluded: dict[str, str] = {}
 
         overrides = payload.get("overrides") or {}
@@ -4856,6 +5401,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "accepted": True,
             "profile": policy_id,
             "scope": scope,
+            "group_id": group_id,
             "revision": revision,
             "delivery": str(payload.get("delivery") or "when_awake"),
             "mode": selected_mode or "unchanged",
@@ -4883,11 +5429,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if error:
             raise HTTPException(status_code=409, detail=error)
         scope = str(payload.get("scope") or "all").lower()
+        group_id = str(payload.get("group_id") or "").strip().lower()
         requested_ids = {
             _device_id(str(device_id))
             for device_id in (payload.get("device_ids") or [])
         }
-        records = fleet_scope_records(scope, requested_ids)
+        records = fleet_scope_records(scope, requested_ids, group_id)
         eligible_records: list[dict[str, Any]] = []
         excluded: dict[str, str] = {}
         for record in records:
@@ -4927,6 +5474,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "accepted": True,
             "target_version": target,
             "scope": scope,
+            "group_id": group_id,
             "targets": targets,
             "excluded": excluded,
             **advanced,

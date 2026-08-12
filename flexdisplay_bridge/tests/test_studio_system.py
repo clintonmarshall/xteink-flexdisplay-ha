@@ -927,3 +927,165 @@ def test_system_status_does_not_describe_unconfigured_flexhub_as_operational(
     flexhub = response.json()["connections"]["flexhub"]
     assert flexhub["status"] == "not_configured"
     assert flexhub["detail"] == "No FlexHub endpoint is configured."
+
+
+def test_saved_groups_drive_dry_run_policy_and_firmware_previews(
+    tmp_path: Path,
+) -> None:
+    firmware = _firmware("1.5.0-flexdisplay.9.0.0", "7")
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="bridge-key",
+        firmware=firmware,
+    )
+    auth = {"X-FlexDisplay-Bridge-Key": "bridge-key"}
+
+    with TestClient(create_app(config)) as client:
+        _check_in(client, "X3-GROUP01", "XTEINK_X3")
+        _check_in(client, "ESP-GROUP02", "ESP32-S3-LCD")
+        saved = client.put(
+            "/api/v1/fleet/groups/reception",
+            headers=auth,
+            json={
+                "label": "Reception",
+                "device_ids": ["X3-GROUP01", "ESP-GROUP02"],
+            },
+        )
+        before = {
+            device_id: client.app.state.store.get(device_id)
+            for device_id in ("X3-GROUP01", "ESP-GROUP02")
+        }
+        policy = client.post(
+            "/api/v1/fleet/policy/preview",
+            headers=auth,
+            json={
+                "profile": "balanced",
+                "scope": "group",
+                "group_id": "reception",
+            },
+        )
+        firmware_preview = client.post(
+            "/api/v1/fleet/firmware/preview",
+            headers=auth,
+            json={"scope": "group", "group_id": "reception"},
+        )
+        after = {
+            device_id: client.app.state.store.get(device_id)
+            for device_id in before
+        }
+        listed = client.get("/api/v1/fleet/groups", headers=auth)
+
+    assert saved.status_code == 200
+    assert saved.json()["group"]["resolved_count"] == 2
+    assert policy.status_code == 200
+    assert policy.json()["target_count"] == 2
+    assert firmware_preview.status_code == 200
+    assert firmware_preview.json()["eligible"] == ["X3-GROUP01"]
+    assert "ESP-GROUP02" in firmware_preview.json()["excluded"]
+    assert before == after
+    assert client.app.state.store.firmware_rollout() == {}
+    assert listed.json()["groups"][0]["resolved_device_ids"] == [
+        "X3-GROUP01",
+        "ESP-GROUP02",
+    ]
+
+
+def test_device_identity_and_management_timeline_follow_model_correction(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key="bridge-key",
+    )
+    auth = {"X-FlexDisplay-Bridge-Key": "bridge-key"}
+
+    with TestClient(create_app(config)) as client:
+        _check_in(client, "X3-IDENTITY01", "XTEINK_X3")
+        _check_in(client, "X3-IDENTITY01", "ROOK")
+        assert (
+            client.get("/api/v1/devices/X3-IDENTITY01/timeline").status_code
+            == 401
+        )
+        response = client.get(
+            "/api/v1/devices/X3-IDENTITY01/timeline",
+            headers=auth,
+        )
+        device = client.get("/api/v1/devices/X3-IDENTITY01").json()
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["identity"]["source"] == "reported"
+    assert payload["identity"]["conflict"] is True
+    assert payload["identity"]["firmware_owner"] == "android_app"
+    assert any(event["type"] == "identity" for event in payload["events"])
+    assert device["identity"] == payload["identity"]
+
+
+def test_support_bundle_is_authenticated_redacted_and_includes_drift_alerts(
+    tmp_path: Path, monkeypatch
+) -> None:
+    monkeypatch.setenv("FLEXDISPLAY_FIRMWARE_CONFIGURED_VERSION", "old-release")
+    monkeypatch.setenv("FLEXDISPLAY_FIRMWARE_CONFIG_SOURCE", "packaged_release")
+    sentinels = {
+        "api": "bundle-api-secret",
+        "ha": "bundle-ha-token",
+        "mqtt": "bundle-mqtt-password",
+        "pin": "bundle-flexhub-pin",
+    }
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        api_key=sentinels["api"],
+        home_assistant=HomeAssistantConfig(token=sentinels["ha"]),
+        mqtt=MqttConfig(enabled=False, password=sentinels["mqtt"]),
+        flexhub=FlexHubConfig(
+            url="http://flexhub.example.test",
+            access_pin=sentinels["pin"],
+        ),
+        firmware=_firmware("1.5.0-flexdisplay.9.0.0", "8"),
+    )
+    auth = {"X-FlexDisplay-Bridge-Key": sentinels["api"]}
+
+    with TestClient(create_app(config)) as client:
+        _check_in(client, "X4-BUNDLE01", "XTEINK_X4")
+        assert client.get("/api/v1/system/support-bundle").status_code == 401
+        response = client.get("/api/v1/system/support-bundle", headers=auth)
+
+    assert response.status_code == 200
+    assert response.headers["content-disposition"].endswith(
+        "flexdisplay-support-bundle.json"
+    )
+    serialized = response.text
+    for sentinel in sentinels.values():
+        assert sentinel not in serialized
+    payload = response.json()
+    assert payload["schema_version"] == 1
+    assert payload["fleet"]["device_count"] == 1
+    assert payload["system"]["alerts"]
+    assert any(
+        alert["category"] == "configuration_drift"
+        for alert in payload["system"]["alerts"]
+    )
+    assert all(
+        "detail" not in event
+        for event in payload["fleet"]["devices"][0]["timeline"]
+    )
+
+
+def test_studio_exposes_mixed_fleet_lifecycle_operations(tmp_path: Path) -> None:
+    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+        html = client.get("/studio/").text
+
+    for element_id in (
+        "downloadSupportBundle",
+        "systemAlertList",
+        "fleetGroupSelect",
+        "saveFleetGroup",
+        "previewFleetPolicy",
+        "previewFleetFirmware",
+        "fleetImpactPreview",
+        "deviceTimelineDialog",
+    ):
+        assert f'id="{element_id}"' in html
+    assert "fleet/policy/preview" in html
+    assert "fleet/firmware/preview" in html
+    assert "system/support-bundle" in html

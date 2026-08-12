@@ -11,6 +11,7 @@ from typing import Any
 
 CHECKIN_HISTORY_LIMIT = 48
 RESET_HISTORY_LIMIT = 24
+IDENTITY_HISTORY_LIMIT = 24
 PROBLEM_RESET_REASONS = {
     "panic",
     "interrupt_watchdog",
@@ -172,10 +173,33 @@ class DeviceStore:
             is_checkin = "firmware" in telemetry and "model" in telemetry
             previous_sd_ready = record.get("sd_ready")
             previous_boot_id = str(record.get("boot_id") or "")
+            previous_model = str(record.get("model") or "")
+            previous_model_reported = record.get("model_reported") is True
             now = utc_now()
             record.update({key: value for key, value in telemetry.items() if value is not None})
             record["last_seen"] = now
             if is_checkin:
+                current_model = str(record.get("model") or "")
+                current_model_reported = record.get("model_reported") is True
+                if current_model and (
+                    current_model != previous_model
+                    or current_model_reported != previous_model_reported
+                ):
+                    identity = {
+                        "at": now,
+                        "from_model": previous_model,
+                        "to_model": current_model,
+                        "source": (
+                            "reported" if current_model_reported else "inferred"
+                        ),
+                    }
+                    identity_history = record.setdefault("identity_history", [])
+                    identity_history.append(identity)
+                    record["identity_history"] = identity_history[
+                        -IDENTITY_HISTORY_LIMIT:
+                    ]
+                    record["last_identity_changed_at"] = now
+                    record["last_identity_previous_model"] = previous_model
                 record["checkin_count"] = int(record.get("checkin_count") or 0) + 1
                 history = record.setdefault("checkin_history", [])
                 point = {
@@ -329,6 +353,48 @@ class DeviceStore:
         """Return operator-created fleet policy profiles."""
         with self._lock:
             return deepcopy(self._state.get("custom_policy_profiles") or {})
+
+    def fleet_groups(self) -> dict[str, dict[str, Any]]:
+        """Return saved explicit or filter-based device cohorts."""
+        with self._lock:
+            return deepcopy(self._state.get("fleet_groups") or {})
+
+    def put_fleet_group(
+        self,
+        group_id: str,
+        *,
+        label: str,
+        description: str,
+        device_ids: list[str],
+        filters: dict[str, Any],
+    ) -> dict[str, Any]:
+        """Create or replace a reusable fleet cohort."""
+        with self._lock:
+            groups = self._state.setdefault("fleet_groups", {})
+            now = utc_now()
+            previous = groups.get(group_id) or {}
+            group = {
+                "id": group_id,
+                "label": label,
+                "description": description,
+                "device_ids": sorted(set(device_ids)),
+                "filters": deepcopy(filters),
+                "created_at": previous.get("created_at") or now,
+                "updated_at": now,
+            }
+            groups[group_id] = group
+            self._save()
+            return deepcopy(group)
+
+    def delete_fleet_group(self, group_id: str) -> bool:
+        """Delete a saved fleet cohort."""
+        with self._lock:
+            groups = self._state.get("fleet_groups") or {}
+            if group_id not in groups:
+                return False
+            del groups[group_id]
+            self._save()
+            return True
 
     def put_custom_policy_profile(
         self,

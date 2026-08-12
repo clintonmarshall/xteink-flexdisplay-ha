@@ -56,6 +56,9 @@ class FlexDisplayActiveTime(FlexDisplayEntity, TimeEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "sleep_policy")
+
     @property
     def native_value(self) -> time | None:
         """Return the assigned local time."""

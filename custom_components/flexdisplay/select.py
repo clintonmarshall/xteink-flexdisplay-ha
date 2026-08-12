@@ -21,6 +21,9 @@ class FlexDisplayPageSelect(FlexDisplayEntity, SelectEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_dashboard_page_select"
 
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "page_selection")
+
     @property
     def options(self) -> list[str]:
         """Return the available page titles."""
@@ -52,6 +55,9 @@ class FlexDisplayProfileSelect(FlexDisplayEntity, SelectEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_dashboard_profile_select"
 
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "dashboard_profiles")
+
     @property
     def options(self) -> list[str]:
         return list(self.record.get("available_profiles") or ["default"])
@@ -77,6 +83,9 @@ class FlexDisplayModeSelect(FlexDisplayEntity, SelectEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_assigned_mode_select"
 
+    def _record_supported(self, record: dict) -> bool:
+        return bool(management_modes(record))
+
     @property
     def options(self) -> list[str]:
         return list(self.record.get("available_modes") or ["home_assistant"])
@@ -101,6 +110,9 @@ class FlexDisplayPolicySelect(FlexDisplayEntity, SelectEntity):
     def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_fleet_policy_select"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "fleet_policy")
 
     @property
     def options(self) -> list[str]:
@@ -136,6 +148,9 @@ class FlexDisplayRenderingProfileSelect(FlexDisplayEntity, SelectEntity):
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_rendering_profile_select"
 
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "rendering_profile")
+
     @property
     def current_option(self) -> str | None:
         current = str(self.record.get("assigned_rendering_profile") or "standard")
@@ -160,6 +175,9 @@ class FlexDisplayOpenDisplayTransportSelect(FlexDisplayEntity, SelectEntity):
     def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_open_display_transport_select"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "opendisplay_policy")
 
     @property
     def current_option(self) -> str | None:

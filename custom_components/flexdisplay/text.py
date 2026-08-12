@@ -68,6 +68,13 @@ class FlexDisplayText(FlexDisplayEntity, TextEntity):
         self.entity_description = description
         self._attr_unique_id = f"{device_id}_{description.key}"
 
+    def _record_supported(self, record: dict) -> bool:
+        if self.entity_description.key in {"device_name", "area"}:
+            return management_supports(record, "provisioning")
+        if self.entity_description.key == "timezone":
+            return management_supports(record, "sleep_policy")
+        return False
+
     @property
     def native_value(self) -> str:
         """Return the assigned value."""
