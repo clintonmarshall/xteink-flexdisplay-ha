@@ -157,7 +157,8 @@ final class FlexDisplayClient {
         }
 
         String summary() {
-            if (!response.isEmpty() && !transcript.isEmpty()) return transcript + "\n" + response;
+            String suffix = audio.length == 0 ? "\nNo Assist audio returned" : "";
+            if (!response.isEmpty() && !transcript.isEmpty()) return transcript + "\n" + response + suffix;
             if (!response.isEmpty()) return response;
             if (!transcript.isEmpty()) return transcript;
             return audio.length == 0 ? "Assist completed" : "Assist response";
