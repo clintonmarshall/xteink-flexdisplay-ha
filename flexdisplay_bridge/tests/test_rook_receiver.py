@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+from dataclasses import replace
 from pathlib import Path
 
 from fastapi.testclient import TestClient
@@ -187,6 +188,52 @@ def test_checkers_screen_is_landscape_android_png(tmp_path: Path) -> None:
         firmware = client.post("/api/v1/devices/CHECKERS-SHOW501/commands/install")
         assert firmware.status_code == 409
         assert firmware.json()["detail"] == "No firmware release is configured"
+
+
+def test_android_receiver_fleet_controls_and_diagnostics(tmp_path: Path) -> None:
+    config = replace(_config(tmp_path), api_key="bridge-secret")
+    headers = {
+        "X-FlexDisplay-ID": "CHECKERS-CONTROL01",
+        "X-FlexDisplay-Model": "CHECKERS",
+        "X-FlexDisplay-Firmware": "android-0.4.0",
+        "X-FlexDisplay-Width": "960",
+        "X-FlexDisplay-Height": "480",
+        "X-FlexDisplay-Capabilities": "android,color,touch,png,audio,assist",
+        "X-FlexDisplay-Volume": "55",
+        "X-FlexDisplay-Muted": "false",
+        "X-FlexDisplay-Brightness": "72",
+    }
+    with TestClient(create_app(config)) as client:
+        response = client.get("/api/v1/screen", headers=headers)
+        assert response.status_code == 200
+        device = client.get("/api/v1/devices/CHECKERS-CONTROL01").json()
+        assert device["voice_volume"] == 55
+        assert device["voice_muted"] is False
+        assert device["screen_brightness"] == 72
+
+        voice = client.put(
+            "/api/v1/devices/CHECKERS-CONTROL01/voice",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+            json={"volume": 35, "muted": True},
+        )
+        assert voice.status_code == 200
+        display = client.put(
+            "/api/v1/devices/CHECKERS-CONTROL01/display",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+            json={"brightness": 40},
+        )
+        assert display.status_code == 200
+        command = client.post(
+            "/api/v1/devices/CHECKERS-CONTROL01/commands/test-chime",
+            headers={"X-FlexDisplay-Bridge-Key": "bridge-secret"},
+        )
+        assert command.status_code == 200
+
+        update = client.get("/api/v1/screen", headers=headers)
+        assert update.headers["x-flexdisplay-desired-volume"] == "35"
+        assert update.headers["x-flexdisplay-desired-muted"] == "true"
+        assert update.headers["x-flexdisplay-desired-brightness"] == "40"
+        assert update.headers["x-flexdisplay-commands"] == "test-chime"
 
 
 def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:

@@ -122,5 +122,9 @@ Echo camera as a Home Assistant camera entity; current LineageOS builds report
 camera hardware features but no public camera devices through Android's camera
 service.
 
+Version 0.4.0 adds Android fleet controls. The Bridge and Home Assistant
+integration can set receiver speaker volume, mute/unmute, set app brightness,
+restart the receiver app, and trigger a test chime.
+
 The LineageOS builds are experimental and SELinux-permissive. Keep ADB and the
 Bridge API on a trusted LAN; do not expose either directly to the internet.

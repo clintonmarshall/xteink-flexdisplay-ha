@@ -322,6 +322,14 @@ DESCRIPTIONS = (
             or "none"
         ),
     ),
+    FlexDisplaySensorDescription(
+        key="screen_brightness",
+        translation_key="screen_brightness",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda record: record.get(
+            "desired_screen_brightness", record.get("screen_brightness")
+        ),
+    ),
 )
 
 VOICE_DESCRIPTIONS = (
@@ -375,7 +383,8 @@ def _device_sensors(
             )
         )
     ]
-    if is_note4(record):
+    model = str(record.get("model") or "").upper()
+    if is_note4(record) or model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}:
         descriptions.extend(VOICE_DESCRIPTIONS)
     return tuple(
         FlexDisplaySensor(coordinator, device_id, description)

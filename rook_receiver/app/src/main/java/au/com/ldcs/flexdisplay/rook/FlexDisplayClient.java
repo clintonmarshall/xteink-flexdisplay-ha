@@ -33,7 +33,7 @@ import java.util.List;
 import java.util.Map;
 
 final class FlexDisplayClient {
-    static final String FIRMWARE_VERSION = "android-0.3.0";
+    static final String FIRMWARE_VERSION = "android-0.4.0";
 
     static final class Interaction {
         final String id;
@@ -188,6 +188,10 @@ final class FlexDisplayClient {
         connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
         connection.setRequestProperty("X-FlexDisplay-Firmware", FIRMWARE_VERSION);
         connection.setRequestProperty("X-FlexDisplay-Capabilities", profile.capabilities());
+        AudioState audioState = audioState();
+        connection.setRequestProperty("X-FlexDisplay-Volume", Integer.toString(audioState.volume));
+        connection.setRequestProperty("X-FlexDisplay-Muted", Boolean.toString(audioState.muted));
+        connection.setRequestProperty("X-FlexDisplay-Brightness", Integer.toString(screenBrightness()));
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
                 Long.toString(SystemClock.elapsedRealtime() / 1000));
@@ -405,6 +409,36 @@ final class FlexDisplayClient {
         WifiManager manager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         WifiInfo info = manager == null ? null : manager.getConnectionInfo();
         return info == null ? Integer.MIN_VALUE : info.getRssi();
+    }
+
+    private AudioState audioState() {
+        android.media.AudioManager manager =
+                (android.media.AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        if (manager == null) return new AudioState(0, false);
+        int max = Math.max(1, manager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
+        int current = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        return new AudioState(Math.max(0, Math.min(100, current * 100 / max)), current == 0);
+    }
+
+    private int screenBrightness() {
+        try {
+            int raw = android.provider.Settings.System.getInt(
+                    context.getContentResolver(),
+                    android.provider.Settings.System.SCREEN_BRIGHTNESS);
+            return Math.max(0, Math.min(100, raw * 100 / 255));
+        } catch (android.provider.Settings.SettingNotFoundException error) {
+            return 100;
+        }
+    }
+
+    private static final class AudioState {
+        final int volume;
+        final boolean muted;
+
+        AudioState(int volume, boolean muted) {
+            this.volume = volume;
+            this.muted = muted;
+        }
     }
 
     private static byte[] readBytes(InputStream input) throws IOException {

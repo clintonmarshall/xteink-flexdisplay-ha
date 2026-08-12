@@ -140,7 +140,7 @@ class FlexDisplayNumber(FlexDisplayEntity, NumberEntity):
 
 
 class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
-    """Control the Note4 speaker volume."""
+    """Control receiver speaker volume."""
 
     _attr_translation_key = "voice_volume"
     _attr_entity_category = EntityCategory.CONFIG
@@ -167,6 +167,44 @@ class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
             self.device_id, {"volume": round(value)}
         )
         await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayScreenBrightness(FlexDisplayEntity, NumberEntity):
+    """Control Android receiver screen brightness."""
+
+    _attr_translation_key = "screen_brightness"
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 5
+    _attr_native_max_value = 100
+    _attr_native_step = 5
+    _attr_native_unit_of_measurement = "%"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_screen_brightness"
+
+    @property
+    def native_value(self) -> float | None:
+        value = self.record.get(
+            "desired_screen_brightness", self.record.get("screen_brightness")
+        )
+        return float(value) if value is not None else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.client.display_settings(
+            self.device_id, {"brightness": round(value)}
+        )
+        await self.coordinator.async_request_refresh()
+
+
+def _is_note4(record: dict) -> bool:
+    return str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+
+
+def _is_android_receiver(record: dict) -> bool:
+    model = str(record.get("model") or "").upper()
+    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
 
 
 def _entities_for_device(
@@ -196,8 +234,10 @@ def _entities_for_device(
             and management_supports(record, "rendering_profile")
         )
     ]
-    if is_note4(record):
+    if is_note4(record) or _is_android_receiver(record):
         entities.append(FlexDisplayVoiceVolume(coordinator, device_id))
+    if _is_android_receiver(record):
+        entities.append(FlexDisplayScreenBrightness(coordinator, device_id))
     return tuple(entities)
 
 

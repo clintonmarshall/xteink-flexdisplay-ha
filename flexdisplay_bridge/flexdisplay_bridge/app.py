@@ -113,6 +113,14 @@ SUPPORTED_COMMANDS = {
     "sleep",
     "power-off",
     "restart",
+    "restart-app",
+    "test-chime",
+    "volume-up",
+    "volume-down",
+    "mute",
+    "unmute",
+    "brightness-up",
+    "brightness-down",
     "install",
 }
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
@@ -3330,8 +3338,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         current = store.get(selected)
         if not current:
             raise HTTPException(status_code=404, detail="Device has not checked in")
-        if not _is_note4(current):
-            raise HTTPException(status_code=409, detail="Voice controls require a Note4")
+        if not (_is_note4(current) or _is_android_display(current)):
+            raise HTTPException(
+                status_code=409,
+                detail="Voice controls require a Note4 or Android receiver",
+            )
         changes: dict[str, Any] = {}
         if "volume" in payload:
             changes["desired_voice_volume"] = max(0, min(100, int(payload["volume"])))
@@ -3339,6 +3350,32 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             changes["desired_voice_muted"] = bool(payload["muted"])
         if not changes:
             raise HTTPException(status_code=400, detail="Volume or mute state is required")
+        record = store.touch(selected, changes)
+        return {"updated": True, "device": record}
+
+    @app.put("/api/v1/devices/{device_id}/display")
+    def configure_device_display(
+        device_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        if not _is_android_display(current):
+            raise HTTPException(
+                status_code=409,
+                detail="Display brightness controls require an Android receiver",
+            )
+        changes: dict[str, Any] = {}
+        if "brightness" in payload:
+            changes["desired_screen_brightness"] = max(
+                5, min(100, int(payload["brightness"]))
+            )
+        if not changes:
+            raise HTTPException(status_code=400, detail="Brightness is required")
         record = store.touch(selected, changes)
         return {"updated": True, "device": record}
 
@@ -5754,6 +5791,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_firmware: str | None = Header(default=None),
         x_flexdisplay_volume: str | None = Header(default=None),
         x_flexdisplay_muted: str | None = Header(default=None),
+        x_flexdisplay_brightness: str | None = Header(default=None),
         x_flexdisplay_battery_percent: str | None = Header(default=None),
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
@@ -5849,6 +5887,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "firmware": x_flexdisplay_firmware or "0.4.0",
             "voice_volume": _optional_integer(x_flexdisplay_volume, 0, 100),
             "voice_muted": _boolean(x_flexdisplay_muted),
+            "screen_brightness": _optional_integer(x_flexdisplay_brightness, 0, 100),
             "battery_percent": _number(x_flexdisplay_battery_percent),
             "battery_voltage": _number(x_flexdisplay_battery_voltage),
             "rssi": _number(x_flexdisplay_rssi),
@@ -6204,12 +6243,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Policy-Revision"] = str(
                         int(record.get("assigned_policy_revision") or 0)
                     )
-                if _is_note4(model):
+                if _is_note4(model) or _is_android_display(model):
                     response.headers["X-FlexDisplay-Desired-Volume"] = str(
                         int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
                     )
                     response.headers["X-FlexDisplay-Desired-Muted"] = (
                         "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+                    )
+                if _is_android_display(model):
+                    response.headers["X-FlexDisplay-Desired-Brightness"] = str(
+                        int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
                     )
                 if device_firmware.version:
                     response.headers["X-FlexDisplay-Latest-Firmware"] = (
@@ -6412,12 +6455,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Command-Acknowledged"] = (
                     "true" if command_acknowledged else "false"
                 )
-            if _is_note4(model):
+            if _is_note4(model) or _is_android_display(model):
                 response.headers["X-FlexDisplay-Desired-Volume"] = str(
                     int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
                 )
                 response.headers["X-FlexDisplay-Desired-Muted"] = (
                     "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+                )
+            if _is_android_display(model):
+                response.headers["X-FlexDisplay-Desired-Brightness"] = str(
+                    int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
                 )
             if device_firmware.version:
                 response.headers["X-FlexDisplay-Latest-Firmware"] = (
@@ -6743,12 +6790,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Interaction-Revision"] = str(
                 rook.interactions(device_id)["revision"]
             )
-        if _is_note4(model):
+        if _is_note4(model) or _is_android_display(model):
             response.headers["X-FlexDisplay-Desired-Volume"] = str(
                 int(record.get("desired_voice_volume", record.get("voice_volume") or 45))
             )
             response.headers["X-FlexDisplay-Desired-Muted"] = (
                 "true" if record.get("desired_voice_muted", record.get("voice_muted") is True) else "false"
+            )
+        if _is_android_display(model):
+            response.headers["X-FlexDisplay-Desired-Brightness"] = str(
+                int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
             )
         if device_firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = (
