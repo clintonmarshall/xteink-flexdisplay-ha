@@ -242,7 +242,16 @@ def _is_note4(record: dict[str, Any] | str) -> bool:
 def _is_android_display(record: dict[str, Any] | str) -> bool:
     model = record if isinstance(record, str) else str(record.get("model") or "")
     normalized = re.sub(r"[^A-Z0-9]", "", model.upper())
-    return normalized in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
+    return normalized in {
+        "ROOK",
+        "ECHOSPOT",
+        "ECHOSPOT2017",
+        "AMAZONECHOSPOT",
+        "CHECKERS",
+        "ECHOSHOW5",
+        "ECHOSHOW52019",
+        "AMAZONECHOSHOW5",
+    }
 
 
 def _transfer_capabilities(record: dict[str, Any]) -> set[str]:
@@ -2850,6 +2859,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "X3": {"width": 528, "height": 792},
                 "X4": {"width": 480, "height": 800},
                 "N4": {"width": 400, "height": 300},
+                "ROOK": {"width": 480, "height": 480},
+                "CHECKERS": {"width": 960, "height": 480},
             },
             "capabilities": {
                 "layouts": [
@@ -3194,6 +3205,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "models": {
                 "X3": {"width": 528, "height": 792},
                 "X4": {"width": 480, "height": 800},
+                "ROOK": {"width": 480, "height": 480},
+                "CHECKERS": {"width": 960, "height": 480},
             },
             "maximum_image_bytes": MAX_IMAGE_BYTES,
         }
@@ -3458,6 +3471,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if model == "N4"
             else (480, 480)
             if model == "ROOK"
+            else (960, 480)
+            if model == "CHECKERS"
             else (480, 800)
         )
         width = _integer(

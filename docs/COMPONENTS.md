@@ -5,7 +5,7 @@
 | FlexDisplay Bridge | `flexdisplay_bridge/flexdisplay_bridge/` | Platform | Rendering, device state, commands, media, fleet and Home Assistant API |
 | Flex Studio | `flexdisplay_bridge/flexdisplay_bridge/static/` | Platform | Dashboard, content and fleet authoring UI |
 | Home Assistant integration | `custom_components/flexdisplay/` | Platform | Home Assistant devices, entities, services and update surfaces |
-| Echo Spot receiver | `rook_receiver/` | Receiver | 480 × 480 Android kiosk, touch, alerts and telemetry |
+| Android receiver | `rook_receiver/` | Receiver | Echo Spot 480 × 480 and Echo Show 5 960 × 480 Android kiosk, touch, alerts and telemetry |
 | FlexHub | External `xteink-flexhub` repository | Firmware | Always-on relay and local fleet transport |
 | X3/X4 firmware | External `xteink-flexdisplay` repository | Firmware | Embedded e-paper runtime |
 | Factory/release kit | External `xteink-flexdisplay-release` repository | Release train | Coordinated images and provisioning artifacts |

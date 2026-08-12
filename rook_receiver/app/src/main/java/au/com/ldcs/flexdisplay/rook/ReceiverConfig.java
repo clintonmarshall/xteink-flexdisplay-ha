@@ -26,11 +26,12 @@ final class ReceiverConfig {
     }
 
     static ReceiverConfig load(Context context) {
+        ReceiverProfile profile = ReceiverProfile.detect();
         SharedPreferences preferences = context.getSharedPreferences(PREFS, Context.MODE_PRIVATE);
         String androidId = Settings.Secure.getString(
                 context.getContentResolver(), Settings.Secure.ANDROID_ID);
         if (androidId == null || androidId.length() < 8) androidId = "00000000";
-        String generatedId = "ROOK-" + androidId.substring(androidId.length() - 8).toUpperCase(Locale.ROOT);
+        String generatedId = profile.idPrefix + "-" + androidId.substring(androidId.length() - 8).toUpperCase(Locale.ROOT);
         ReceiverConfig selected = new ReceiverConfig(
                 preferences.getString("bridge_url", ""),
                 preferences.getString("device_id", generatedId),
