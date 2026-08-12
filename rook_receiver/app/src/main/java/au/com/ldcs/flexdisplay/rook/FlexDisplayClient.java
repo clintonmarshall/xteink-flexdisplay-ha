@@ -23,6 +23,8 @@ import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -31,6 +33,8 @@ import java.util.List;
 import java.util.Map;
 
 final class FlexDisplayClient {
+    static final String FIRMWARE_VERSION = "android-0.3.0";
+
     static final class Interaction {
         final String id;
         final String label;
@@ -139,6 +143,27 @@ final class FlexDisplayClient {
         }
     }
 
+    static final class VoiceAssistantResponse {
+        final int sampleRate;
+        final String transcript;
+        final String response;
+        final byte[] audio;
+
+        VoiceAssistantResponse(int sampleRate, String transcript, String response, byte[] audio) {
+            this.sampleRate = sampleRate;
+            this.transcript = transcript;
+            this.response = response;
+            this.audio = audio;
+        }
+
+        String summary() {
+            if (!response.isEmpty() && !transcript.isEmpty()) return transcript + "\n" + response;
+            if (!response.isEmpty()) return response;
+            if (!transcript.isEmpty()) return transcript;
+            return audio.length == 0 ? "Assist completed" : "Assist response";
+        }
+    }
+
     private final Context context;
     private final ReceiverProfile profile;
 
@@ -160,7 +185,7 @@ final class FlexDisplayClient {
         connection.setRequestProperty("X-FlexDisplay-Width", Integer.toString(profile.width));
         connection.setRequestProperty("X-FlexDisplay-Height", Integer.toString(profile.height));
         connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
-        connection.setRequestProperty("X-FlexDisplay-Firmware", "android-0.2.0");
+        connection.setRequestProperty("X-FlexDisplay-Firmware", FIRMWARE_VERSION);
         connection.setRequestProperty("X-FlexDisplay-Capabilities", profile.capabilities());
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
@@ -280,6 +305,33 @@ final class FlexDisplayClient {
                 confirmationPayload(confirmed));
     }
 
+    VoiceAssistantResponse runAssist(
+            ReceiverConfig config,
+            byte[] audio,
+            boolean newConversation) throws IOException {
+        HttpURLConnection connection = open(
+                config,
+                "/api/v1/devices/" + config.deviceId + "/assist",
+                "POST",
+                60_000);
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/octet-stream");
+        connection.setRequestProperty("Accept", "application/octet-stream");
+        connection.setRequestProperty(
+                "X-FlexDisplay-New-Conversation",
+                Boolean.toString(newConversation));
+        connection.setFixedLengthStreamingMode(audio.length);
+        try (OutputStream output = connection.getOutputStream()) {
+            output.write(audio);
+        }
+        requireSuccess(connection);
+        try {
+            return decodeVoiceResponse(readBytes(connection.getInputStream()));
+        } finally {
+            connection.disconnect();
+        }
+    }
+
     private HttpURLConnection open(
             ReceiverConfig config, String path, String method, int readTimeout) throws IOException {
         HttpURLConnection connection = (HttpURLConnection) new URL(config.bridgeUrl + path).openConnection();
@@ -373,5 +425,52 @@ final class FlexDisplayClient {
             while ((line = reader.readLine()) != null) result.append(line);
             return result.toString();
         }
+    }
+
+    private static VoiceAssistantResponse decodeVoiceResponse(byte[] body) throws IOException {
+        if (body.length < 4) throw new IOException("Bridge returned an empty Assist response");
+        String magic = new String(body, 0, 4, StandardCharsets.US_ASCII);
+        ByteBuffer header = ByteBuffer.wrap(body).order(ByteOrder.LITTLE_ENDIAN);
+        if ("FVA2".equals(magic)) {
+            if (body.length < 20) throw new IOException("Bridge returned a truncated Assist response");
+            header.position(4);
+            int sampleRate = header.getInt();
+            int transcriptLength = header.getInt();
+            int responseLength = header.getInt();
+            int audioLength = header.getInt();
+            int offset = 20;
+            requirePayloadLength(body.length, offset, transcriptLength, responseLength, audioLength);
+            String transcript = new String(body, offset, transcriptLength, StandardCharsets.UTF_8);
+            offset += transcriptLength;
+            String response = new String(body, offset, responseLength, StandardCharsets.UTF_8);
+            offset += responseLength;
+            byte[] audio = new byte[audioLength];
+            System.arraycopy(body, offset, audio, 0, audioLength);
+            return new VoiceAssistantResponse(sampleRate, transcript, response, audio);
+        }
+        if ("FVA1".equals(magic)) {
+            if (body.length < 16) throw new IOException("Bridge returned a truncated Assist response");
+            header.position(4);
+            int sampleRate = header.getInt();
+            int textLength = header.getInt();
+            int audioLength = header.getInt();
+            int offset = 16;
+            requirePayloadLength(body.length, offset, textLength, audioLength);
+            String response = new String(body, offset, textLength, StandardCharsets.UTF_8);
+            offset += textLength;
+            byte[] audio = new byte[audioLength];
+            System.arraycopy(body, offset, audio, 0, audioLength);
+            return new VoiceAssistantResponse(sampleRate, "", response, audio);
+        }
+        throw new IOException("Bridge returned an unknown Assist payload");
+    }
+
+    private static void requirePayloadLength(int bodyLength, int offset, int... lengths) throws IOException {
+        long required = offset;
+        for (int length : lengths) {
+            if (length < 0) throw new IOException("Bridge returned an invalid Assist payload");
+            required += length;
+        }
+        if (required > bodyLength) throw new IOException("Bridge returned a truncated Assist payload");
     }
 }

@@ -15,6 +15,8 @@ and device-specific screen capabilities.
 - swipe left/right for previous/next page and tap empty space to refresh
 - tap controls for lights, switches, input booleans, and scenes
 - hold-and-confirm safety for garage doors and other covers
+- press-and-hold Assist voice control through the FlexDisplay Bridge and Home
+  Assistant Assist pipeline, with local speaker playback
 - immediate camera notifications, local chimes, dismissal, and action buttons
 - immediate screen invalidation over the notification long poll, with a
   one-minute safety poll if the push connection is interrupted
@@ -59,6 +61,8 @@ the Bridge address later.
 
 - Tap a light, switch, input boolean, or scene tile: run its default action.
 - Hold a cover tile: show a confirmation before opening or closing it.
+- Hold **Assist**: record while held, send the request to Home Assistant Assist,
+  and play the response on the device speaker.
 - Tap empty space: refresh the current page.
 - Swipe left: next page.
 - Swipe right: previous page.
@@ -100,6 +104,23 @@ fetches once more after the active request completes. The Bridge classifies the
 Android receiver as `always_on_color`, keeps its sleep plan awake, and ignores
 battery and unchanged-image interval multipliers; the 60-second interval remains
 only as a recovery fallback.
+
+## Home Assistant Assist
+
+Version 0.3.0 of the Android receiver adds a local push-to-talk Assist button.
+It sends 16 kHz mono PCM audio to the Bridge `/assist` endpoint using the
+receiver token and plays the returned PCM response through the Echo device
+speaker. Android will ask for microphone permission on first use; it can also be
+granted over ADB:
+
+```bash
+adb shell pm grant au.com.ldcs.flexdisplay.rook android.permission.RECORD_AUDIO
+```
+
+This uses Home Assistant's configured Assist pipeline. It does not expose the
+Echo camera as a Home Assistant camera entity; current LineageOS builds report
+camera hardware features but no public camera devices through Android's camera
+service.
 
 The LineageOS builds are experimental and SELinux-permissive. Keep ADB and the
 Bridge API on a trusted LAN; do not expose either directly to the internet.

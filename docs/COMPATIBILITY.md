@@ -4,9 +4,9 @@ Update this table in every release that changes a protocol or minimum version.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.45.0 | Bridge, Studio and HA integration are version-locked |
-| Echo Spot receiver | 0.2.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11 |
-| Echo Show 5 receiver | 0.2.0 | 2019 `checkers`; LineageOS 18.1 / Android 11 |
+| FlexDisplay platform | 0.45.1 | Bridge, Studio and HA integration are version-locked |
+| Echo Spot receiver | 0.3.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist |
+| Echo Show 5 receiver | 0.3.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |

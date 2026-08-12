@@ -1,10 +1,16 @@
 package au.com.ldcs.flexdisplay.rook;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.Color;
+import android.media.AudioFormat;
 import android.media.AudioManager;
+import android.media.AudioRecord;
+import android.media.AudioTrack;
+import android.media.MediaRecorder;
 import android.media.ToneGenerator;
 import android.os.Bundle;
 import android.os.Handler;
@@ -21,6 +27,7 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
+import java.io.ByteArrayOutputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
@@ -28,9 +35,15 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
+    private static final int VOICE_PERMISSION_REQUEST = 4103;
+    private static final int VOICE_SAMPLE_RATE = 16_000;
+    private static final int VOICE_MAX_BYTES = VOICE_SAMPLE_RATE * 2 * 8;
+    private static final int VOICE_MIN_BYTES = VOICE_SAMPLE_RATE;
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final ExecutorService network = Executors.newSingleThreadExecutor();
     private final ExecutorService notificationNetwork = Executors.newSingleThreadExecutor();
+    private final ExecutorService voiceNetwork = Executors.newSingleThreadExecutor();
     private final Runnable scheduledRefresh = () -> refresh(false);
     private final ReceiverProfile profile = ReceiverProfile.detect();
     private ReceiverConfig config;
@@ -38,6 +51,7 @@ public final class MainActivity extends Activity {
     private FrameLayout root;
     private ImageView imageView;
     private TextView statusView;
+    private Button assistButton;
     private Bitmap currentBitmap;
     private String imageSha256 = "";
     private String pendingCommandResult = "";
@@ -55,6 +69,8 @@ public final class MainActivity extends Activity {
     private float touchStartX;
     private float touchStartY;
     private long touchStartedAt;
+    private volatile boolean voiceRecording;
+    private volatile boolean voiceBusy;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -91,6 +107,7 @@ public final class MainActivity extends Activity {
         handler.removeCallbacksAndMessages(null);
         network.shutdownNow();
         notificationNetwork.shutdownNow();
+        voiceNetwork.shutdownNow();
         super.onDestroy();
     }
 
@@ -112,10 +129,36 @@ public final class MainActivity extends Activity {
         statusParams.rightMargin = 42;
         root.addView(statusView, statusParams);
 
+        assistButton = new Button(this);
+        assistButton.setText("Assist");
+        assistButton.setTextSize(11);
+        assistButton.setTextColor(Color.WHITE);
+        assistButton.setBackgroundColor(Color.argb(190, 14, 82, 130));
+        assistButton.setOnTouchListener(this::onAssistTouch);
+        FrameLayout.LayoutParams assistParams = new FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM | Gravity.RIGHT);
+        assistParams.rightMargin = profile.round ? 78 : 18;
+        assistParams.bottomMargin = profile.round ? 46 : 18;
+        root.addView(assistButton, assistParams);
+
         root.setClickable(true);
         root.setOnTouchListener(this::onTouch);
         setContentView(root);
         showStatus("Connecting to FlexDisplay…", true);
+    }
+
+    private boolean onAssistTouch(View view, MotionEvent event) {
+        switch (event.getAction()) {
+            case MotionEvent.ACTION_DOWN:
+                view.performClick();
+                startVoiceCapture();
+                return true;
+            case MotionEvent.ACTION_UP:
+            case MotionEvent.ACTION_CANCEL:
+                stopVoiceCapture();
+                return true;
+            default:
+                return true;
+        }
     }
 
     private boolean onTouch(View view, MotionEvent event) {
@@ -417,6 +460,132 @@ public final class MainActivity extends Activity {
         handler.postDelayed(tone::release, 1_200L);
     }
 
+    private void startVoiceCapture() {
+        if (!config.isReady()) {
+            showSettings();
+            return;
+        }
+        if (voiceRecording || voiceBusy) return;
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.RECORD_AUDIO }, VOICE_PERMISSION_REQUEST);
+            showTransientStatus("Allow microphone, then hold Assist again");
+            return;
+        }
+        int minBuffer = AudioRecord.getMinBufferSize(
+                VOICE_SAMPLE_RATE,
+                AudioFormat.CHANNEL_IN_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        if (minBuffer <= 0) {
+            showTransientStatus("Microphone is unavailable");
+            return;
+        }
+        int bufferSize = Math.max(minBuffer, 4096);
+        try {
+            AudioRecord recorder = new AudioRecord(
+                    MediaRecorder.AudioSource.VOICE_RECOGNITION,
+                    VOICE_SAMPLE_RATE,
+                    AudioFormat.CHANNEL_IN_MONO,
+                    AudioFormat.ENCODING_PCM_16BIT,
+                    bufferSize * 2);
+            if (recorder.getState() != AudioRecord.STATE_INITIALIZED) {
+                recorder.release();
+                showTransientStatus("Microphone did not initialise");
+                return;
+            }
+            voiceBusy = true;
+            voiceRecording = true;
+            setAssistActive(true, "Listening… release to send");
+            voiceNetwork.execute(() -> recordAndSendVoice(recorder, bufferSize));
+        } catch (SecurityException error) {
+            voiceBusy = false;
+            showTransientStatus("Microphone permission denied");
+        } catch (IllegalArgumentException error) {
+            voiceBusy = false;
+            showTransientStatus("Microphone is unavailable");
+        }
+    }
+
+    private void stopVoiceCapture() {
+        if (!voiceRecording) return;
+        voiceRecording = false;
+        setAssistActive(false, "Processing Assist…");
+    }
+
+    private void recordAndSendVoice(AudioRecord recorder, int bufferSize) {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        byte[] buffer = new byte[bufferSize];
+        try {
+            recorder.startRecording();
+            while (voiceRecording && output.size() < VOICE_MAX_BYTES && !Thread.currentThread().isInterrupted()) {
+                int read = recorder.read(buffer, 0, buffer.length);
+                if (read > 0) output.write(buffer, 0, read);
+            }
+        } catch (Exception error) {
+            voiceBusy = false;
+            handler.post(() -> setAssistActive(false, "Assist recording failed\n" + error.getMessage()));
+            return;
+        } finally {
+            voiceRecording = false;
+            try {
+                recorder.stop();
+            } catch (IllegalStateException ignored) {
+                // Already stopped by the audio stack.
+            }
+            recorder.release();
+        }
+        byte[] audio = output.toByteArray();
+        if (audio.length < VOICE_MIN_BYTES) {
+            voiceBusy = false;
+            handler.post(() -> setAssistActive(false, "Hold Assist a little longer"));
+            return;
+        }
+        try {
+            FlexDisplayClient.VoiceAssistantResponse response = client.runAssist(config, audio, false);
+            voiceBusy = false;
+            handler.post(() -> setAssistActive(false, response.summary()));
+            playAssistAudio(response);
+            handler.postDelayed(() -> refresh(true), 900L);
+        } catch (Exception error) {
+            voiceBusy = false;
+            handler.post(() -> setAssistActive(false, "Assist failed\n" + error.getMessage()));
+        }
+    }
+
+    private void playAssistAudio(FlexDisplayClient.VoiceAssistantResponse response) {
+        if (response.audio.length == 0) return;
+        int sampleRate = response.sampleRate <= 0 ? VOICE_SAMPLE_RATE : response.sampleRate;
+        int minBuffer = AudioTrack.getMinBufferSize(
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT);
+        int bufferSize = Math.max(minBuffer, response.audio.length);
+        AudioTrack track = new AudioTrack(
+                AudioManager.STREAM_MUSIC,
+                sampleRate,
+                AudioFormat.CHANNEL_OUT_MONO,
+                AudioFormat.ENCODING_PCM_16BIT,
+                bufferSize,
+                AudioTrack.MODE_STREAM);
+        try {
+            track.play();
+            track.write(response.audio, 0, response.audio.length);
+            track.stop();
+        } finally {
+            track.release();
+        }
+    }
+
+    private void setAssistActive(boolean active, String message) {
+        assistButton.setEnabled(!active && !voiceBusy);
+        assistButton.setText(active ? "Listening" : (voiceBusy ? "Assist…" : "Assist"));
+        showStatus(message, true);
+        if (!active) {
+            handler.postDelayed(() -> {
+                if (notificationOverlay == null && !voiceRecording) showStatus("", false);
+            }, 3_500L);
+        }
+    }
+
     private void executeCommands(String commands, String commandId) {
         boolean success = true;
         String detail = "ok";
@@ -525,6 +694,14 @@ public final class MainActivity extends Activity {
                         | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN
                         | View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION
                         | View.SYSTEM_UI_FLAG_LAYOUT_STABLE);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != VOICE_PERMISSION_REQUEST) return;
+        boolean granted = grantResults.length > 0 && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+        showTransientStatus(granted ? "Microphone ready" : "Microphone permission denied");
     }
 
     private static long parseLong(String value, long fallback) {

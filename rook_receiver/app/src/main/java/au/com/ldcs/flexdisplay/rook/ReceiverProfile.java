@@ -52,7 +52,7 @@ final class ReceiverProfile {
     }
 
     String capabilities() {
-        String base = "android,color,touch,png,empty-unchanged,kiosk,interactions,notifications,audio,always-on-color,long-poll-refresh";
+        String base = "android,color,touch,png,empty-unchanged,kiosk,interactions,notifications,audio,assist,always-on-color,long-poll-refresh";
         return round ? base + ",round-display" : base;
     }
 
