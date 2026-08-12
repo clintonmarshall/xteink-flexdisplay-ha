@@ -554,6 +554,14 @@ public final class MainActivity extends Activity {
     private void playAssistAudio(FlexDisplayClient.VoiceAssistantResponse response) {
         if (response.audio.length == 0) return;
         int sampleRate = response.sampleRate <= 0 ? VOICE_SAMPLE_RATE : response.sampleRate;
+        AudioManager audioManager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (audioManager != null && audioManager.getStreamVolume(AudioManager.STREAM_MUSIC) == 0) {
+            int maxVolume = audioManager.getStreamMaxVolume(AudioManager.STREAM_MUSIC);
+            audioManager.setStreamVolume(
+                    AudioManager.STREAM_MUSIC,
+                    Math.max(1, maxVolume / 2),
+                    0);
+        }
         int minBuffer = AudioTrack.getMinBufferSize(
                 sampleRate,
                 AudioFormat.CHANNEL_OUT_MONO,
@@ -569,6 +577,8 @@ public final class MainActivity extends Activity {
         try {
             track.play();
             track.write(response.audio, 0, response.audio.length);
+            int durationMs = Math.max(250, (response.audio.length / 2) * 1000 / sampleRate);
+            SystemClock.sleep(durationMs + 150L);
             track.stop();
         } finally {
             track.release();
