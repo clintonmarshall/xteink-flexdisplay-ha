@@ -20,6 +20,11 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import (
+    firmware_manageable,
+    reports_battery,
+    supports_xteink_ota,
+)
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -345,6 +350,30 @@ def _device_sensors(
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
+    battery_keys = {"battery_percent", "battery_voltage"}
+    managed_firmware_keys = {
+        "firmware_update_status",
+        "firmware_update_stage",
+        "firmware_update_percent",
+        "firmware_update_error",
+        "firmware_update_error_at",
+        "firmware_install_blockers",
+    }
+    descriptions = [
+        description
+        for description in descriptions
+        if not (
+            (description.key in battery_keys and not reports_battery(record))
+            or (
+                description.key in managed_firmware_keys
+                and not firmware_manageable(record)
+            )
+            or (
+                description.key == "firmware_rollout_status"
+                and not supports_xteink_ota(record)
+            )
+        )
+    ]
     if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
         descriptions.extend(VOICE_DESCRIPTIONS)
     return tuple(

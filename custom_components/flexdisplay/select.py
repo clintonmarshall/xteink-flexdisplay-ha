@@ -8,6 +8,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import management_modes, management_supports
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -184,15 +185,33 @@ async def async_setup_entry(
 ) -> None:
     """Create a page selector for each registered device."""
     del hass
+
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[SelectEntity, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        entities: list[SelectEntity] = []
+        if management_supports(record, "page_selection"):
+            entities.append(FlexDisplayPageSelect(coordinator, device_id))
+        if management_supports(record, "dashboard_profiles"):
+            entities.append(FlexDisplayProfileSelect(coordinator, device_id))
+        if management_modes(record):
+            entities.append(FlexDisplayModeSelect(coordinator, device_id))
+        if management_supports(record, "fleet_policy"):
+            entities.append(FlexDisplayPolicySelect(coordinator, device_id))
+        if management_supports(record, "rendering_profile"):
+            entities.append(FlexDisplayRenderingProfileSelect(coordinator, device_id))
+        if management_supports(record, "opendisplay_policy"):
+            entities.append(
+                FlexDisplayOpenDisplayTransportSelect(coordinator, device_id)
+            )
+        return tuple(entities)
+
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplayPageSelect(coordinator, device_id),
-            FlexDisplayProfileSelect(coordinator, device_id),
-            FlexDisplayModeSelect(coordinator, device_id),
-            FlexDisplayPolicySelect(coordinator, device_id),
-            FlexDisplayRenderingProfileSelect(coordinator, device_id),
-            FlexDisplayOpenDisplayTransportSelect(coordinator, device_id),
-        ),
+        entities_for_device,
     )

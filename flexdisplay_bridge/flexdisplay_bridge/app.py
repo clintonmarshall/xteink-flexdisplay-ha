@@ -55,6 +55,10 @@ from .dashboard_store import (
     profile_payload,
 )
 from .dashboards import build_dashboard_pages, select_active_pages
+from .device_capabilities import (
+    DeviceCapabilityDescriptor,
+    resolve_device_capabilities,
+)
 from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
 from .flexhub_client import FlexHubClient, FlexHubClientError
 from .home_assistant import HomeAssistantClient
@@ -234,24 +238,214 @@ def _firmware_version(value: str) -> tuple[int, int, int]:
     return tuple(int(part) for part in match.groups()) if match else (0, 0, 0)
 
 
+def _safe_display_url(value: str) -> str:
+    """Strip credentials and query data from an operational display URL."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    selected = str(value or "").strip()
+    if not selected:
+        return ""
+    try:
+        parsed = urlsplit(selected)
+        parsed_port = parsed.port
+    except ValueError:
+        return ""
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        return ""
+    host = parsed.hostname
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    port = f":{parsed_port}" if parsed_port is not None else ""
+    return urlunsplit((parsed.scheme, f"{host}{port}", parsed.path, "", ""))
+
+
+def _safe_host_port(value: str, port: int) -> str:
+    """Return a broker endpoint without userinfo, paths, or query data."""
+    from ipaddress import ip_address
+    from urllib.parse import urlsplit
+
+    selected = str(value or "").strip()
+    if not selected:
+        return f"port {port}"
+    try:
+        literal = selected.strip("[]")
+        try:
+            host = str(ip_address(literal))
+        except ValueError:
+            parsed = urlsplit(selected if "://" in selected else f"//{selected}")
+            host = parsed.hostname or ""
+    except ValueError:
+        host = ""
+    if not host:
+        return "Configured endpoint"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return f"{host}:{port}"
+
+
+def _home_assistant_apps_url(request: Request) -> str:
+    """Link to Home Assistant from either ingress or the Bridge's direct port."""
+    from urllib.parse import urlsplit, urlunsplit
+
+    configured = _safe_display_url(os.getenv("FLEXDISPLAY_HA_UI_URL", ""))
+    if configured:
+        return f"{configured.rstrip('/')}/config/apps"
+
+    forwarded_host = str(request.headers.get("x-forwarded-host") or "").split(
+        ",", 1
+    )[0].strip()
+    forwarded_proto = str(request.headers.get("x-forwarded-proto") or "").split(
+        ",", 1
+    )[0].strip()
+    selected = (
+        f"{forwarded_proto or request.url.scheme}://{forwarded_host}"
+        if forwarded_host
+        else str(request.base_url)
+    )
+    try:
+        parsed = urlsplit(selected)
+        host = parsed.hostname or ""
+        port = parsed.port
+    except ValueError:
+        return "/config/apps"
+    if not host or port in {None, 80, 443, 8123}:
+        return "/config/apps"
+    if ":" in host and not host.startswith("["):
+        host = f"[{host}]"
+    return urlunsplit(
+        (forwarded_proto or parsed.scheme or "http", f"{host}:8123", "/config/apps", "", "")
+    )
+
+
+def _public_flexhub_error(value: Any) -> str:
+    """Map untrusted network errors to a small secret-free status vocabulary."""
+    selected = str(value or "").lower()
+    if not selected:
+        return ""
+    if "not configured" in selected:
+        return "No FlexHub endpoint is configured."
+    if "waiting for flexhub" in selected:
+        return "FlexHub is configured but has not connected yet."
+    if "401" in selected or "access pin" in selected:
+        return "FlexHub rejected the configured access PIN."
+    if "404" in selected or "not found" in selected:
+        return "The FlexHub status API is unavailable at the configured endpoint."
+    if "redirect" in selected:
+        return "The FlexHub endpoint redirected; configure the hub's direct base address."
+    if "timed out" in selected or "timeout" in selected:
+        return "The FlexHub connection timed out."
+    if "non-json" in selected or "invalid status" in selected:
+        return "FlexHub returned an invalid status response."
+    if "meshtastic web page" in selected:
+        return "The configured endpoint does not expose the FlexHub status API."
+    return "FlexHub could not be reached at the configured endpoint."
+
+
+def _public_firmware_error(value: Any) -> str:
+    """Return a useful firmware error without reflecting request URLs or paths."""
+    selected = str(value or "").lower()
+    if not selected:
+        return ""
+    if "sha-256" in selected or "sha256" in selected:
+        return "Firmware mirror verification failed its SHA-256 check."
+    if "size mismatch" in selected:
+        return "Firmware mirror verification found an unexpected file size."
+    if "manifest is incomplete" in selected:
+        return "The firmware release manifest is incomplete."
+    if "timed out" in selected or "timeout" in selected:
+        return "The firmware mirror download timed out."
+    return "The firmware mirror could not prepare the configured release."
+
+
+def _public_mirror_status(status: dict[str, Any]) -> dict[str, Any]:
+    """Allowlist the unauthenticated firmware health fields."""
+    return {
+        "enabled": bool(status.get("enabled")),
+        "ready": bool(status.get("ready")),
+        "state": str(status.get("state") or "idle"),
+        "version": str(status.get("version") or ""),
+        "size": int(status.get("size") or 0),
+        "source": str(status.get("source") or ""),
+        "last_error": _public_firmware_error(status.get("last_error")),
+        "last_error_at": status.get("last_error_at"),
+        "last_ready_at": status.get("last_ready_at"),
+        "next_retry_at": status.get("next_retry_at"),
+    }
+
+
 def _is_note4(record: dict[str, Any] | str) -> bool:
     model = record if isinstance(record, str) else str(record.get("model") or "")
-    return model.upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+    return resolve_device_capabilities(model).firmware.provider == "note4"
 
 
 def _is_android_display(record: dict[str, Any] | str) -> bool:
     model = record if isinstance(record, str) else str(record.get("model") or "")
-    normalized = re.sub(r"[^A-Z0-9]", "", model.upper())
-    return normalized in {
-        "ROOK",
-        "ECHOSPOT",
-        "ECHOSPOT2017",
-        "AMAZONECHOSPOT",
-        "CHECKERS",
-        "ECHOSHOW5",
-        "ECHOSHOW52019",
-        "AMAZONECHOSHOW5",
-    }
+    return resolve_device_capabilities(model).family == "android_receiver"
+
+
+def _device_capabilities(record: dict[str, Any] | str):
+    if isinstance(record, str):
+        return resolve_device_capabilities(record)
+    model = str(record.get("model") or "")
+    descriptor = resolve_device_capabilities(
+        model,
+        capabilities=record.get("transfer_capabilities") or (),
+        width=(
+            int(record["width"])
+            if record.get("width") is not None
+            else None
+        ),
+        height=(
+            int(record["height"])
+            if record.get("height") is not None
+            else None
+        ),
+    )
+    model_reported = record.get("model_reported")
+    if descriptor.supports_xteink_ota and model_reported is not True:
+        device_id = str(record.get("device_id") or "").upper()
+        trusted_prefixes = (
+            ("X3-",) if descriptor.model_key == "x3" else ("X4-",)
+        )
+        if not device_id.startswith(trusted_prefixes):
+            return resolve_device_capabilities(
+                "UNKNOWN",
+                capabilities=record.get("transfer_capabilities") or (),
+                width=descriptor.display.width,
+                height=descriptor.display.height,
+            )
+    return descriptor
+
+
+def _capability_normalized_config(
+    config: DeviceConfig,
+    descriptor: DeviceCapabilityDescriptor,
+) -> DeviceConfig:
+    """Return safe effective defaults for the device capability contract."""
+    modes = descriptor.management.modes
+    mode = config.mode
+    if mode not in modes:
+        mode = (
+            "home_assistant"
+            if "home_assistant" in modes
+            else modes[0]
+            if modes
+            else "home_assistant"
+        )
+    changes: dict[str, Any] = {"mode": mode}
+    if not descriptor.management.supports_sleep_policy:
+        changes.update(
+            {
+                "live_mode": True,
+                "intelligent_sleep": False,
+                "stay_awake_on_usb": True,
+                "low_battery_multiplier": 1,
+                "unchanged_image_multiplier": 1,
+            }
+        )
+    if not descriptor.management.supports_opendisplay_policy:
+        changes["open_display_transport_policy"] = "auto"
+    return replace(config, **changes)
 
 
 def _transfer_capabilities(record: dict[str, Any]) -> set[str]:
@@ -303,11 +497,14 @@ def _display_runtime(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _device_firmware(settings: BridgeConfig, record: dict[str, Any] | str) -> FirmwareConfig:
-    # Android receivers are applications, not ESP32 firmware targets. Returning
-    # an empty release keeps X3/X4 OTA controls from ever being offered to them.
-    if _is_android_display(record):
-        return FirmwareConfig()
-    return settings.note4_firmware if _is_note4(record) else settings.firmware
+    provider = _device_capabilities(record).firmware.provider
+    if provider == "xteink":
+        return settings.firmware
+    if provider == "note4":
+        return settings.note4_firmware
+    # Android applications, generic ESP displays, and unknown devices never
+    # inherit the X3/X4 release merely because they share the Bridge protocol.
+    return FirmwareConfig()
 
 
 def _firmware_metadata_error(
@@ -317,6 +514,12 @@ def _firmware_metadata_error(
     firmware = firmware or settings.firmware
     if not firmware.version or not firmware.url:
         return "No firmware release is configured"
+    if (
+        firmware is settings.firmware
+        and firmware.url == "packaged"
+        and not firmware.mirror_enabled
+    ):
+        return "Packaged X3/X4 firmware requires the local mirror"
     if firmware.url != "packaged" and not firmware.url.startswith(("https://", "http://")):
         return "Firmware URL must use HTTP or HTTPS"
     if not re.fullmatch(r"[0-9a-f]{64}", firmware.sha256):
@@ -473,6 +676,8 @@ def _firmware_retry_blockers(
     store: DeviceStore,
 ) -> list[str]:
     """Explain why a failed device cannot be retried yet."""
+    if not _device_capabilities(record).supports_xteink_ota:
+        return ["Firmware retry is not available for this device family"]
     blockers: list[str] = []
     error = _firmware_metadata_error(settings)
     if error:
@@ -530,6 +735,8 @@ def _usb_recovery_blockers(
     external_usb_evidence: dict[str, Any] | None = None,
 ) -> list[str]:
     """Explain why an operator cannot reconcile a USB-recovered device."""
+    if not _device_capabilities(record).supports_xteink_ota:
+        return ["USB recovery verification is not available for this device family"]
     target = settings.firmware.version
     blockers: list[str] = []
     if not target:
@@ -688,6 +895,11 @@ def _decorate_device(
     available_policy_profiles: list[str] | None = None,
 ) -> dict[str, Any]:
     result = dict(record)
+    descriptor = _device_capabilities(result)
+    result["device_capabilities"] = descriptor.to_dict()
+    result["device_family"] = descriptor.family
+    result["firmware_provider"] = descriptor.firmware.provider
+    result["supported_actions"] = list(descriptor.management.actions)
     result.update(_display_runtime(result))
     last_seen = result.get("last_seen")
     online = False
@@ -697,11 +909,14 @@ def _decorate_device(
             seen = datetime.fromisoformat(last_seen)
             age = (datetime.now(UTC) - seen).total_seconds()
             profile = _effective_device(
-                settings.device(
-                    str(result.get("device_id") or ""),
-                    int(result.get("width") or 480),
-                    int(result.get("height") or 800),
-                    str(result.get("model") or ""),
+                _capability_normalized_config(
+                    settings.device(
+                        str(result.get("device_id") or ""),
+                        int(result.get("width") or 480),
+                        int(result.get("height") or 800),
+                        str(result.get("model") or ""),
+                    ),
+                    descriptor,
                 ),
                 result,
             )
@@ -748,36 +963,96 @@ def _decorate_device(
     device_firmware = _device_firmware(settings, result)
     result["latest_firmware"] = device_firmware.version or result.get("firmware", "")
     profile = _effective_device(
-        settings.device(
-            str(result.get("device_id") or ""),
-            int(result.get("width") or 480),
-            int(result.get("height") or 800),
-            str(result.get("model") or ""),
+        _capability_normalized_config(
+            settings.device(
+                str(result.get("device_id") or ""),
+                int(result.get("width") or 480),
+                int(result.get("height") or 800),
+                str(result.get("model") or ""),
+            ),
+            descriptor,
         ),
         result,
     )
     result["name"] = profile.name
     result["area"] = profile.area
-    result["assigned_profile"] = profile.profile
-    result["assigned_mode"] = profile.mode
-    result["assigned_auto_start"] = profile.auto_start
-    result["assigned_refresh_interval_seconds"] = profile.refresh_interval_seconds
-    result["assigned_live_mode"] = profile.live_mode
-    result["assigned_manual_sleep_seconds"] = profile.manual_sleep_seconds
-    result["assigned_intelligent_sleep"] = profile.intelligent_sleep
-    result["assigned_active_start"] = profile.active_start
-    result["assigned_active_end"] = profile.active_end
-    result["assigned_timezone"] = profile.timezone
-    result["assigned_critical_battery_percent"] = profile.critical_battery_percent
-    result["assigned_low_battery_percent"] = profile.low_battery_percent
-    result["assigned_low_battery_multiplier"] = profile.low_battery_multiplier
-    result["assigned_unchanged_image_multiplier"] = profile.unchanged_image_multiplier
-    result["assigned_stay_awake_on_usb"] = profile.stay_awake_on_usb
-    result["assigned_manual_wake_grace_seconds"] = profile.manual_wake_grace_seconds
-    result["assigned_rendering_profile"] = profile.rendering_profile
-    result["assigned_open_display_transport_policy"] = (
-        profile.open_display_transport_policy
-    )
+    management = descriptor.management
+    if management.supports_dashboard_profiles:
+        result["assigned_profile"] = profile.profile
+    else:
+        result.pop("assigned_profile", None)
+    if management.modes:
+        result["assigned_mode"] = profile.mode
+    else:
+        result.pop("assigned_mode", None)
+    if management.supports_provisioning:
+        result["assigned_auto_start"] = profile.auto_start
+        result["assigned_refresh_interval_seconds"] = profile.refresh_interval_seconds
+    else:
+        result.pop("assigned_auto_start", None)
+        result.pop("assigned_refresh_interval_seconds", None)
+    if management.supports_sleep_policy:
+        result.update(
+            {
+                "assigned_live_mode": profile.live_mode,
+                "assigned_manual_sleep_seconds": profile.manual_sleep_seconds,
+                "assigned_intelligent_sleep": profile.intelligent_sleep,
+                "assigned_active_start": profile.active_start,
+                "assigned_active_end": profile.active_end,
+                "assigned_timezone": profile.timezone,
+                "assigned_stay_awake_on_usb": profile.stay_awake_on_usb,
+                "assigned_manual_wake_grace_seconds": (
+                    profile.manual_wake_grace_seconds
+                ),
+            }
+        )
+    else:
+        for field in (
+            "assigned_live_mode",
+            "assigned_manual_sleep_seconds",
+            "assigned_intelligent_sleep",
+            "assigned_active_start",
+            "assigned_active_end",
+            "assigned_timezone",
+            "assigned_stay_awake_on_usb",
+            "assigned_manual_wake_grace_seconds",
+        ):
+            result.pop(field, None)
+        if management.supports_provisioning:
+            # Known always-on receivers retain their effective overlay for
+            # diagnostics, while the capability contract keeps these values
+            # out of editable sleep-policy surfaces.
+            result["assigned_live_mode"] = profile.live_mode
+            result["assigned_intelligent_sleep"] = profile.intelligent_sleep
+    if management.supports_battery_policy:
+        result.update(
+            {
+                "assigned_critical_battery_percent": profile.critical_battery_percent,
+                "assigned_low_battery_percent": profile.low_battery_percent,
+                "assigned_low_battery_multiplier": profile.low_battery_multiplier,
+            }
+        )
+    else:
+        for field in (
+            "assigned_critical_battery_percent",
+            "assigned_low_battery_percent",
+            "assigned_low_battery_multiplier",
+        ):
+            result.pop(field, None)
+    if management.supports_rendering_profile:
+        result["assigned_rendering_profile"] = profile.rendering_profile
+        result["assigned_unchanged_image_multiplier"] = (
+            profile.unchanged_image_multiplier
+        )
+    else:
+        result.pop("assigned_rendering_profile", None)
+        result.pop("assigned_unchanged_image_multiplier", None)
+    if management.supports_opendisplay_policy:
+        result["assigned_open_display_transport_policy"] = (
+            profile.open_display_transport_policy
+        )
+    else:
+        result.pop("assigned_open_display_transport_policy", None)
     desired_revision = int(result.get("assigned_policy_revision") or 0)
     reported_revision = int(result.get("reported_policy_revision") or 0)
     result["assigned_policy_name"] = str(result.get("assigned_policy_name") or "custom")
@@ -805,7 +1080,7 @@ def _decorate_device(
     result["firmware_maintenance_next_start"] = maintenance["next_start"]
     result["firmware_maintenance_usb_override"] = maintenance["usb_override"]
     result["available_profiles"] = available_profiles or list(settings.profiles)
-    result["available_modes"] = sorted(SUPPORTED_MODES)
+    result["available_modes"] = list(descriptor.management.modes)
     result["update_available"] = bool(
         device_firmware.version
         and device_firmware.url
@@ -834,12 +1109,11 @@ def _decorate_device(
         result["firmware_retry_backoff_seconds"] = (
             device_firmware.retry_backoff_seconds
         )
-        result["firmware_rollout_reset_ready"] = rollout.get(
-            "target_version"
-        ) == settings.firmware.version and rollout.get("status") in {
-            "failed",
-            "canary_active",
-        }
+        result["firmware_rollout_reset_ready"] = (
+            descriptor.supports_xteink_ota
+            and rollout.get("target_version") == settings.firmware.version
+            and rollout.get("status") in {"failed", "canary_active"}
+        )
         recovery_blockers = _usb_recovery_blockers(result, settings, store)
         result["usb_recovery_verification_blockers"] = recovery_blockers
         result["usb_recovery_verification_ready"] = not recovery_blockers
@@ -1162,6 +1436,60 @@ def _provisioning_assignment(
     return assignment
 
 
+def _filter_provisioning_assignment(
+    assignment: dict[str, Any],
+    descriptor: DeviceCapabilityDescriptor,
+) -> tuple[dict[str, Any], list[str]]:
+    """Remove fields a device family cannot apply and report what was skipped."""
+    selected = dict(assignment)
+    skipped: list[str] = []
+
+    def remove(fields: set[str]) -> None:
+        for field in fields:
+            if field in selected:
+                selected.pop(field, None)
+                skipped.append(field.removeprefix("assigned_"))
+
+    if not descriptor.management.supports_provisioning:
+        remove(set(selected))
+        return selected, skipped
+    mode = str(selected.get("assigned_mode") or "")
+    if mode and mode not in descriptor.management.modes:
+        remove({"assigned_mode"})
+    if not descriptor.management.supports_dashboard_profiles:
+        remove({"assigned_profile"})
+    if not descriptor.management.supports_battery_policy:
+        remove(
+            {
+                "assigned_critical_battery_percent",
+                "assigned_low_battery_percent",
+                "assigned_low_battery_multiplier",
+            }
+        )
+    if not descriptor.management.supports_sleep_policy:
+        remove(
+            {
+                "assigned_manual_sleep_seconds",
+                "assigned_intelligent_sleep",
+                "assigned_active_start",
+                "assigned_active_end",
+                "assigned_timezone",
+                "assigned_stay_awake_on_usb",
+                "assigned_manual_wake_grace_seconds",
+            }
+        )
+    if not descriptor.management.supports_rendering_profile:
+        remove(
+            {
+                "assigned_rendering_profile",
+                "assigned_unchanged_image_multiplier",
+            }
+        )
+    if not descriptor.management.supports_opendisplay_policy:
+        remove({"assigned_open_display_transport_policy"})
+    return selected, skipped
+
+
 def _sleep_plan(
     profile: DeviceConfig,
     battery_percent: float | None,
@@ -1449,11 +1777,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         records: list[dict[str, Any]] = []
         for record in store.all():
             device_id = str(record.get("device_id") or "")
-            model = str(record.get("model") or device_id[:2]).upper()
+            descriptor = _device_capabilities(record)
             if (
                 scope == "all"
-                or (scope == "x3" and "X3" in model)
-                or (scope == "x4" and "X4" in model)
+                or (scope == "x3" and descriptor.model_key == "x3")
+                or (scope == "x4" and descriptor.model_key == "x4")
                 or (scope == "devices" and device_id in requested_ids)
             ):
                 records.append(record)
@@ -1483,6 +1811,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record = store.get(device_id)
             if not record:
                 result["blocked"][device_id] = "Device has not checked in"
+                continue
+            if not _device_capabilities(record).supports_xteink_ota:
+                result["blocked"][device_id] = (
+                    "Device is not eligible for the X3/X4 firmware channel"
+                )
                 continue
             if _firmware_version(
                 str(record.get("firmware") or "")
@@ -1621,6 +1954,34 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             preview = output.getvalue()
         mqtt.publish_screen(device_id, preview)
 
+    def queue_firmware_for_device(
+        device_id: str, current: dict[str, Any]
+    ) -> dict[str, Any]:
+        """Queue the release owned by the device's trusted firmware provider."""
+        descriptor = _device_capabilities(current)
+        if not descriptor.firmware.manageable:
+            raise ValueError(
+                "Firmware installation is not managed by the Bridge for this device family"
+            )
+        blockers = _firmware_install_blockers(current, settings, store)
+        if blockers:
+            raise ValueError("; ".join(blockers))
+        firmware = _device_firmware(settings, current)
+        if descriptor.firmware.provider == "note4":
+            return store.queue_device_firmware_install(
+                device_id,
+                firmware.version,
+                firmware_provider=descriptor.firmware.provider,
+            )
+        if descriptor.supports_xteink_ota:
+            return store.queue_firmware_install(
+                device_id,
+                firmware.version,
+                canary_required=firmware.canary_required,
+                max_parallel=firmware.max_parallel,
+            )
+        raise ValueError("No trusted firmware provider is configured for this device")
+
     def queue_from_mqtt(device_id: str, command: str, payload: str) -> None:
         if device_id == "flexhub":
             try:
@@ -1663,23 +2024,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         current = store.get(device_id)
         if not current:
             return
+        descriptor = _device_capabilities(current)
         try:
             if command in SUPPORTED_COMMANDS:
-                if command == "install":
-                    blockers = _firmware_install_blockers(current, settings, store)
-                    if blockers:
-                        raise ValueError("; ".join(blockers))
-                    store.queue_firmware_install(
-                        device_id,
-                        settings.firmware.version,
-                        canary_required=settings.firmware.canary_required,
-                        max_parallel=settings.firmware.max_parallel,
+                if command not in descriptor.management.actions:
+                    raise ValueError(
+                        "Command is not supported by this device family"
                     )
+                if command == "install":
+                    queue_firmware_for_device(device_id, current)
                 else:
                     store.queue_command(device_id, command)
             elif command == "cancel":
                 store.clear_commands(device_id, include_dispatched=True)
             elif command == "firmware-retry":
+                if not descriptor.supports_xteink_ota:
+                    raise ValueError(
+                        "Firmware retry is not supported by this device family"
+                    )
                 blockers = _firmware_retry_blockers(current, settings, store)
                 if blockers:
                     raise ValueError("; ".join(blockers))
@@ -1692,11 +2054,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     retry_backoff_seconds=settings.firmware.retry_backoff_seconds,
                 )
             elif command == "rollout-reset":
+                if not descriptor.supports_xteink_ota:
+                    raise ValueError(
+                        "Firmware rollout reset is not supported by this device family"
+                    )
                 store.reset_firmware_rollout(
                     settings.firmware.version,
                     canary_required=settings.firmware.canary_required,
                 )
             elif command == "resend-screen":
+                if (
+                    "refresh" not in descriptor.management.actions
+                    or not descriptor.management.supports_screen_history
+                ):
+                    raise ValueError(
+                        "Screen history is not supported by this device family"
+                    )
                 _, item = screen_history.latest(device_id)
                 store.set_screen_override(device_id, str(item["id"]))
                 store.queue_command(device_id, "refresh")
@@ -1706,6 +2079,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "set-intelligent-sleep",
                 "set-stay-awake-on-usb",
             }:
+                if (
+                    command in {"set-auto-start", "set-live-mode"}
+                    and not descriptor.management.supports_fleet_policy
+                ):
+                    raise ValueError(
+                        "Fleet settings are not supported by this device family"
+                    )
+                if (
+                    command in {"set-intelligent-sleep", "set-stay-awake-on-usb"}
+                    and not descriptor.management.supports_sleep_policy
+                ):
+                    raise ValueError(
+                        "Sleep settings are not supported by this device family"
+                    )
                 field = {
                     "set-auto-start": "assigned_auto_start",
                     "set-live-mode": "assigned_live_mode",
@@ -1726,6 +2113,35 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "set-unchanged-multiplier",
                 "set-manual-wake-grace",
             }:
+                if (
+                    command == "set-refresh-interval"
+                    and not descriptor.management.supports_fleet_policy
+                ):
+                    raise ValueError(
+                        "Fleet settings are not supported by this device family"
+                    )
+                if command in {
+                    "set-critical-battery",
+                    "set-low-battery",
+                    "set-low-battery-multiplier",
+                } and not descriptor.management.supports_battery_policy:
+                    raise ValueError(
+                        "Battery settings are not supported by this device family"
+                    )
+                if command in {
+                    "set-manual-sleep",
+                    "set-manual-wake-grace",
+                } and not descriptor.management.supports_sleep_policy:
+                    raise ValueError(
+                        "Sleep settings are not supported by this device family"
+                    )
+                if (
+                    command == "set-unchanged-multiplier"
+                    and not descriptor.management.supports_rendering_profile
+                ):
+                    raise ValueError(
+                        "Rendering settings are not supported by this device family"
+                    )
                 field, minimum, maximum = {
                     "set-refresh-interval": (
                         "assigned_refresh_interval_seconds",
@@ -1772,27 +2188,42 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 store.provision(device_id, {field: value})
                 store.queue_command(device_id, "refresh")
             elif command == "set-mode":
-                if payload not in SUPPORTED_MODES:
+                if payload not in descriptor.management.modes:
                     raise ValueError("Unsupported device mode")
                 store.provision(device_id, {"assigned_mode": payload})
                 store.queue_command(device_id, "refresh")
             elif command == "set-profile":
+                if not descriptor.management.supports_dashboard_profiles:
+                    raise ValueError(
+                        "Dashboard profiles are not supported by this device family"
+                    )
                 if payload not in dashboards.names():
                     raise ValueError("Unknown dashboard profile")
                 store.provision(device_id, {"assigned_profile": payload})
                 store.queue_command(device_id, "refresh")
             elif command == "set-policy":
+                if not descriptor.management.supports_fleet_policy:
+                    raise ValueError(
+                        "Fleet policy is not supported by this device family"
+                    )
                 preset = fleet_policy_profiles().get(payload)
                 if not preset:
                     raise ValueError("Unknown fleet policy profile")
                 assignment = _provisioning_assignment(
                     preset["settings"], device_id, dashboards.names()
                 )
+                assignment, _ = _filter_provisioning_assignment(
+                    assignment, descriptor
+                )
                 assignment["assigned_policy_name"] = payload
                 assignment["assigned_policy_revision"] = store.next_policy_revision()
                 store.provision(device_id, assignment)
                 store.queue_command(device_id, "refresh")
             elif command == "set-opendisplay-transport":
+                if not descriptor.management.supports_opendisplay_policy:
+                    raise ValueError(
+                        "OpenDisplay transport is not supported by this device family"
+                    )
                 selected_transport = payload.strip().lower()
                 if selected_transport not in {"auto", "lan_preferred", "ble_only"}:
                     raise ValueError("Unsupported OpenDisplay transport policy")
@@ -1804,6 +2235,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
                 store.queue_command(device_id, "refresh")
             elif command in {"set-name", "set-area"}:
+                if not descriptor.management.supports_provisioning:
+                    raise ValueError(
+                        "Provisioning is not supported by this device family"
+                    )
                 field = "assigned_name" if command == "set-name" else "assigned_area"
                 value = _header_value(payload)
                 if command == "set-name" and not value:
@@ -1811,6 +2246,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 store.provision(device_id, {field: value})
                 store.queue_command(device_id, "refresh")
             elif command == "set-timezone":
+                if not descriptor.management.supports_sleep_policy:
+                    raise ValueError(
+                        "Sleep scheduling is not supported by this device family"
+                    )
                 try:
                     ZoneInfo(payload)
                 except ZoneInfoNotFoundError as err:
@@ -1821,6 +2260,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
                 store.queue_command(device_id, "refresh")
             elif command in {"set-active-start", "set-active-end"}:
+                if not descriptor.management.supports_sleep_policy:
+                    raise ValueError(
+                        "Sleep scheduling is not supported by this device family"
+                    )
                 minutes = _clock_minutes(payload, -1)
                 if minutes < 0:
                     raise ValueError("Active time must use HH:MM")
@@ -2151,6 +2594,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.get("/healthz")
     def health() -> dict[str, Any]:
         flexhub_health = flexhub.summary()
+        mirror_health = firmware_mirror.status(settings.firmware)
         return {
             "status": "ok",
             "version": __version__,
@@ -2161,13 +2605,374 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "mqtt_discovery_enabled": mqtt.discovery_enabled,
             "screen_history_enabled": settings.screen_history.enabled,
             "screen_history_limit": settings.screen_history.limit,
-            "firmware_mirror": firmware_mirror.status(settings.firmware),
+            "firmware_mirror": _public_mirror_status(mirror_health),
             "firmware_maintenance": _firmware_maintenance_status(settings),
             "flexhub": {
                 "configured": bool(flexhub_health.get("configured")),
                 "connected": bool(flexhub_health.get("connected")),
                 "last_seen": flexhub_health.get("last_seen") or "",
-                "error": flexhub_health.get("error") or "",
+                "error": _public_flexhub_error(flexhub_health.get("error")),
+            },
+        }
+
+    @app.get("/api/v1/system")
+    def system_status(request: Request) -> dict[str, Any]:
+        """Return the effective, redacted operational configuration for Studio."""
+        authorize(request)
+        flexhub_health = flexhub.summary()
+        mirror = firmware_mirror.status(settings.firmware)
+        maintenance = _firmware_maintenance_status(settings)
+        firmware_source = os.getenv(
+            "FLEXDISPLAY_FIRMWARE_CONFIG_SOURCE",
+            "packaged_release" if settings.firmware.url == "packaged" else "bridge_configuration",
+        )
+        note4_source = os.getenv(
+            "FLEXDISPLAY_NOTE4_FIRMWARE_CONFIG_SOURCE",
+            "packaged_release"
+            if settings.note4_firmware.url == "packaged"
+            else "bridge_configuration",
+        )
+        if firmware_source not in {
+            "packaged_release",
+            "home_assistant_app",
+            "bridge_configuration",
+        }:
+            firmware_source = "bridge_configuration"
+        if note4_source not in {
+            "packaged_release",
+            "home_assistant_app",
+            "bridge_configuration",
+        }:
+            note4_source = "bridge_configuration"
+        configured_firmware_version = os.getenv(
+            "FLEXDISPLAY_FIRMWARE_CONFIGURED_VERSION", ""
+        )
+        configured_note4_version = os.getenv(
+            "FLEXDISPLAY_NOTE4_FIRMWARE_CONFIGURED_VERSION", ""
+        )
+        configured_flexhub_url = _safe_display_url(settings.flexhub.url)
+        effective_flexhub_url = _safe_display_url(
+            str(flexhub_health.get("url") or "")
+        )
+        flexhub_saved = bool(flexhub_health.get("saved_configuration"))
+        flexhub_url_override = bool(flexhub_health.get("saved_url_override"))
+        flexhub_pin_saved = bool(flexhub_health.get("saved_pin_authoritative"))
+        flexhub_apply_state = (
+            "saved_disconnect"
+            if flexhub_url_override and not effective_flexhub_url
+            else "saved_override"
+            if flexhub_url_override
+            else "effective"
+        )
+        firmware_owner = (
+            "Release package"
+            if firmware_source == "packaged_release"
+            else "Home Assistant App"
+            if firmware_source == "home_assistant_app"
+            else "Bridge configuration"
+        )
+        note4_owner = (
+            "Release package"
+            if note4_source == "packaged_release"
+            else "Home Assistant App"
+            if note4_source == "home_assistant_app"
+            else "Bridge configuration"
+        )
+        x_metadata_error = _firmware_metadata_error(settings, settings.firmware)
+        note4_metadata_error = _firmware_metadata_error(
+            settings, settings.note4_firmware
+        )
+        x_channel_ready = not x_metadata_error and (
+            not settings.firmware.mirror_enabled or bool(mirror.get("ready"))
+        )
+
+        effective_settings = {
+            "dashboard_title": {
+                "label": "Dashboard title",
+                "value": settings.title,
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "home_assistant_entity_source": {
+                "label": "Home Assistant entity source",
+                "value": settings.mqtt.entity_source,
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "mqtt_enabled": {
+                "label": "MQTT enabled",
+                "value": settings.mqtt.enabled,
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "mqtt_endpoint": {
+                "label": "MQTT endpoint",
+                "value": _safe_host_port(settings.mqtt.host, settings.mqtt.port),
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "mqtt_credentials": {
+                "label": "MQTT credentials",
+                "value": "configured" if settings.mqtt.username or settings.mqtt.password else "not configured",
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+                "sensitive": True,
+            },
+            "bridge_api_key": {
+                "label": "Bridge API key",
+                "value": "configured" if settings.api_key else "not configured",
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+                "sensitive": True,
+            },
+            "screen_history_enabled": {
+                "label": "Screen history",
+                "value": settings.screen_history.enabled,
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "screen_history_limit": {
+                "label": "Screen history limit",
+                "value": settings.screen_history.limit,
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+            "flexhub_endpoint": {
+                "label": "FlexHub endpoint",
+                "value": effective_flexhub_url,
+                "configured_value": (
+                    configured_flexhub_url if flexhub_url_override else ""
+                ),
+                "configured_label": "Home Assistant App option",
+                "source": flexhub_health.get("url_configuration_source")
+                or "not_configured",
+                "apply_state": flexhub_apply_state,
+                "owner": (
+                    "Bridge saved state"
+                    if flexhub_health.get("saved_url_authoritative")
+                    else "Home Assistant App"
+                ),
+                "detail": (
+                    "A saved Bridge disconnect overrides the Home Assistant App option."
+                    if flexhub_apply_state == "saved_disconnect"
+                    else (
+                        "Saved Bridge connection settings override the Home Assistant App option."
+                    )
+                    if flexhub_apply_state == "saved_override"
+                    else ""
+                ),
+            },
+            "flexhub_access_pin": {
+                "label": "FlexHub access PIN",
+                "value": (
+                    "configured"
+                    if flexhub_health.get("access_pin_configured")
+                    else "not configured"
+                ),
+                "source": flexhub_health.get("pin_configuration_source")
+                or "not_configured",
+                "apply_state": (
+                    "saved_override" if flexhub_pin_saved else "effective"
+                ),
+                "owner": (
+                    "Bridge saved state"
+                    if flexhub_health.get("saved_pin_authoritative")
+                    else "Home Assistant App"
+                ),
+                "sensitive": True,
+                "detail": (
+                    "A saved Bridge PIN overrides the Home Assistant App option."
+                    if flexhub_pin_saved
+                    else ""
+                ),
+            },
+            "x_series_firmware": {
+                "label": "X3/X4 firmware",
+                "value": settings.firmware.version,
+                "configured_value": configured_firmware_version,
+                "source": firmware_source,
+                "apply_state": (
+                    "resolved_override"
+                    if configured_firmware_version
+                    and configured_firmware_version != settings.firmware.version
+                    else "effective"
+                ),
+                "owner": firmware_owner,
+                "detail": (
+                    "A known legacy Home Assistant option was resolved to the packaged release."
+                    if configured_firmware_version
+                    and configured_firmware_version != settings.firmware.version
+                    else ""
+                ),
+            },
+            "firmware_maintenance_window": {
+                "label": "Firmware maintenance window",
+                "value": (
+                    f"{maintenance['start']}-{maintenance['end']} {maintenance['timezone']}"
+                    if maintenance["enabled"]
+                    else "Disabled"
+                ),
+                "source": "bridge_configuration",
+                "apply_state": "effective",
+                "owner": "Home Assistant App",
+            },
+        }
+
+        return {
+            "bridge": {
+                "status": "running",
+                "version": __version__,
+                "detail": "Serving Studio and device check-ins.",
+                "owner": "Home Assistant App",
+            },
+            "connections": {
+                "home_assistant": {
+                    "configured": ha.configured,
+                    "status": "configured" if ha.configured else "not_configured",
+                    "detail": (
+                        "API credentials are configured; connectivity is verified when entities are requested."
+                        if ha.configured
+                        else "Home Assistant API credentials are not configured."
+                    ),
+                    "owner": "Home Assistant App",
+                },
+                "mqtt": {
+                    "enabled": settings.mqtt.enabled,
+                    "connected": mqtt.connected,
+                    "status": (
+                        "connected"
+                        if mqtt.connected
+                        else "disconnected"
+                        if settings.mqtt.enabled
+                        else "disabled"
+                    ),
+                    "endpoint": _safe_host_port(
+                        settings.mqtt.host, settings.mqtt.port
+                    ),
+                    "discovery_enabled": mqtt.discovery_enabled,
+                    "detail": (
+                        "Discovery and device state publishing are available."
+                        if mqtt.connected and mqtt.discovery_enabled
+                        else "MQTT is connected; discovery is disabled while HACS owns entities."
+                        if mqtt.connected
+                        else "MQTT is enabled but the Bridge is not connected."
+                        if settings.mqtt.enabled
+                        else "MQTT is disabled."
+                    ),
+                    "owner": "Home Assistant App",
+                },
+                "flexhub": {
+                    "configured": bool(flexhub_health.get("configured")),
+                    "connected": bool(flexhub_health.get("connected")),
+                    "status": (
+                        "connected"
+                        if flexhub_health.get("connected")
+                        else "disconnected"
+                        if flexhub_health.get("configured")
+                        else "not_configured"
+                    ),
+                    "display_url": effective_flexhub_url,
+                    "last_seen": flexhub_health.get("last_seen") or "",
+                    "detail": _public_flexhub_error(flexhub_health.get("error"))
+                    or (
+                        "FlexHub is operational."
+                        if flexhub_health.get("connected")
+                        else "FlexHub is configured but is not currently connected."
+                        if flexhub_health.get("configured")
+                        else "No FlexHub endpoint is configured."
+                    ),
+                    "owner": (
+                        "Bridge saved state"
+                        if flexhub_saved
+                        else "Home Assistant App"
+                    ),
+                },
+            },
+            "effective_settings": effective_settings,
+            "firmware_channels": {
+                "x_series": {
+                    "label": "XTEINK X3/X4",
+                    "status": (
+                        "ready"
+                        if x_channel_ready
+                        else "invalid"
+                        if x_metadata_error
+                        else mirror.get("state") or "not_ready"
+                    ),
+                    "version": settings.firmware.version,
+                    "family": "X3 and X4 only",
+                    "track": "xteink",
+                    "owner": firmware_owner,
+                    "source": firmware_source,
+                    "detail": (
+                        "Verified local mirror is ready for capability-gated rollout."
+                        if settings.firmware.mirror_enabled and mirror.get("ready")
+                        else "Direct firmware delivery is configured; local mirroring is disabled."
+                        if x_channel_ready
+                        else x_metadata_error
+                        or _public_firmware_error(mirror.get("last_error"))
+                        or "The local firmware mirror is not ready."
+                    ),
+                },
+                "note4": {
+                    "label": "Zectrix Note4",
+                    "status": "configured" if not note4_metadata_error else "not_configured",
+                    "version": settings.note4_firmware.version,
+                    "configured_version": configured_note4_version,
+                    "family": "Note4 only",
+                    "track": "note4",
+                    "owner": note4_owner,
+                    "source": note4_source,
+                    "detail": (
+                        "Delivered through the dedicated Note4 firmware channel."
+                        if not note4_metadata_error
+                        else note4_metadata_error
+                    ),
+                },
+                "android_receiver": {
+                    "label": "Amazon Android receivers",
+                    "status": "external",
+                    "version": "Managed on device",
+                    "family": "Echo Spot and Echo Show 5",
+                    "track": "android_app",
+                    "owner": "Android receiver app",
+                    "detail": "Android application updates never use ESP firmware rollout.",
+                },
+                "generic_embedded": {
+                    "label": "Generic ESP displays",
+                    "status": "unmanaged",
+                    "version": "No trusted release",
+                    "family": "Unclassified ESP and LCD devices",
+                    "track": "none",
+                    "owner": "Device-specific integration",
+                    "detail": "Unknown devices fail closed until a trusted firmware provider is added.",
+                },
+            },
+            "links": {
+                "home_assistant_app_settings": {
+                    "label": "Home Assistant Apps",
+                    "url": _home_assistant_apps_url(request),
+                    "owner": "Home Assistant",
+                    "description": (
+                        "Open Apps, select FlexDisplay Bridge, then manage lifecycle "
+                        "settings, credentials, network ports, and restart-required options."
+                    ),
+                },
+                "bridge_health": {
+                    "label": "Bridge health JSON",
+                    "url": "../healthz",
+                    "owner": "FlexDisplay Bridge",
+                    "description": "Open the small redacted runtime health response.",
+                    "external": False,
+                },
             },
         }
 
@@ -2366,7 +3171,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         try:
             path = firmware_mirror.prepare(settings.firmware)
         except FirmwareMirrorError as err:
-            raise HTTPException(status_code=503, detail=str(err)) from err
+            raise HTTPException(
+                status_code=503,
+                detail=_public_firmware_error(str(err)),
+            ) from err
         return FileResponse(
             path,
             media_type="application/octet-stream",
@@ -2411,11 +3219,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         try:
             path = firmware_mirror.prepare(settings.firmware, force=True)
         except FirmwareMirrorError as err:
-            raise HTTPException(status_code=503, detail=str(err)) from err
+            raise HTTPException(
+                status_code=503,
+                detail=_public_firmware_error(str(err)),
+            ) from err
         return {
             "refreshed": True,
-            "path": str(path),
-            "mirror": firmware_mirror.status(settings.firmware),
+            "mirror": _public_mirror_status(
+                firmware_mirror.status(settings.firmware)
+            ),
         }
 
     @app.get("/api/v1/devices")
@@ -3382,7 +4194,25 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
         except KeyError as err:
             raise HTTPException(status_code=404, detail="Album not found") from err
-        store.provision(selected, {"assigned_mode": "photo_frame"})
+        existing = store.get(selected)
+        inferred_model = (
+            "XTEINK_X4"
+            if not existing and selected.upper().startswith("X4-")
+            else "XTEINK_X3"
+            if not existing and selected.upper().startswith("X3-")
+            else ""
+        )
+        store.provision(
+            selected,
+            {
+                "assigned_mode": "photo_frame",
+                **(
+                    {"model": inferred_model, "model_reported": None}
+                    if inferred_model
+                    else {}
+                ),
+            },
+        )
         store.queue_command(selected, "refresh")
         return assignment
 
@@ -3535,26 +4365,37 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             current = store.get(selected)
             if not current:
                 raise HTTPException(status_code=404, detail="Device has not checked in")
-            blockers = _firmware_install_blockers(current, settings, store)
-            if blockers:
-                raise HTTPException(status_code=409, detail="; ".join(blockers))
+            descriptor = _device_capabilities(current)
+            if not descriptor.firmware.manageable:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "No firmware release is configured"
+                        if descriptor.family == "android_receiver"
+                        else "Firmware installation is not managed by the Bridge for "
+                        "this device family"
+                    ),
+                )
             try:
-                firmware = _device_firmware(settings, current)
-                if _is_note4(current):
-                    record = store.queue_device_firmware_install(
-                        selected,
-                        firmware.version,
-                    )
-                else:
-                    record = store.queue_firmware_install(
-                        selected,
-                        firmware.version,
-                        canary_required=firmware.canary_required,
-                        max_parallel=firmware.max_parallel,
-                    )
+                record = queue_firmware_for_device(selected, current)
             except ValueError as err:
                 raise HTTPException(status_code=409, detail=str(err)) from err
         else:
+            current = store.get(selected)
+            if current:
+                descriptor = _device_capabilities(current)
+                page_command = bool(re.fullmatch(r"page-[1-9][0-9]?", command))
+                if (
+                    command not in descriptor.management.actions
+                    and not (
+                        page_command
+                        and descriptor.management.supports_page_selection
+                    )
+                ):
+                    raise HTTPException(
+                        status_code=409,
+                        detail="Command is not supported by this device family",
+                    )
             record = store.queue_command(selected, command)
         return {"queued": command, "device": record}
 
@@ -3703,10 +4544,30 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        descriptor = _device_capabilities(current)
+        if not descriptor.management.supports_provisioning:
+            raise HTTPException(
+                status_code=409,
+                detail="Provisioning is not supported for this device family",
+            )
         assignment = _provisioning_assignment(payload, selected, dashboards.names())
         if not assignment:
             raise HTTPException(
                 status_code=400, detail="No provisioning fields supplied"
+            )
+        assignment, skipped = _filter_provisioning_assignment(
+            assignment, descriptor
+        )
+        if skipped:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "These settings are not supported for this device family: "
+                    + ", ".join(sorted(skipped))
+                ),
             )
         assignment["assigned_policy_name"] = "custom"
         assignment["assigned_policy_revision"] = store.next_policy_revision()
@@ -3747,7 +4608,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "require_usb_for_canary": settings.firmware.require_usb_for_canary,
                 "max_parallel": settings.firmware.max_parallel,
                 "maintenance": maintenance,
-                "mirror": firmware_mirror.status(settings.firmware),
+                "mirror": _public_mirror_status(
+                    firmware_mirror.status(settings.firmware)
+                ),
                 "rollout": rollout,
             },
             "dashboard_profiles": dashboards.names(),
@@ -3780,6 +4643,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "device_id": record.get("device_id"),
                     "name": record.get("name"),
                     "model": record.get("model"),
+                    "device_family": record.get("device_family"),
+                    "firmware_provider": record.get("firmware_provider"),
+                    "supported_actions": record.get("supported_actions") or [],
+                    "device_capabilities": record.get("device_capabilities") or {},
                     "online": record.get("online"),
                     "power_state": record.get("power_state"),
                     "battery_percent": record.get("battery_percent"),
@@ -3924,6 +4791,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             for device_id in (payload.get("device_ids") or [])
         }
         scoped_records = fleet_scope_records(scope, requested_ids)
+        excluded: dict[str, str] = {}
 
         overrides = payload.get("overrides") or {}
         if not isinstance(overrides, dict):
@@ -3950,9 +4818,27 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             merged["mode"] = "photo_frame"
         revision = store.next_policy_revision()
         targets: list[str] = []
+        filtered_fields: dict[str, list[str]] = {}
         for record in scoped_records:
             device_id = str(record.get("device_id") or "")
+            descriptor = _device_capabilities(record)
+            if not descriptor.management.supports_fleet_policy:
+                excluded[device_id] = (
+                    "Device does not advertise a compatible fleet policy contract"
+                )
+                continue
             assignment = _provisioning_assignment(merged, device_id, dashboards.names())
+            assignment, skipped = _filter_provisioning_assignment(
+                assignment, descriptor
+            )
+            if "mode" in skipped:
+                excluded[device_id] = (
+                    f"Mode {selected_mode or merged.get('mode')} is not supported "
+                    "by this device family"
+                )
+                continue
+            if skipped:
+                filtered_fields[device_id] = sorted(skipped)
             assignment["assigned_policy_name"] = policy_id
             assignment["assigned_policy_revision"] = revision
             store.provision(device_id, assignment)
@@ -3976,6 +4862,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "dashboard_profile": dashboard_profile,
             "photo_album": photo_album,
             "targets": targets,
+            "excluded": excluded,
+            "filtered_fields": filtered_fields,
             "pending_acknowledgements": len(targets),
         }
 
@@ -4000,16 +4888,30 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             for device_id in (payload.get("device_ids") or [])
         }
         records = fleet_scope_records(scope, requested_ids)
+        eligible_records: list[dict[str, Any]] = []
+        excluded: dict[str, str] = {}
+        for record in records:
+            device_id = str(record.get("device_id") or "")
+            if _device_capabilities(record).supports_xteink_ota:
+                eligible_records.append(record)
+            else:
+                excluded[device_id] = (
+                    "Device is not eligible for the X3/X4 firmware channel"
+                )
         targets = [
             str(record.get("device_id") or "")
-            for record in records
+            for record in eligible_records
             if _firmware_version(target)
             > _firmware_version(str(record.get("firmware") or ""))
         ]
         if not targets:
             raise HTTPException(
                 status_code=409,
-                detail="No selected device requires this firmware release",
+                detail=(
+                    "No selected device is eligible for this X3/X4 firmware release"
+                    if records and not eligible_records
+                    else "No selected device requires this firmware release"
+                ),
             )
         try:
             store.plan_firmware_rollout(
@@ -4026,6 +4928,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "target_version": target,
             "scope": scope,
             "targets": targets,
+            "excluded": excluded,
             **advanced,
         }
 
@@ -4235,7 +5138,24 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         device_id = _device_id(x_flexdisplay_id)
         width = _integer(x_flexdisplay_width, 480, 240, 1200)
         height = _integer(x_flexdisplay_height, 800, 240, 1600)
-        model = x_flexdisplay_model or ("X4" if device_id.startswith("X4-") else "X3")
+        existing_record = store.get(device_id) or {}
+        if x_flexdisplay_model:
+            model = x_flexdisplay_model
+        elif existing_record.get("model") and existing_record.get("model_reported") is True:
+            # A transient omission must never replace an explicitly observed
+            # family with a legacy device-ID inference.
+            model = str(existing_record["model"])
+        elif device_id.upper().startswith("X4-"):
+            model = "X4"
+        elif device_id.upper().startswith("X3-"):
+            model = "X3"
+        elif device_id.upper().startswith("N4-"):
+            model = "N4"
+        else:
+            # Unknown identities may render through the shared protocol, but
+            # must not inherit an X3 firmware provider from a historical UI
+            # default. The device can advertise an explicit model next check-in.
+            model = "UNKNOWN"
         device_firmware = _device_firmware(settings, model)
         capabilities = _capabilities(x_flexdisplay_capabilities)
         image_cached = bool(_boolean(x_flexdisplay_image_cached))
@@ -4245,8 +5165,26 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             else None
         )
         one_bit_bytes = ((width + 7) // 8) * height
+        model_source_reported = bool(x_flexdisplay_model)
+        model_source_inferred = bool(
+            not model_source_reported
+            and existing_record.get("model")
+            and model != "UNKNOWN"
+            and existing_record.get("last_seen") is None
+        )
         telemetry = {
             "model": model,
+            "model_reported": (
+                True
+                if model_source_reported
+                or (
+                    not model_source_reported
+                    and existing_record.get("model_reported") is True
+                )
+                else None
+                if model_source_inferred
+                else False
+            ),
             "width": width,
             "height": height,
             "firmware": x_flexdisplay_firmware or "0.4.0",
@@ -4331,34 +5269,135 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "content_pack_error": content_assignment.get("error"),
                 },
             )
-        configured = settings.device(device_id, width, height, model)
-        if settings.provisioning.enabled:
+        descriptor = _device_capabilities(record)
+        allowed_actions = set(descriptor.management.actions)
+        stale_commands = sorted(
+            {
+                str(command)
+                for command in (
+                    list(record.get("pending_commands") or [])
+                    + list(record.get("dispatched_commands") or [])
+                )
+                if (
+                    str(command) != "install"
+                    and str(command) not in allowed_actions
+                    and not (
+                        descriptor.management.supports_page_selection
+                        and re.fullmatch(r"page-[1-9][0-9]*", str(command))
+                    )
+                )
+            }
+        )
+        for stale_command in stale_commands:
+            record = (
+                store.remove_command(
+                    device_id,
+                    stale_command,
+                    reason="capability-reconciled",
+                )
+                or record
+            )
+        configured = _capability_normalized_config(
+            settings.device(device_id, width, height, model),
+            descriptor,
+        )
+        default_assignment = {
+            "assigned_name": configured.name,
+            "assigned_area": configured.area,
+            "assigned_profile": configured.profile,
+            "assigned_mode": configured.mode,
+            "assigned_auto_start": configured.auto_start,
+            "assigned_refresh_interval_seconds": configured.refresh_interval_seconds,
+            "assigned_live_mode": configured.live_mode,
+            "assigned_manual_sleep_seconds": configured.manual_sleep_seconds,
+            "assigned_intelligent_sleep": configured.intelligent_sleep,
+            "assigned_active_start": configured.active_start,
+            "assigned_active_end": configured.active_end,
+            "assigned_timezone": configured.timezone,
+            "assigned_critical_battery_percent": configured.critical_battery_percent,
+            "assigned_low_battery_percent": configured.low_battery_percent,
+            "assigned_low_battery_multiplier": configured.low_battery_multiplier,
+            "assigned_unchanged_image_multiplier": configured.unchanged_image_multiplier,
+            "assigned_stay_awake_on_usb": configured.stay_awake_on_usb,
+            "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
+            "assigned_rendering_profile": configured.rendering_profile,
+            "assigned_open_display_transport_policy": (
+                configured.open_display_transport_policy
+            ),
+        }
+        filtered_assignment, _ = _filter_provisioning_assignment(
+            default_assignment, descriptor
+        )
+        incompatible_fields = {
+            key
+            for key in default_assignment
+            if key not in filtered_assignment and key in record
+        }
+        incompatible_mode = str(record.get("assigned_mode") or "")
+        if (
+            incompatible_mode
+            and incompatible_mode not in descriptor.management.modes
+        ):
+            record = (
+                store.remove_provisioning_fields(
+                    device_id,
+                    {"assigned_mode"},
+                    reason="unsupported-mode",
+                )
+                or record
+            )
+        record = (
+            store.remove_provisioning_fields(
+                device_id,
+                incompatible_fields,
+            )
+            or record
+        )
+        provisioning_enabled = bool(
+            settings.provisioning.enabled
+            and descriptor.management.supports_provisioning
+        )
+        if provisioning_enabled:
             record = store.ensure_provisioning(
                 device_id,
-                {
-                    "assigned_name": configured.name,
-                    "assigned_area": configured.area,
-                    "assigned_profile": configured.profile,
-                    "assigned_mode": configured.mode,
-                    "assigned_auto_start": configured.auto_start,
-                    "assigned_refresh_interval_seconds": configured.refresh_interval_seconds,
-                    "assigned_live_mode": configured.live_mode,
-                    "assigned_manual_sleep_seconds": configured.manual_sleep_seconds,
-                    "assigned_intelligent_sleep": configured.intelligent_sleep,
-                    "assigned_active_start": configured.active_start,
-                    "assigned_active_end": configured.active_end,
-                    "assigned_timezone": configured.timezone,
-                    "assigned_critical_battery_percent": configured.critical_battery_percent,
-                    "assigned_low_battery_percent": configured.low_battery_percent,
-                    "assigned_low_battery_multiplier": configured.low_battery_multiplier,
-                    "assigned_unchanged_image_multiplier": configured.unchanged_image_multiplier,
-                    "assigned_stay_awake_on_usb": configured.stay_awake_on_usb,
-                    "assigned_manual_wake_grace_seconds": configured.manual_wake_grace_seconds,
-                    "assigned_rendering_profile": configured.rendering_profile,
-                    "assigned_open_display_transport_policy": (
-                        configured.open_display_transport_policy
-                    ),
-                },
+                filtered_assignment,
+            )
+        descriptor = _device_capabilities(record)
+        install_active = bool(
+            "install" in (record.get("pending_commands") or [])
+            or "install" in (record.get("dispatched_commands") or [])
+        )
+        if install_active:
+            expected_firmware = _device_firmware(settings, record)
+            queued_provider = str(record.get("firmware_update_provider") or "")
+            if not queued_provider:
+                queued_role = str(record.get("firmware_update_role") or "")
+                queued_provider = (
+                    "note4"
+                    if queued_role == "device"
+                    else "xteink"
+                    if queued_role in {"canary", "fleet"}
+                    else ""
+                )
+            queued_target = str(record.get("firmware_update_target") or "")
+            install_compatible = bool(
+                descriptor.firmware.manageable
+                and queued_provider == descriptor.firmware.provider
+                and queued_target
+                and queued_target == expected_firmware.version
+            )
+        else:
+            install_compatible = True
+        if not install_compatible:
+            # Cancel legacy or stale commands before they can cross firmware
+            # providers after a corrected model check-in.
+            record = (
+                store.remove_command(
+                    device_id,
+                    "install",
+                    reason="firmware-channel-mismatch",
+                )
+                or record
             )
         button_events = _button_events(
             x_flexdisplay_button_events,
@@ -4468,7 +5507,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
                 if command_id:
                     response.headers["X-FlexDisplay-Command-ID"] = command_id
-                if settings.provisioning.enabled:
+                if provisioning_enabled:
                     response.headers["X-FlexDisplay-Provisioned"] = "true"
                     response.headers["X-FlexDisplay-Device-Name"] = _header_value(
                         profile.name
@@ -4671,7 +5710,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
                 profile.manual_wake_grace_seconds
             )
-            if settings.provisioning.enabled:
+            if provisioning_enabled:
                 response.headers["X-FlexDisplay-Provisioned"] = "true"
                 response.headers["X-FlexDisplay-Device-Name"] = _header_value(
                     profile.name
@@ -4993,7 +6032,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["X-FlexDisplay-Manual-Wake-Grace"] = str(
             profile.manual_wake_grace_seconds
         )
-        if settings.provisioning.enabled:
+        if provisioning_enabled:
             response.headers["X-FlexDisplay-Provisioned"] = "true"
             response.headers["X-FlexDisplay-Device-Name"] = _header_value(profile.name)
             response.headers["X-FlexDisplay-Area"] = _header_value(profile.area)

@@ -38,6 +38,8 @@ class FlexHubClient:
         self._request_lock = threading.Lock()
         self._url = ""
         self._access_pin = ""
+        self._configuration_source = "not_configured"
+        self._has_saved_configuration = False
         self._status: dict[str, Any] = {}
         self._last_seen = ""
         self._error = ""
@@ -53,6 +55,12 @@ class FlexHubClient:
         self._meshtastic_seen: list[str] = []
         self._meshtastic_initialized = False
         self._last_meshtastic_send = 0.0
+        self._default_url = ""
+        self._default_access_pin = ""
+        self._url_configuration_source = "not_configured"
+        self._pin_configuration_source = "not_configured"
+        self._saved_url_authoritative = False
+        self._saved_pin_authoritative = False
         self._load(default_url, default_access_pin)
 
     @staticmethod
@@ -60,7 +68,10 @@ class FlexHubClient:
         candidate = str(value or "").strip().rstrip("/")
         if not candidate:
             return ""
-        parsed = urlparse(candidate)
+        try:
+            parsed = urlparse(candidate)
+        except ValueError as err:
+            raise FlexHubClientError("FlexHub URL is malformed") from err
         if parsed.scheme not in {"http", "https"} or not parsed.hostname:
             raise FlexHubClientError("FlexHub URL must start with http:// or https://")
         if (
@@ -75,6 +86,10 @@ class FlexHubClient:
             )
         if len(candidate) > 240:
             raise FlexHubClientError("FlexHub URL is too long")
+        try:
+            parsed.port
+        except ValueError as err:
+            raise FlexHubClientError("FlexHub URL contains an invalid port") from err
         normalized_path = parsed.path.rstrip("/")
         supported_paths = {"", "/flexhub", "/meshtastic", "/api/flexhub/status"}
         if normalized_path not in supported_paths:
@@ -84,6 +99,30 @@ class FlexHubClient:
                 "/api/flexhub/status may be pasted after it"
             )
         return f"{parsed.scheme}://{parsed.netloc}"
+
+    @staticmethod
+    def _pin_value(value: str) -> str:
+        candidate = str(value or "")
+        if not candidate:
+            return ""
+        if len(candidate) > 64 or any(
+            not 0x21 <= ord(character) <= 0x7E for character in candidate
+        ):
+            raise FlexHubClientError(
+                "FlexHub access PIN must use at most 64 visible ASCII characters"
+            )
+        return candidate
+
+    @staticmethod
+    def _request_failure(error: requests.RequestException) -> str:
+        """Map request failures without retaining headers, URLs, or credentials."""
+        if isinstance(error, requests.Timeout):
+            return "FlexHub connection timed out"
+        if isinstance(error, requests.ConnectionError):
+            return "FlexHub could not be reached"
+        if isinstance(error, requests.exceptions.InvalidHeader):
+            return "FlexHub request configuration is invalid"
+        return "FlexHub request failed"
 
     @staticmethod
     def _route_urls(url: str) -> dict[str, str]:
@@ -103,22 +142,95 @@ class FlexHubClient:
 
     def _load(self, default_url: str, default_access_pin: str) -> None:
         payload: dict[str, Any] = {}
+        has_saved_configuration = False
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
             if isinstance(loaded, dict):
                 payload = loaded
+                has_saved_configuration = "url" in payload or "access_pin" in payload
         except (FileNotFoundError, OSError, ValueError):
             pass
-        self._url = self._url_value(str(payload.get("url") or default_url or ""))
-        self._access_pin = str(payload.get("access_pin") or default_access_pin or "")[
-            :64
-        ]
+        complete_saved_configuration = bool(
+            has_saved_configuration
+            and (
+                payload.get("saved_override_schema") == 1
+                or ("url" in payload and "access_pin" in payload)
+            )
+        )
+        self._default_url = self._url_value(str(default_url or ""))
+        invalid_pin = False
+        try:
+            self._default_access_pin = self._pin_value(default_access_pin)
+        except FlexHubClientError:
+            self._default_access_pin = ""
+            invalid_pin = True
+        saved_url_present = "url" in payload
+        saved_pin_present = "access_pin" in payload
+        self._saved_url_authoritative = bool(
+            complete_saved_configuration
+            or (saved_url_present and payload.get("url"))
+        )
+        self._saved_pin_authoritative = bool(
+            complete_saved_configuration
+            or (saved_pin_present and payload.get("access_pin"))
+        )
+        selected_url = (
+            payload.get("url", "")
+            if complete_saved_configuration
+            else payload.get("url") or default_url
+            if has_saved_configuration
+            else default_url
+        )
+        selected_pin = (
+            payload.get("access_pin", "")
+            if complete_saved_configuration
+            else payload.get("access_pin") or default_access_pin
+            if has_saved_configuration
+            else default_access_pin
+        )
+        self._url = self._url_value(str(selected_url or ""))
+        try:
+            self._access_pin = self._pin_value(str(selected_pin or ""))
+        except FlexHubClientError:
+            self._access_pin = ""
+            invalid_pin = True
+        self._configuration_source = (
+            "bridge_saved"
+            if has_saved_configuration
+            else "bridge_configuration"
+            if self._url or self._access_pin
+            else "not_configured"
+        )
+        self._url_configuration_source = (
+            "bridge_saved"
+            if self._saved_url_authoritative
+            else "bridge_configuration"
+            if self._url
+            else "not_configured"
+        )
+        self._pin_configuration_source = (
+            "bridge_saved"
+            if self._saved_pin_authoritative
+            else "bridge_configuration"
+            if self._access_pin
+            else "not_configured"
+        )
+        self._has_saved_configuration = has_saved_configuration
+        if invalid_pin:
+            self._error = "FlexHub access PIN is invalid; update it in Studio"
 
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(f"{self.path.suffix}.tmp")
         temporary.write_text(
-            json.dumps({"url": self._url, "access_pin": self._access_pin}, indent=2),
+            json.dumps(
+                {
+                    "saved_override_schema": 1,
+                    "url": self._url,
+                    "access_pin": self._access_pin,
+                },
+                indent=2,
+            ),
             encoding="utf-8",
         )
         temporary.replace(self.path)
@@ -130,9 +242,16 @@ class FlexHubClient:
 
     def configure(self, url: str, access_pin: str = "") -> dict[str, Any]:
         normalized = self._url_value(url)
+        normalized_pin = self._pin_value(access_pin)
         with self._lock:
             self._url = normalized
-            self._access_pin = str(access_pin or "")[:64]
+            self._access_pin = normalized_pin
+            self._configuration_source = "bridge_saved"
+            self._has_saved_configuration = True
+            self._url_configuration_source = "bridge_saved"
+            self._pin_configuration_source = "bridge_saved"
+            self._saved_url_authoritative = True
+            self._saved_pin_authoritative = True
             self._status = {}
             self._last_seen = ""
             self._error = "Not configured" if not normalized else "Waiting for FlexHub"
@@ -173,12 +292,9 @@ class FlexHubClient:
                     allow_redirects=False,
                 )
             if 300 <= response.status_code < 400:
-                destination = str(
-                    response.headers.get("Location") or "another address"
-                )[:160]
                 raise FlexHubClientError(
-                    f"FlexHub status endpoint redirected to {destination}; "
-                    "use the hub's direct http:// or https:// base address"
+                    "FlexHub status endpoint redirected; use the hub's direct "
+                    "http:// or https:// base address"
                 )
             if response.status_code == 401:
                 raise FlexHubClientError(
@@ -210,7 +326,11 @@ class FlexHubClient:
                 raise FlexHubClientError("FlexHub returned an invalid status response")
         except (requests.RequestException, FlexHubClientError) as exc:
             with self._lock:
-                self._error = str(exc)[:240]
+                self._error = (
+                    self._request_failure(exc)
+                    if isinstance(exc, requests.RequestException)
+                    else str(exc)[:240]
+                )
             return self.summary()
 
         with self._lock:
@@ -251,7 +371,7 @@ class FlexHubClient:
                 else:
                     response = requests.post(f"{url}{path}", **request_kwargs)
         except requests.RequestException as exc:
-            raise FlexHubClientError(f"FlexHub request failed: {exc}") from exc
+            raise FlexHubClientError(self._request_failure(exc)) from exc
         if 300 <= response.status_code < 400:
             raise FlexHubClientError("FlexHub API redirected unexpectedly")
         if response.status_code == 401:
@@ -259,14 +379,26 @@ class FlexHubClient:
                 "FlexHub rejected the access PIN (HTTP 401)", status_code=401
             )
         if response.status_code >= 400:
-            detail = ""
+            remote_detail = ""
             try:
                 failure = response.json()
                 if isinstance(failure, dict):
-                    detail = str(failure.get("detail") or failure.get("error") or "")
+                    remote_detail = str(
+                        failure.get("detail") or failure.get("error") or ""
+                    ).lower()
             except ValueError:
-                detail = str(response.text or "")
-            detail = re.sub(r"\s+", " ", detail).strip()[:180]
+                pass
+            # Convert only known conflict categories to fixed local wording;
+            # never reflect arbitrary remote response bodies into APIs or MQTT.
+            detail = (
+                "Hub is busy"
+                if response.status_code == 409 and "busy" in remote_detail
+                else "Requested action is already active"
+                if response.status_code == 409 and "already" in remote_detail
+                else "No active FlexHub task"
+                if response.status_code == 409 and "no active" in remote_detail
+                else ""
+            )
             suffix = f": {detail}" if detail else ""
             raise FlexHubClientError(
                 f"FlexHub API request failed (HTTP {response.status_code}){suffix}",
@@ -520,6 +652,16 @@ class FlexHubClient:
                 "configured": bool(self._url),
                 "connected": bool(self._status) and not self._error,
                 "url": self._url,
+                "configuration_source": self._configuration_source,
+                "saved_configuration": self._has_saved_configuration,
+                "url_configuration_source": self._url_configuration_source,
+                "pin_configuration_source": self._pin_configuration_source,
+                "saved_url_authoritative": self._saved_url_authoritative,
+                "saved_pin_authoritative": self._saved_pin_authoritative,
+                "saved_url_override": bool(
+                    self._has_saved_configuration
+                    and self._url != self._default_url
+                ),
                 "access_pin_configured": bool(self._access_pin),
                 "last_seen": self._last_seen,
                 "error": self._error,

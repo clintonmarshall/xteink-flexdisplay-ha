@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import management_supports
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -156,13 +157,30 @@ class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
 def _entities_for_device(
     coordinator: FlexDisplayCoordinator, device_id: str
 ) -> tuple[NumberEntity, ...]:
-    entities: list[NumberEntity] = [
-        FlexDisplayNumber(coordinator, device_id, description)
-        for description in DESCRIPTIONS
-    ]
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
+    entities: list[NumberEntity] = [
+        FlexDisplayNumber(coordinator, device_id, description)
+        for description in DESCRIPTIONS
+        if (
+            description.key == "refresh_interval"
+            and management_supports(record, "fleet_policy")
+        )
+        or (
+            description.key in {"manual_sleep_duration", "manual_wake_grace"}
+            and management_supports(record, "sleep_policy")
+        )
+        or (
+            description.key
+            in {"critical_battery", "low_battery", "low_battery_multiplier"}
+            and management_supports(record, "battery_policy")
+        )
+        or (
+            description.key == "unchanged_image_multiplier"
+            and management_supports(record, "rendering_profile")
+        )
+    ]
     if str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}:
         entities.append(FlexDisplayVoiceVolume(coordinator, device_id))
     return tuple(entities)

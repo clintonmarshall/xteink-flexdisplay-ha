@@ -8,7 +8,7 @@ import requests
 from fastapi.testclient import TestClient
 from flexdisplay_bridge.app import create_app
 from flexdisplay_bridge.config import BridgeConfig, MqttConfig
-from flexdisplay_bridge.flexhub_client import FlexHubClient
+from flexdisplay_bridge.flexhub_client import FlexHubClient, FlexHubClientError
 from flexdisplay_bridge.mqtt_service import MqttService
 
 
@@ -106,7 +106,176 @@ def test_flexhub_client_persists_configuration_and_polls(
         )
     ]
     assert json.loads(path.read_text(encoding="utf-8"))["url"] == "http://10.200.40.55"
-    assert FlexHubClient(path).summary()["access_pin_configured"] is True
+    restored = FlexHubClient(path).summary()
+    assert restored["access_pin_configured"] is True
+    assert restored["configuration_source"] == "bridge_saved"
+    assert restored["saved_configuration"] is True
+
+
+def test_flexhub_client_does_not_restore_bridge_default_after_saved_disconnect(
+    tmp_path: Path,
+) -> None:
+    path = tmp_path / "flexhub.json"
+    client = FlexHubClient(
+        path,
+        default_url="http://home-assistant-option.test",
+        default_access_pin="default-pin",
+    )
+    assert client.summary()["configuration_source"] == "bridge_configuration"
+
+    client.configure("", "")
+    restored = FlexHubClient(
+        path,
+        default_url="http://home-assistant-option.test",
+        default_access_pin="default-pin",
+    ).summary()
+
+    assert restored["configured"] is False
+    assert restored["access_pin_configured"] is False
+    assert restored["configuration_source"] == "bridge_saved"
+    assert restored["saved_configuration"] is True
+
+
+@pytest.mark.parametrize(
+    ("saved", "expected_url", "pin_configured"),
+    [
+        ({"url": "http://saved.test"}, "http://saved.test", True),
+        ({"access_pin": "saved-pin"}, "http://default.test", True),
+    ],
+)
+def test_flexhub_partial_legacy_state_merges_missing_default_field(
+    tmp_path: Path,
+    saved: dict[str, str],
+    expected_url: str,
+    pin_configured: bool,
+) -> None:
+    path = tmp_path / "flexhub.json"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+    summary = FlexHubClient(
+        path,
+        default_url="http://default.test",
+        default_access_pin="default-pin",
+    ).summary()
+
+    assert summary["url"] == expected_url
+    assert summary["access_pin_configured"] is pin_configured
+    assert summary["configuration_source"] == "bridge_saved"
+
+
+@pytest.mark.parametrize(
+    "saved",
+    [{"url": ""}, {"access_pin": ""}],
+)
+def test_flexhub_empty_partial_legacy_state_preserves_default_field(
+    tmp_path: Path, saved: dict[str, str]
+) -> None:
+    path = tmp_path / "flexhub.json"
+    path.write_text(json.dumps(saved), encoding="utf-8")
+
+    summary = FlexHubClient(
+        path,
+        default_url="http://default.test",
+        default_access_pin="default-pin",
+    ).summary()
+
+    assert summary["url"] == "http://default.test"
+    assert summary["access_pin_configured"] is True
+    assert summary["saved_url_authoritative"] is False
+    assert summary["saved_pin_authoritative"] is False
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://hub.example:bad",
+        "http://hub.example:70000",
+        "http://[malformed-ipv6",
+    ],
+)
+def test_flexhub_rejects_invalid_ports(tmp_path: Path, url: str) -> None:
+    with pytest.raises(FlexHubClientError, match="invalid port|malformed"):
+        FlexHubClient(tmp_path / "flexhub.json").configure(url)
+
+
+@pytest.mark.parametrize("pin", ["SECRET\nTOKEN", "PIN\U0001f642", "A" * 65])
+def test_flexhub_rejects_unsafe_header_pins_without_persisting(
+    tmp_path: Path, pin: str
+) -> None:
+    path = tmp_path / "flexhub.json"
+    client = FlexHubClient(path)
+
+    with pytest.raises(FlexHubClientError, match="visible ASCII") as error:
+        client.configure("http://hub.test", pin)
+
+    assert pin not in str(error.value)
+    assert not path.exists()
+
+
+def test_flexhub_request_errors_never_republish_access_pin(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = "LEAK-SENTINEL-PIN"
+
+    def fail_request(*args, **kwargs):
+        raise requests.exceptions.InvalidHeader(f"invalid header {secret}")
+
+    monkeypatch.setattr(requests, "get", fail_request)
+    client = FlexHubClient(tmp_path / "flexhub.json")
+    client.configure("http://hub.test", secret)
+
+    summary = client.poll()
+
+    assert summary["error"] == "FlexHub request configuration is invalid"
+    assert secret not in json.dumps(summary)
+    service = MqttService(MqttConfig(enabled=True), lambda *args: None)
+
+    class FakeMqttClient:
+        def __init__(self) -> None:
+            self.messages: list[tuple[str, object, bool]] = []
+
+        def publish(self, topic: str, payload: object, retain: bool = False) -> None:
+            self.messages.append((topic, payload, retain))
+
+    mqtt_client = FakeMqttClient()
+    service.client = mqtt_client
+    service.connected = True
+    service.publish_flexhub(summary)
+    assert secret not in json.dumps(mqtt_client.messages)
+
+
+def test_flexhub_remote_error_body_never_reflects_credentials(
+    tmp_path: Path, monkeypatch
+) -> None:
+    secret = "LEAK-SENTINEL-PIN"
+    monkeypatch.setattr(
+        requests,
+        "post",
+        lambda *args, **kwargs: FakeResponse(
+            {"error": f"bad token {secret}"}, status_code=409
+        ),
+    )
+    client = FlexHubClient(tmp_path / "flexhub.json")
+    client.configure("http://hub.test", "safe-pin")
+
+    with pytest.raises(FlexHubClientError) as error:
+        client.action("scan")
+
+    assert str(error.value) == "FlexHub API request failed (HTTP 409)"
+    assert secret not in str(error.value)
+
+
+def test_flexhub_settings_rejects_unsafe_pin_with_http_400(tmp_path: Path) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+
+    with TestClient(create_app(config)) as client:
+        response = client.put(
+            "/api/v1/flexhub/settings",
+            json={"url": "http://hub.test", "access_pin": "SECRET\nTOKEN"},
+        )
+
+    assert response.status_code == 400
+    assert "SECRET" not in response.text
 
 
 @pytest.mark.parametrize(

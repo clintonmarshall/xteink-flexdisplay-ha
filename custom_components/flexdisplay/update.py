@@ -14,6 +14,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import firmware_manageable
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -28,6 +29,11 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
     def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
         self._attr_unique_id = f"{device_id}_firmware_update"
+
+    @property
+    def available(self) -> bool:
+        """Hide the entity if a later check-in corrects the device identity."""
+        return super().available and firmware_manageable(self.record)
 
     @property
     def installed_version(self) -> str | None:
@@ -112,8 +118,13 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
             "last_command_id": self.record.get("last_command_id"),
             "verification_method": self.record.get("firmware_verification_method"),
             "verified_at": self.record.get("firmware_verified_at"),
-            "usb_recovery_ready": self.record.get("usb_recovery_verification_ready", False),
-            "usb_recovery_blockers": self.record.get("usb_recovery_verification_blockers") or [],
+            "usb_recovery_ready": self.record.get(
+                "usb_recovery_verification_ready", False
+            ),
+            "usb_recovery_blockers": self.record.get(
+                "usb_recovery_verification_blockers"
+            )
+            or [],
         }
 
     def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
@@ -146,6 +157,7 @@ async def async_setup_entry(
 ) -> None:
     """Create update entities for registered devices."""
     del hass
+
     def entities_for_device(
         coordinator: FlexDisplayCoordinator, device_id: str
     ) -> tuple[FlexDisplayFirmwareUpdate, ...]:
@@ -153,13 +165,8 @@ async def async_setup_entry(
             (item for item in coordinator.data if item.get("device_id") == device_id),
             {},
         )
-        model = "".join(
-            character
-            for character in str(record.get("model") or "").upper()
-            if character.isalnum()
-        )
-        if model in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}:
-            return ()
-        return (FlexDisplayFirmwareUpdate(coordinator, device_id),)
+        if firmware_manageable(record):
+            return (FlexDisplayFirmwareUpdate(coordinator, device_id),)
+        return ()
 
     setup_dynamic_entities(entry, async_add_entities, entities_for_device)

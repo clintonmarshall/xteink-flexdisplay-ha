@@ -293,7 +293,15 @@ def main() -> None:
         options, "screen_history_limit", 5
     )
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
+    os.environ["FLEXDISPLAY_FIRMWARE_CONFIGURED_VERSION"] = option(
+        options, "firmware_version"
+    )
     firmware = firmware_options(options)
+    os.environ["FLEXDISPLAY_FIRMWARE_CONFIG_SOURCE"] = (
+        "packaged_release"
+        if firmware["firmware_url"] == "packaged"
+        else "home_assistant_app"
+    )
     os.environ["FLEXDISPLAY_FIRMWARE_VERSION"] = firmware["firmware_version"]
     os.environ["FLEXDISPLAY_FIRMWARE_URL"] = firmware["firmware_url"]
     os.environ["FLEXDISPLAY_FIRMWARE_SHA256"] = firmware["firmware_sha256"]
@@ -340,7 +348,15 @@ def main() -> None:
     os.environ["FLEXDISPLAY_FIRMWARE_MAINTENANCE_USB_OVERRIDE"] = option(
         options, "firmware_maintenance_usb_override", True
     )
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_CONFIGURED_VERSION"] = option(
+        options, "note4_firmware_version"
+    )
     note4_firmware = note4_firmware_options(options)
+    os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_CONFIG_SOURCE"] = (
+        "packaged_release"
+        if note4_firmware["note4_firmware_url"] == "packaged"
+        else "home_assistant_app"
+    )
     os.environ["FLEXDISPLAY_NOTE4_FIRMWARE_VERSION"] = note4_firmware[
         "note4_firmware_version"
     ]

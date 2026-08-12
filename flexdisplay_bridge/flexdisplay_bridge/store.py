@@ -293,6 +293,30 @@ class DeviceStore:
             self._save()
             return deepcopy(record)
 
+    def remove_provisioning_fields(
+        self,
+        device_id: str,
+        fields: set[str],
+        *,
+        reason: str = "capability-reconciled",
+    ) -> dict[str, Any] | None:
+        """Drop assignments that a corrected device identity cannot apply."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            removed = sorted(field for field in fields if field in record)
+            if not removed:
+                return deepcopy(record)
+            for field in removed:
+                record.pop(field, None)
+            record["provisioning_capability_reconciled_at"] = utc_now()
+            record["provisioning_capability_reconciled_reason"] = str(reason)[:96]
+            record["provisioning_capability_removed_fields"] = removed
+            record["render_revision"] = int(record.get("render_revision", 0)) + 1
+            self._save()
+            return deepcopy(record)
+
     def next_policy_revision(self) -> int:
         """Allocate one monotonic revision for an atomic fleet policy change."""
         with self._lock:
@@ -421,6 +445,53 @@ class DeviceStore:
                 record["firmware_update_error_at"] = now
                 rollout = self._state.get("firmware_rollout") or {}
                 if rollout.get("target_version") == record.get("firmware_update_target"):
+                    rollout["last_cancelled_device_id"] = device_id
+                    rollout["last_cancelled_at"] = now
+                    if rollout.get("canary_device_id") == device_id:
+                        rollout["status"] = "awaiting_canary"
+                        rollout.pop("canary_device_id", None)
+                        rollout.pop("canary_started_at", None)
+            self._save()
+            return deepcopy(record)
+
+    def remove_command(
+        self,
+        device_id: str,
+        command: str,
+        *,
+        reason: str = "capability-excluded",
+    ) -> dict[str, Any] | None:
+        """Remove one unsafe queued/dispatched command without losing others."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            pending = list(record.get("pending_commands") or [])
+            dispatched = list(record.get("dispatched_commands") or [])
+            if command not in pending and command not in dispatched:
+                return deepcopy(record)
+            record["pending_commands"] = [item for item in pending if item != command]
+            record["dispatched_commands"] = [
+                item for item in dispatched if item != command
+            ]
+            if not record["pending_commands"]:
+                record.pop("pending_command_id", None)
+            if not record["dispatched_commands"]:
+                record.pop("dispatched_command_id", None)
+            now = utc_now()
+            record["commands_cancelled_at"] = now
+            record["last_cancelled_commands"] = [command]
+            if command == "install":
+                record["firmware_update_status"] = "cancelled"
+                record["firmware_update_stage"] = "cancelled"
+                record["firmware_update_percent"] = 0
+                record["firmware_update_stage_at"] = now
+                record["firmware_update_error"] = f"install:{reason}"[:160]
+                record["firmware_update_error_at"] = now
+                rollout = self._state.get("firmware_rollout") or {}
+                if rollout.get("target_version") == record.get(
+                    "firmware_update_target"
+                ):
                     rollout["last_cancelled_device_id"] = device_id
                     rollout["last_cancelled_at"] = now
                     if rollout.get("canary_device_id") == device_id:
@@ -1167,6 +1238,7 @@ class DeviceStore:
             record = self._state["devices"][device_id]
             is_canary = rollout.get("canary_device_id") == device_id
             record["firmware_update_role"] = "canary" if is_canary else "fleet"
+            record["firmware_update_provider"] = "xteink"
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
             record["firmware_update_stage"] = "queued"
@@ -1185,6 +1257,8 @@ class DeviceStore:
         self,
         device_id: str,
         target_version: str,
+        *,
+        firmware_provider: str,
     ) -> dict[str, Any]:
         """Queue a model-specific OTA without changing the X3/X4 fleet rollout."""
         with self._lock:
@@ -1200,6 +1274,7 @@ class DeviceStore:
             self.queue_command(device_id, "install")
             record = self._state["devices"][device_id]
             record["firmware_update_role"] = "device"
+            record["firmware_update_provider"] = str(firmware_provider or "")[:32]
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
             record["firmware_update_stage"] = "queued"

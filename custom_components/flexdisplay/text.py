@@ -11,6 +11,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import management_supports
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -88,11 +89,33 @@ async def async_setup_entry(
 ) -> None:
     """Create text controls for registered devices."""
     del hass
+
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[FlexDisplayText, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        descriptions = tuple(
+            description
+            for description in DESCRIPTIONS
+            if (
+                description.key in {"device_name", "area"}
+                and management_supports(record, "provisioning")
+            )
+            or (
+                description.key == "timezone"
+                and management_supports(record, "sleep_policy")
+            )
+        )
+        return tuple(
+            FlexDisplayText(coordinator, device_id, description)
+            for description in descriptions
+        )
+
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplayText(coordinator, device_id, description)
-            for description in DESCRIPTIONS
-        ),
+        entities_for_device,
     )

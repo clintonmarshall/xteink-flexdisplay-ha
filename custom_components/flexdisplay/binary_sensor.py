@@ -15,6 +15,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import (
+    firmware_manageable,
+    firmware_provider,
+    reports_battery,
+    reports_usb_power,
+)
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -99,11 +105,34 @@ async def async_setup_entry(
 ) -> None:
     """Create online sensors for registered devices."""
     del hass
+
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[FlexDisplayBinarySensor, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        descriptions = tuple(
+            description
+            for description in DESCRIPTIONS
+            if not (
+                (description.key == "usb_connected" and not reports_usb_power(record))
+                or (description.key == "sd_ready" and firmware_provider(record) != "xteink")
+                or (description.key == "low_battery" and not reports_battery(record))
+                or (
+                    description.key == "firmware_update_problem"
+                    and not firmware_manageable(record)
+                )
+            )
+        )
+        return tuple(
+            FlexDisplayBinarySensor(coordinator, device_id, description)
+            for description in descriptions
+        )
+
     setup_dynamic_entities(
         entry,
         async_add_entities,
-        lambda coordinator, device_id: (
-            FlexDisplayBinarySensor(coordinator, device_id, description)
-            for description in DESCRIPTIONS
-        ),
+        entities_for_device,
     )
