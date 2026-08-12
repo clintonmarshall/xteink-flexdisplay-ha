@@ -45,6 +45,12 @@ DESCRIPTIONS = (
         value_fn=lambda record: bool(record.get("sd_ready")),
     ),
     FlexDisplayBinarySensorDescription(
+        key="sd_writable",
+        translation_key="sd_writable",
+        device_class=BinarySensorDeviceClass.CONNECTIVITY,
+        value_fn=lambda record: bool(record.get("sd_writable")),
+    ),
+    FlexDisplayBinarySensorDescription(
         key="image_unchanged",
         translation_key="image_unchanged",
         value_fn=lambda record: bool(record.get("image_unchanged")),
@@ -60,6 +66,12 @@ DESCRIPTIONS = (
         translation_key="home_assistant_error",
         device_class=BinarySensorDeviceClass.PROBLEM,
         value_fn=lambda record: bool(record.get("ha_error")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="dashboard_fetch_error",
+        translation_key="dashboard_fetch_error",
+        device_class=BinarySensorDeviceClass.PROBLEM,
+        value_fn=lambda record: bool(record.get("dashboard_fetch_error")),
     ),
     FlexDisplayBinarySensorDescription(
         key="firmware_update_problem",

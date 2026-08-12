@@ -1650,18 +1650,50 @@
       <button id="closeContentPacks" class="icon" title="Close">×</button>
     </div>
     <div class="guide-strip" aria-label="Content pack workflow">
-      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Install a pack</strong><span>Upload a valid content-pack ZIP</span></div></div>
+      <div class="guide-step"><span class="guide-number">1</span><div class="guide-copy"><strong>Build or install</strong><span>Create Quick Cards or upload a ZIP</span></div></div>
       <div class="guide-step"><span class="guide-number">2</span><div class="guide-copy"><strong>Select devices</strong><span>Choose the exact rollout scope</span></div></div>
       <div class="guide-step"><span class="guide-number">3</span><div class="guide-copy"><strong>Deploy and track</strong><span>Sleeping displays update on wake</span></div></div>
     </div>
     <div class="loading-shell">
       <div class="loading-controls">
+        <details class="guided-details" open>
+          <summary>Quick Cards builder <span>Create an offline Wallet pack in Studio</span></summary>
+          <div class="guided-details-body">
+            <div class="field-grid">
+              <label>Pack name<input id="quickPackName" maxlength="80" value="My Quick Cards"></label>
+              <label>Version<input id="quickPackVersion" maxlength="64" placeholder="wallet-2026-01"></label>
+            </div>
+            <div class="field-grid">
+              <label>Card type<select id="quickCardType"><option value="id_badge">ID badge</option><option value="contact">Contact</option><option value="wifi">Wi-Fi</option><option value="message">Message</option><option value="emergency">Emergency</option><option value="image">Pinned image</option></select></label>
+              <label>Card ID<input id="quickCardId" maxlength="48" placeholder="employee-badge"></label>
+            </div>
+            <label>Title<input id="quickCardTitle" maxlength="80" placeholder="Clinton Marshall"></label>
+            <label>Subtitle<input id="quickCardSubtitle" maxlength="120" placeholder="Team, role, or short detail"></label>
+            <label>Body<textarea id="quickCardBody" maxlength="512" placeholder="Details shown on the card"></textarea></label>
+            <details class="guided-details">
+              <summary>QR, image, and footer <span>Optional card details</span></summary>
+              <div class="guided-details-body">
+                <label>QR payload<input id="quickCardQr" maxlength="800" placeholder="mailto:name@example.com or WIFI:T:WPA;S:Guest;P:password;;"></label>
+                <label>QR label<input id="quickCardQrLabel" maxlength="80" placeholder="Scan to connect"></label>
+                <label>Image path<input id="quickCardImage" maxlength="180" placeholder="/cards/flexdisplay/assets/profile.bmp"></label>
+                <label>Footer<input id="quickCardFooter" maxlength="120" placeholder="Company or expiry note"></label>
+                <label>Asset files<input id="quickCardAssets" type="file" accept="image/bmp" multiple><span class="small muted">BMP files are stored under /cards/flexdisplay/assets/.</span></label>
+              </div>
+            </details>
+            <div class="button-row"><button id="addQuickCard">Add card</button><button id="buildQuickPack" class="primary">Build pack</button></div>
+            <div id="quickCardList" class="tile-list"><div class="empty">Add the first offline card.</div></div>
+          </div>
+        </details>
         <div class="upload-drop">
           <strong>Install a content-pack ZIP</strong>
           <span class="small muted">The ZIP contains content-pack.json plus managed photos, books, logos, or assets.</span>
           <input id="contentPackUpload" type="file" accept=".zip,application/zip">
         </div>
         <label><span class="field-title">Pack to deploy<button type="button" class="help-tip" data-tooltip="Choose an installed pack version. Devices compare the pack ID and version, download only when needed, and acknowledge after applying it.">Help</button></span><select id="contentPackVersion"></select></label>
+        <div class="field-grid" style="margin-top:14px">
+          <label>Deployment scope<select id="contentPackScope"><option value="devices">Selected devices</option><option value="all">Entire fleet</option><option value="x3">All X3 devices</option><option value="x4">All X4 devices</option></select></label>
+          <label>Schedule (optional)<input id="contentPackSchedule" type="datetime-local"></label>
+        </div>
         <div class="section-head" style="margin-top:14px"><h2>Target devices</h2><button id="selectAllContentDevices">Select all</button></div>
         <div id="contentPackDevices" class="tile-list"></div>
         <button id="deployContentPack" class="primary">Deploy to selected devices</button>
@@ -1740,6 +1772,7 @@
       loadingPreviewUrl: "",
       loadingPreviewTimer: null,
       contentPacks: {packs: {}, assignments: {}},
+      quickCards: [],
       fleetPolicies: {profiles: [], dashboard_profiles: [], photo_albums: [], devices: [], summary: {}},
       fleetManagementTimer: null,
       flexHub: {},
@@ -2226,8 +2259,11 @@
         $("#meshActionStatus").textContent = `${status.state || "ready"} · ${activity}`;
       }
       const devices = Array.isArray(fleet.devices) ? fleet.devices : [];
+      const receivers = Array.isArray(status.targets) ? status.targets : [];
+      const deliveryJournal = Array.isArray(status.delivery_journal) ? status.delivery_journal : [];
       const cards = [
         ["FlexHub", [["State", status.state || "offline"], ["Task", status.detail || "—"], ["Platform", status.platform_version || "—"], ["Receivers", status.target_count ?? "—"], ["Active job", status.active_job || "None"], ["Remote commands", status.remote_commands_enabled ? "Enabled" : "Disabled"], ["Access PIN", status.access_control_enabled ? "Enabled" : "Disabled"], ["Healthy boots", boot.count ?? "—"]]],
+        ["Delivery safety", [["Trusted", `${receivers.filter((item) => item.trusted).length} of ${receivers.length}`], ["Included", receivers.filter((item) => item.trusted && item.enabled).length], ["Resume available", status.resume_available ? "Yes" : "No"], ["Checkpoints", deliveryJournal.length]]],
         ["Fleet Bridge", [["Connected", fleet.connected ? "Yes" : "No"], ["Displays", devices.length], ["Online", devices.filter((d) => d.online).length], ["Policy", fleet.selected_policy || "—"]]],
         ["Network and storage", [["IP address", network.ip || "—"], ["Wi-Fi", network.rssi == null ? "—" : `${network.rssi} dBm`], ["SD card", storage.ready ? "Ready" : "Unavailable"], ["SD free", storage.free_bytes == null ? "—" : `${Math.round(storage.free_bytes / 1048576)} MB`]]],
         ["Meshtastic", [["Firmware", mesh.firmware || status.firmware || "—"], ["Node ID", mesh.node_id || "—"], ["Mesh nodes", mesh.node_count ?? "—"], ["MQTT", mesh.mqtt_connected ? "Connected" : mesh.mqtt_enabled ? "Enabled" : "Disabled"]]],
@@ -2927,14 +2963,82 @@
               </label>`).join("")
           : '<div class="empty">No FlexDisplay devices have checked in yet.</div>';
         const assignments = state.contentPacks.assignments || {};
+        const deployments = state.contentPacks.deployments || [];
         $("#contentPackStatus").innerHTML = Object.keys(assignments).length
           ? Object.entries(assignments).map(([deviceId, item]) => `
               <article class="fleet-card">
                 <div class="section-head"><strong>${escapeHtml(deviceId)}</strong><span class="rule-badge">${escapeHtml(item.status || "pending")}</span></div>
                 <div class="small muted">Desired ${escapeHtml(item.desired_version || "—")} · Installed ${escapeHtml(item.installed_version || "waiting")}</div>
                 ${item.error ? `<div class="small" style="color:var(--danger);margin-top:8px">${escapeHtml(item.error)}</div>` : ""}
+              </article>`).join("") + deployments.slice(-5).reverse().map((item) => `
+              <article class="fleet-card">
+                <div class="section-head"><strong>Deployment ${escapeHtml(item.id)}</strong><span class="rule-badge">${escapeHtml(item.scope || "devices")}</span></div>
+                <div class="small muted">${escapeHtml(item.version)} · ${item.device_ids?.length || 0} devices · ${escapeHtml(item.scheduled_for || item.created_at || "")}</div>
               </article>`).join("")
           : '<div class="empty">No content rollout has been assigned.</div>';
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    function renderQuickCards() {
+      $("#quickCardList").innerHTML = state.quickCards.length
+        ? state.quickCards.map((card, index) => `
+            <article class="fleet-card">
+              <div class="section-head"><strong>${escapeHtml(card.title)}</strong><button data-remove-quick-card="${index}" class="danger">Remove</button></div>
+              <div class="small muted">${escapeHtml(card.type.replaceAll("_", " "))} · ${escapeHtml(card.id)}${card.qr_payload ? " · QR" : ""}${card.image_path ? " · image" : ""}</div>
+            </article>`).join("")
+        : '<div class="empty">Add the first offline card.</div>';
+    }
+
+    function addQuickCard() {
+      const title = $("#quickCardTitle").value.trim();
+      const id = channelIdFromName($("#quickCardId").value || title).slice(0, 48);
+      if (!title || !id) return toast("Give the card a title and safe ID.", true);
+      if (state.quickCards.some((card) => card.id === id)) return toast(`Card ID ${id} already exists.`, true);
+      const files = [...$("#quickCardAssets").files];
+      const suppliedImage = $("#quickCardImage").value.trim();
+      state.quickCards.push({
+        id,
+        type: $("#quickCardType").value,
+        title,
+        subtitle: $("#quickCardSubtitle").value.trim(),
+        body: $("#quickCardBody").value.trim(),
+        qr_payload: $("#quickCardQr").value.trim(),
+        qr_label: $("#quickCardQrLabel").value.trim(),
+        image_path: suppliedImage || (files[0] ? `/cards/flexdisplay/assets/${files[0].name}` : ""),
+        footer: $("#quickCardFooter").value.trim(),
+      });
+      ["#quickCardId", "#quickCardTitle", "#quickCardSubtitle", "#quickCardBody", "#quickCardQr", "#quickCardQrLabel", "#quickCardImage", "#quickCardFooter"].forEach((selector) => { $(selector).value = ""; });
+      renderQuickCards();
+    }
+
+    async function fileToBase64(file) {
+      const bytes = new Uint8Array(await file.arrayBuffer());
+      let binary = "";
+      for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+        binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000));
+      }
+      return btoa(binary);
+    }
+
+    async function buildQuickPack() {
+      const version = $("#quickPackVersion").value.trim();
+      if (!version) return toast("Give the Quick Cards pack a version.", true);
+      if (!state.quickCards.length) return toast("Add at least one Quick Card.", true);
+      try {
+        const assets = await Promise.all([...$("#quickCardAssets").files].map(async (file) => ({
+          filename: file.name,
+          data_base64: await fileToBase64(file),
+        })));
+        const response = await api("content-packs/quick-cards", {
+          method: "POST",
+          body: {version, name: $("#quickPackName").value.trim(), cards: state.quickCards, assets},
+        });
+        const payload = await response.json();
+        toast(`Quick Cards pack ${payload.pack.version} is ready to deploy.`);
+        await loadContentPacks();
+        $("#contentPackVersion").value = payload.pack.version;
       } catch (error) {
         toast(error.message, true);
       }
@@ -2961,16 +3065,18 @@
 
     async function deployContentPack() {
       const version = $("#contentPackVersion").value;
+      const scope = $("#contentPackScope").value;
       const deviceIds = [...document.querySelectorAll("[data-content-device]:checked")]
         .map((node) => node.value);
       if (!version) return toast("Upload or select a content pack first.", true);
-      if (!deviceIds.length) return toast("Select at least one device.", true);
+      if (scope === "devices" && !deviceIds.length) return toast("Select at least one device.", true);
       try {
+        const schedule = $("#contentPackSchedule").value;
         await api(`content-packs/${encodeURIComponent(version)}/rollout`, {
           method: "POST",
-          body: {device_ids: deviceIds},
+          body: {scope, device_ids: deviceIds, scheduled_for: schedule ? new Date(schedule).toISOString() : ""},
         });
-        toast(`${version} queued for ${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}.`);
+        toast(`${version} ${schedule ? "scheduled" : "queued"} for ${scope === "devices" ? `${deviceIds.length} device${deviceIds.length === 1 ? "" : "s"}` : scope}.`);
         await loadContentPacks();
       } catch (error) {
         toast(error.message, true);
@@ -5162,12 +5268,28 @@
     $("#contentItemList").addEventListener("change", updateContentField);
     $("#openContentPacks").addEventListener("click", () => {
       $("#contentPackDialog").showModal();
+      if (!$("#quickPackVersion").value) {
+        $("#quickPackVersion").value = `wallet-${new Date().toISOString().slice(0, 16).replaceAll(/[-:T]/g, "")}`;
+      }
       loadContentPacks();
     });
     $("#closeContentPacks").addEventListener("click", () => $("#contentPackDialog").close());
     $("#refreshContentPacks").addEventListener("click", loadContentPacks);
     $("#contentPackUpload").addEventListener("change", uploadContentPack);
     $("#deployContentPack").addEventListener("click", deployContentPack);
+    $("#addQuickCard").addEventListener("click", addQuickCard);
+    $("#buildQuickPack").addEventListener("click", buildQuickPack);
+    $("#quickCardList").addEventListener("click", (event) => {
+      const button = event.target.closest("[data-remove-quick-card]");
+      if (!button) return;
+      state.quickCards.splice(Number(button.dataset.removeQuickCard), 1);
+      renderQuickCards();
+    });
+    $("#contentPackScope").addEventListener("change", () => {
+      const disabled = $("#contentPackScope").value !== "devices";
+      document.querySelectorAll("[data-content-device]").forEach((node) => { node.disabled = disabled; });
+      $("#selectAllContentDevices").disabled = disabled;
+    });
     $("#selectAllContentDevices").addEventListener("click", () => {
       document.querySelectorAll("[data-content-device]").forEach((node) => { node.checked = true; });
     });

@@ -139,6 +139,75 @@ class FlexDisplayFirmwareUpdate(FlexDisplayEntity, UpdateEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayContentUpdate(FlexDisplayEntity, UpdateEntity):
+    """Install the Bridge-assigned content pack independently of firmware."""
+
+    _attr_translation_key = "content"
+    _attr_supported_features = UpdateEntityFeature.INSTALL
+    _attr_title = "FlexDisplay content"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_content_update"
+
+    @property
+    def installed_version(self) -> str | None:
+        """Return the acknowledged SD content version."""
+        return str(self.record.get("content_pack_version") or "none")
+
+    @property
+    def latest_version(self) -> str | None:
+        """Return the content version assigned by Fleet Manager."""
+        return str(
+            self.record.get("content_pack_desired") or self.installed_version or "none"
+        )
+
+    @property
+    def in_progress(self) -> bool:
+        """Return whether the device still needs to apply its assigned pack."""
+        return str(self.record.get("content_pack_status") or "") in {
+            "scheduled",
+            "pending",
+            "downloading",
+            "installing",
+        }
+
+    @property
+    def release_summary(self) -> str | None:
+        """Explain sleeping-device delivery in the Home Assistant update dialog."""
+        if self.record.get("content_pack_error"):
+            return f"Content update failed: {self.record['content_pack_error']}"
+        if self.record.get("content_pack_status") == "scheduled":
+            return "Scheduled by FlexDisplay Content Manager; it will install at the selected time."
+        if self.in_progress:
+            return "Queued for the next Bridge check-in; waking the display applies it sooner."
+        return "Content packs update SD-managed cards and assets without replacing firmware."
+
+    @property
+    def extra_state_attributes(self) -> dict[str, object]:
+        """Expose content acknowledgement independently of firmware state."""
+        return {
+            "desired_version": self.record.get("content_pack_desired"),
+            "status": self.record.get("content_pack_status"),
+            "last_error": self.record.get("content_pack_error"),
+        }
+
+    def version_is_newer(self, latest_version: str, installed_version: str) -> bool:
+        """Content versions are opaque pack IDs, so any mismatch is actionable."""
+        return latest_version != installed_version
+
+    async def async_install(
+        self,
+        version: str | None,
+        backup: bool,
+        **kwargs,
+    ) -> None:
+        """Ask an awake device to check the assigned pack immediately."""
+        del version, backup, kwargs
+        await self.coordinator.client.command(self.device_id, "refresh")
+        await self.coordinator.async_request_refresh()
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
@@ -148,7 +217,7 @@ async def async_setup_entry(
     del hass
     def entities_for_device(
         coordinator: FlexDisplayCoordinator, device_id: str
-    ) -> tuple[FlexDisplayFirmwareUpdate, ...]:
+    ) -> tuple[FlexDisplayFirmwareUpdate | FlexDisplayContentUpdate, ...]:
         record = next(
             (item for item in coordinator.data if item.get("device_id") == device_id),
             {},
@@ -160,6 +229,9 @@ async def async_setup_entry(
         )
         if model in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}:
             return ()
-        return (FlexDisplayFirmwareUpdate(coordinator, device_id),)
+        return (
+            FlexDisplayFirmwareUpdate(coordinator, device_id),
+            FlexDisplayContentUpdate(coordinator, device_id),
+        )
 
     setup_dynamic_entities(entry, async_add_entities, entities_for_device)

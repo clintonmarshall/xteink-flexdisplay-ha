@@ -195,6 +195,9 @@
       "sd_ready": {
         "name": "SD card ready"
       },
+      "sd_writable": {
+        "name": "SD card writable"
+      },
       "image_unchanged": {
         "name": "Image unchanged"
       },
@@ -203,6 +206,9 @@
       },
       "home_assistant_error": {
         "name": "Home Assistant error"
+      },
+      "dashboard_fetch_error": {
+        "name": "Dashboard fetch problem"
       },
       "firmware_update_problem": {
         "name": "Firmware update problem"
@@ -362,6 +368,9 @@
     "update": {
       "firmware": {
         "name": "Firmware"
+      },
+      "content": {
+        "name": "Managed content"
       }
     }
   }
