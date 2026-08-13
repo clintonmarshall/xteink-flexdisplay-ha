@@ -41,6 +41,24 @@ class FlexDisplaySensorDescription(SensorEntityDescription):
     value_fn: Callable[[dict], Any]
 
 
+def _screen_resolution(record: dict) -> str:
+    """Return a readable screen resolution."""
+    resolution = record.get("screen_resolution")
+    if resolution:
+        return str(resolution)
+    width = record.get("width")
+    height = record.get("height")
+    if width and height:
+        return f"{width}x{height}"
+    return "unknown"
+
+
+def _capability_summary(record: dict) -> str:
+    """Return a stable comma-separated capability list."""
+    capabilities = record.get("transfer_capabilities") or []
+    return ", ".join(str(item) for item in capabilities) or "none"
+
+
 DESCRIPTIONS = (
     FlexDisplaySensorDescription(
         key="battery_percent",
@@ -71,6 +89,36 @@ DESCRIPTIONS = (
         key="mode",
         translation_key="mode",
         value_fn=lambda record: record.get("mode"),
+    ),
+    FlexDisplaySensorDescription(
+        key="device_class",
+        translation_key="device_class",
+        value_fn=lambda record: record.get("device_class") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="screen_resolution",
+        translation_key="screen_resolution",
+        value_fn=_screen_resolution,
+    ),
+    FlexDisplaySensorDescription(
+        key="display_technology",
+        translation_key="display_technology",
+        value_fn=lambda record: record.get("display_technology") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="power_class",
+        translation_key="power_class",
+        value_fn=lambda record: record.get("power_class") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="refresh_delivery",
+        translation_key="refresh_delivery",
+        value_fn=lambda record: record.get("refresh_delivery") or "unknown",
+    ),
+    FlexDisplaySensorDescription(
+        key="device_capabilities",
+        translation_key="device_capabilities",
+        value_fn=_capability_summary,
     ),
     FlexDisplaySensorDescription(
         key="dashboard_page_title",

@@ -57,6 +57,31 @@ DESCRIPTIONS = (
         value_fn=lambda record: bool(record.get("sd_writable")),
     ),
     FlexDisplayBinarySensorDescription(
+        key="camera_available",
+        translation_key="camera_available",
+        value_fn=lambda record: bool(record.get("camera_available")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="microphone_available",
+        translation_key="microphone_available",
+        value_fn=lambda record: bool(record.get("microphone_available")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="audio_available",
+        translation_key="audio_available",
+        value_fn=lambda record: bool(record.get("audio_available")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="touch_available",
+        translation_key="touch_available",
+        value_fn=lambda record: bool(record.get("touch_available")),
+    ),
+    FlexDisplayBinarySensorDescription(
+        key="always_on_available",
+        translation_key="always_on_available",
+        value_fn=lambda record: bool(record.get("always_on_available")),
+    ),
+    FlexDisplayBinarySensorDescription(
         key="image_unchanged",
         translation_key="image_unchanged",
         value_fn=lambda record: bool(record.get("image_unchanged")),

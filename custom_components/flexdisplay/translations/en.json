@@ -34,6 +34,24 @@
       "mode": {
         "name": "Mode"
       },
+      "device_class": {
+        "name": "Device class"
+      },
+      "screen_resolution": {
+        "name": "Screen resolution"
+      },
+      "display_technology": {
+        "name": "Display technology"
+      },
+      "power_class": {
+        "name": "Power class"
+      },
+      "refresh_delivery": {
+        "name": "Refresh delivery"
+      },
+      "device_capabilities": {
+        "name": "Device capabilities"
+      },
       "dashboard_page": {
         "name": "Dashboard page"
       },
@@ -200,6 +218,21 @@
       },
       "sd_writable": {
         "name": "SD card writable"
+      },
+      "camera_available": {
+        "name": "Camera available"
+      },
+      "microphone_available": {
+        "name": "Microphone available"
+      },
+      "audio_available": {
+        "name": "Audio available"
+      },
+      "touch_available": {
+        "name": "Touch available"
+      },
+      "always_on_available": {
+        "name": "Always-on display available"
       },
       "image_unchanged": {
         "name": "Image unchanged"

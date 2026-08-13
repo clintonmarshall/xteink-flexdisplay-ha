@@ -199,6 +199,12 @@ def test_android_receiver_fleet_controls_and_diagnostics(tmp_path: Path) -> None
         "X-FlexDisplay-Width": "960",
         "X-FlexDisplay-Height": "480",
         "X-FlexDisplay-Capabilities": "android,color,touch,png,audio,assist",
+        "X-FlexDisplay-Camera-Available": "true",
+        "X-FlexDisplay-Microphone-Available": "true",
+        "X-FlexDisplay-Audio-Available": "true",
+        "X-FlexDisplay-Touch-Available": "true",
+        "X-FlexDisplay-Always-On": "true",
+        "X-FlexDisplay-Device-Class": "echo_show_5",
         "X-FlexDisplay-Volume": "55",
         "X-FlexDisplay-Muted": "false",
         "X-FlexDisplay-Brightness": "72",
@@ -210,6 +216,16 @@ def test_android_receiver_fleet_controls_and_diagnostics(tmp_path: Path) -> None
         assert device["voice_volume"] == 55
         assert device["voice_muted"] is False
         assert device["screen_brightness"] == 72
+        assert device["camera_available"] is True
+        assert device["microphone_available"] is True
+        assert device["audio_available"] is True
+        assert device["touch_available"] is True
+        assert device["always_on_available"] is True
+        assert device["device_class"] == "echo_show_5"
+        assert device["screen_resolution"] == "960x480"
+        assert device["display_technology"] == "lcd"
+        assert device["power_class"] == "always_on_color"
+        assert device["refresh_delivery"] == "long_poll"
 
         voice = client.put(
             "/api/v1/devices/CHECKERS-CONTROL01/voice",

@@ -5814,6 +5814,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_last_image_error: str | None = Header(default=None),
         x_flexdisplay_last_fetch_error: str | None = Header(default=None),
         x_flexdisplay_capabilities: str | None = Header(default=None),
+        x_flexdisplay_camera_available: str | None = Header(default=None),
+        x_flexdisplay_microphone_available: str | None = Header(default=None),
+        x_flexdisplay_audio_available: str | None = Header(default=None),
+        x_flexdisplay_touch_available: str | None = Header(default=None),
+        x_flexdisplay_always_on: str | None = Header(default=None),
+        x_flexdisplay_device_class: str | None = Header(default=None),
         x_flexdisplay_content_version: str | None = Header(default=None),
         x_flexdisplay_content_status: str | None = Header(default=None),
         x_flexdisplay_content_error: str | None = Header(default=None),
@@ -5850,6 +5856,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             model = "UNKNOWN"
         device_firmware = _device_firmware(settings, model)
         capabilities = _capabilities(x_flexdisplay_capabilities)
+
+        def capability_flag(raw: str | None, *names: str) -> bool:
+            parsed = _boolean(raw)
+            if parsed is not None:
+                return parsed
+            return any(name in capabilities for name in names)
+
         image_cached = bool(_boolean(x_flexdisplay_image_cached))
         last_image_error = (
             _header_value(x_flexdisplay_last_image_error).strip()
@@ -5908,8 +5921,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "boot_id": x_flexdisplay_boot_id or None,
             "transfer_capabilities": sorted(capabilities),
             "display_shape": "round" if "round-display" in capabilities else "rectangular",
-            "touch_available": "touch" in capabilities,
+            "touch_available": capability_flag(x_flexdisplay_touch_available, "touch"),
             "color_available": "color" in capabilities,
+            "camera_available": capability_flag(
+                x_flexdisplay_camera_available, "camera", "camera-snapshot"
+            ),
+            "microphone_available": capability_flag(
+                x_flexdisplay_microphone_available, "microphone", "assist"
+            ),
+            "audio_available": capability_flag(x_flexdisplay_audio_available, "audio"),
+            "always_on_available": capability_flag(
+                x_flexdisplay_always_on, "always-on", "always-on-color"
+            ),
+            "device_class": _header_value(x_flexdisplay_device_class),
+            "screen_resolution": f"{width}x{height}",
             "client_platform": "android" if "android" in capabilities else "embedded",
             "receiver_token_sha256": (
                 hashlib.sha256(x_flexdisplay_receiver_token.encode("utf-8")).hexdigest()

@@ -11,6 +11,7 @@ final class ReceiverProfile {
     final int width;
     final int height;
     final boolean round;
+    final String deviceClass;
 
     private ReceiverProfile(
             String model,
@@ -18,13 +19,15 @@ final class ReceiverProfile {
             String idPrefix,
             int width,
             int height,
-            boolean round) {
+            boolean round,
+            String deviceClass) {
         this.model = model;
         this.label = label;
         this.idPrefix = idPrefix;
         this.width = width;
         this.height = height;
         this.round = round;
+        this.deviceClass = deviceClass;
     }
 
     static ReceiverProfile detect() {
@@ -40,7 +43,8 @@ final class ReceiverProfile {
                     "CHECKERS",
                     960,
                     480,
-                    false);
+                    false,
+                    "echo_show_5");
         }
         return new ReceiverProfile(
                 "ROOK",
@@ -48,7 +52,8 @@ final class ReceiverProfile {
                 "ROOK",
                 480,
                 480,
-                true);
+                true,
+                "echo_spot");
     }
 
     String capabilities() {
