@@ -26,9 +26,6 @@ on:
         required: true
         type: string
 
-permissions:
-  contents: read
-
 concurrency:
   group: flexdisplay-release
   cancel-in-progress: false
