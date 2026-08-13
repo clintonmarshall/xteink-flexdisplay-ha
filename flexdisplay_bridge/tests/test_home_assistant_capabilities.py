@@ -157,6 +157,9 @@ def test_management_control_fallback_matches_each_legacy_family() -> None:
     assert CAPABILITIES.management_supports(phone, "audio") is True
     assert CAPABILITIES.management_supports(phone, "camera") is True
     assert CAPABILITIES.management_supports(phone, "microphone") is True
+    assert CAPABILITIES.management_supports(phone, "notifications") is True
+    assert CAPABILITIES.reports_battery(phone) is True
+    assert CAPABILITIES.reports_usb_power(phone) is True
     assert CAPABILITIES.desired_microphone_enabled(phone) is False
     assert (
         CAPABILITIES.desired_microphone_enabled(
@@ -241,6 +244,10 @@ def test_android_phone_entity_platform_contracts_are_privacy_bounded() -> None:
     media = _integration_source("media_player.py")
     button = _integration_source("button.py")
     microphone = _integration_source("switch.py")
+    notify = _integration_source("notify.py")
+    event = _integration_source("event.py")
+    binary_sensor = _integration_source("binary_sensor.py")
+    sensor = _integration_source("sensor.py")
 
     assert '"camera"' in platforms
     assert '"media_player"' in platforms
@@ -254,3 +261,21 @@ def test_android_phone_entity_platform_contracts_are_privacy_bounded() -> None:
     assert "request_camera_snapshot" in button
     assert '"microphone_enabled": enabled' in microphone
     assert "async_camera_image" not in microphone
+    assert "NotifyEntity" in notify
+    assert "foreground_session" in notify
+    assert "FlexDisplayNotificationResponseEvent" in event
+    assert "NOTIFICATION_RESPONSE_EVENT_TYPES" in event
+    assert "action_execution_success" in event
+    assert "active_alert" in binary_sensor
+    assert "camera_ready" in binary_sensor
+    assert "speaker_ready" in binary_sensor
+    assert "battery_charging" in binary_sensor
+    for key in (
+        "battery_status",
+        "battery_health",
+        "battery_temperature_c",
+        "battery_current_ma",
+        "battery_plug_type",
+        "battery_observed_at",
+    ):
+        assert key in sensor

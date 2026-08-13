@@ -118,6 +118,11 @@ def is_android_receiver(record: Mapping[str, Any]) -> bool:
     return firmware_provider(record) == "android_app"
 
 
+def is_android_companion(record: Mapping[str, Any]) -> bool:
+    """Return whether the receiver is a foreground-only Android phone app."""
+    return _model_key(record) in _ANDROID_COMPANION_ALIASES
+
+
 def desired_microphone_enabled(record: Mapping[str, Any]) -> bool:
     """Fail closed for a phone companion until the user explicitly enables it."""
     value = record.get("desired_microphone_enabled")
@@ -174,7 +179,7 @@ def reports_battery(record: Mapping[str, Any]) -> bool:
     reported = _section(record, "power").get("reports_battery")
     if isinstance(reported, bool):
         return reported
-    return firmware_provider(record) in {"xteink", "note4"}
+    return firmware_provider(record) in {"xteink", "note4", "android_app"}
 
 
 def reports_usb_power(record: Mapping[str, Any]) -> bool:
@@ -182,7 +187,7 @@ def reports_usb_power(record: Mapping[str, Any]) -> bool:
     reported = _section(record, "power").get("reports_usb_power")
     if isinstance(reported, bool):
         return reported
-    return firmware_provider(record) in {"xteink", "note4"}
+    return firmware_provider(record) in {"xteink", "note4", "android_app"}
 
 
 def management_supports(record: Mapping[str, Any], capability: str) -> bool:
@@ -207,7 +212,7 @@ def management_supports(record: Mapping[str, Any], capability: str) -> bool:
         return provider == "xteink"
     if capability in {"screen_history", "page_selection"}:
         return provider in {"xteink", "note4", "android_app"}
-    if capability == "audio":
+    if capability in {"audio", "camera", "microphone", "notifications"}:
         return provider in {"note4", "android_app"}
     return False
 

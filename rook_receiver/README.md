@@ -39,6 +39,13 @@ device-specific capabilities.
 - local push-to-talk microphone policy exposed to Home Assistant
 - explicit one-shot companion camera snapshots, with no live stream or
   background capture
+- a local Privacy Centre with default-off camera policy, permission/readiness
+  state, Bridge health, and camera-request audit metadata
+- user-started, charging-aware companion Dock Mode with an optional Quick
+  Settings tile
+- authenticated notification action, explicit-dismiss, and local-expiry
+  response reporting
+- battery charging, health, temperature, voltage, plug, and current telemetry
 
 ## Build
 
@@ -47,7 +54,8 @@ The project uses Android Gradle Plugin 7.4.2 and Gradle 7.6.4. Set
 33, then run:
 
 ```bash
-./gradlew clean assembleKioskDebug assembleCompanionDebug \
+./gradlew clean testKioskDebugUnitTest testCompanionDebugUnitTest \
+  assembleKioskDebug assembleCompanionDebug \
   lintKioskDebug lintCompanionDebug
 ```
 
@@ -96,6 +104,9 @@ saving unchanged values preserves the existing pairing.
 - Swipe left: next page.
 - Swipe right: previous page.
 - Long press outside an interactive tile: connection settings.
+- Tap **Privacy** on the phone companion: inspect connection/privacy state or
+  locally enable camera snapshots.
+- Tap **Dock** on the phone companion: explicitly enable or disable Dock Mode.
 
 ## Home Assistant notifications
 
@@ -124,6 +135,9 @@ Opening a cover always requires confirmation, even if an automation omits the
 confirmation flag. Notification actions are limited to lights, switches,
 input booleans, scenes, and cover open/close/stop services. The Spot uses a
 Google-free long-poll connection to receive notifications immediately.
+Action taps, explicit dismissal, and local duration expiry are reported once
+to the Bridge. Merely backgrounding the companion or replacing an alert does
+not claim that the user dismissed it.
 
 The same connection carries `screen_refresh` events. Saving and pushing a
 Studio page, changing a profile, or issuing a device command wakes the receiver
@@ -178,13 +192,37 @@ for a trusted companion capability record:
 - **Speaker** supports volume set, volume step, and mute. **Test chime** remains
   a separate button; arbitrary media playback is not advertised.
 
-Android offers camera permission through a visible local explanation when the
-companion opens and requests microphone permission only when Assist is first
-held. A snapshot captures only while the app is foregrounded and the phone is
-unlocked, displays visible capture/upload status, times out after 15 seconds,
-and uploads a re-encoded JPEG capped at 2 MiB. Keep the Bridge and receiver on a
-trusted LAN and use HTTPS or a trusted private network when traffic crosses an
-untrusted segment.
+The companion's local camera policy defaults to **Off**, independently of its
+Android permission. Camera permission is requested only after the user opens
+the Privacy Centre and explicitly chooses **Allow HA snapshots while open**.
+Home Assistant administrators or automations can then request one photo only
+while the app remains foregrounded and the phone is unlocked. Switching the
+policy off cancels an active capture/upload and reports a bounded failure.
+Microphone permission is requested only when Assist is first held. A snapshot
+displays visible capture/upload status, times out after 15 seconds, and uploads
+a re-encoded JPEG capped at 2 MiB.
 
-The LineageOS builds are experimental and SELinux-permissive. Keep ADB and the
-Bridge API on a trusted LAN; do not expose either directly to the internet.
+## Companion Dock Mode and Privacy Centre
+
+Dock Mode is always started locally. Enable it from the on-screen **Dock**
+button or add the **FlexDisplay Dock** Quick Settings tile. The tile can disable
+Dock Mode immediately, but enabling it opens the visible companion app for
+confirmation; it cannot start background network, media, camera, or microphone
+work. While enabled, powered, foregrounded, and unlocked, Dock Mode keeps the
+screen awake. Removing AC, USB, wireless, or dock power clears keep-awake,
+dims the app to 5%, and exits after 60 seconds unless power returns. The
+companion still pauses all polling, notification, camera, and microphone work
+when backgrounded.
+
+The Privacy Centre shows the configured Bridge and device ID, last successful
+sync/error, camera policy and Android grant, microphone policy/grant, last
+camera request/outcome, Dock state, and current power state. It also links to
+Android app settings. Companion Recents previews are protected from displaying
+dashboard or camera content.
+
+Keep the Bridge and receiver on a trusted LAN and use HTTPS or a trusted private
+network when traffic crosses an untrusted segment.
+
+LineageOS device builds are experimental; verify the actual SELinux state on
+each receiver rather than assuming it. Keep ADB and the Bridge API on a trusted
+LAN and do not expose either directly to the internet.

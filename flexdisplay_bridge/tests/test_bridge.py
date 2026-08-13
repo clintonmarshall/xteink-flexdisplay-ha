@@ -6,6 +6,7 @@ import hashlib
 import json
 import zipfile
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -58,6 +59,55 @@ def _rgb_bmp_base64() -> str:
     output = io.BytesIO()
     Image.new("RGB", (16, 16), color="white").save(output, format="BMP")
     return base64.b64encode(output.getvalue()).decode("ascii")
+
+
+_MANAGEMENT_API_KEY = "bridge-secret"
+
+
+class _ManagedDeviceReadClient(TestClient):
+    """Test client that defaults ordinary calls to explicit management auth.
+
+    Passing an explicit ``headers`` mapping, including an empty mapping, opts a
+    request out. That keeps negative authentication assertions intentional and
+    visible in the test body.
+    """
+
+    def __init__(self, app, *, management_key: str) -> None:
+        self._management_key = management_key
+        super().__init__(app)
+
+    def _managed_request(self, method: str, url: str, *args, **kwargs):
+        if "headers" not in kwargs:
+            kwargs["headers"] = {
+                "X-FlexDisplay-Bridge-Key": self._management_key,
+            }
+        elif kwargs["headers"]:
+            headers = dict(kwargs["headers"])
+            headers.setdefault("X-FlexDisplay-Bridge-Key", self._management_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, *args, **kwargs)
+
+    def get(self, url: str, *args, **kwargs):
+        return self._managed_request("GET", url, *args, **kwargs)
+
+    def post(self, url: str, *args, **kwargs):
+        return self._managed_request("POST", url, *args, **kwargs)
+
+    def put(self, url: str, *args, **kwargs):
+        return self._managed_request("PUT", url, *args, **kwargs)
+
+    def patch(self, url: str, *args, **kwargs):
+        return self._managed_request("PATCH", url, *args, **kwargs)
+
+    def delete(self, url: str, *args, **kwargs):
+        return self._managed_request("DELETE", url, *args, **kwargs)
+
+
+def _managed_device_client(config: BridgeConfig) -> TestClient:
+    key = config.api_key or _MANAGEMENT_API_KEY
+    if not config.api_key:
+        config = replace(config, api_key=key)
+    return _ManagedDeviceReadClient(create_app(config), management_key=key)
 
 
 def test_note4_house_pulse_renderer_and_bmp_delivery(tmp_path: Path) -> None:
@@ -113,7 +163,7 @@ def test_note4_house_pulse_renderer_and_bmp_delivery(tmp_path: Path) -> None:
         profiles={"house-pulse": profile},
         default_profile="house-pulse",
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         preview = client.post(
             "/api/v1/studio/preview",
             json={
@@ -298,7 +348,7 @@ def test_v035_dependent_stores_purge_unknown_device_assignments(tmp_path: Path) 
 
 def test_v034_mixed_channel_interleaves_dashboard_and_message(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "X3-MIXED"},
@@ -418,7 +468,7 @@ def test_identityless_checkin_is_rejected_without_creating_unknown_device(
     tmp_path: Path,
 ) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get("/api/v1/screen")
         assert response.status_code == 400
         assert response.json()["detail"] == "X-FlexDisplay-ID is required"
@@ -452,7 +502,7 @@ def test_compact_device_list_keeps_sparkline_data_without_diagnostic_histories(
         encoding="utf-8",
     )
 
-    with TestClient(create_app(BridgeConfig(state_path=state_path))) as client:
+    with _managed_device_client(BridgeConfig(state_path=state_path)) as client:
         full = client.get("/api/v1/devices").json()["devices"][0]
         compact = client.get("/api/v1/devices?compact=true").json()["devices"][0]
 
@@ -602,7 +652,7 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
         home_assistant=HomeAssistantConfig(token=""),
         devices={"X4-DEMO01": DeviceConfig(name="Test X4", model="X4", width=480, height=800)},
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get(
             "/api/v1/screen",
             headers={
@@ -642,7 +692,7 @@ def test_screen_registers_device_and_returns_x4_png(tmp_path: Path) -> None:
 
 def test_v022_content_pack_rollout_is_acknowledged_per_device(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "X3-CONTENT"},
@@ -786,7 +836,7 @@ def test_content_manager_builds_quick_cards_and_scopes_scheduled_rollout(
     tmp_path: Path,
 ) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id in ("X3-CARD01", "X4-CARD02"):
             assert client.get(
                 "/api/v1/screen", headers={"X-FlexDisplay-ID": device_id}
@@ -897,7 +947,7 @@ def test_content_manager_builds_quick_cards_and_scopes_scheduled_rollout(
 
 
 def test_quick_card_builder_rejects_unsafe_image_paths(tmp_path: Path) -> None:
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+    with _managed_device_client(BridgeConfig(state_path=tmp_path / "state.json")) as client:
         response = client.post(
             "/api/v1/content-packs/quick-cards",
             json={
@@ -917,7 +967,7 @@ def test_quick_card_builder_rejects_unsafe_image_paths(tmp_path: Path) -> None:
 
 
 def test_quick_card_builder_rejects_non_bmp_assets(tmp_path: Path) -> None:
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+    with _managed_device_client(BridgeConfig(state_path=tmp_path / "state.json")) as client:
         response = client.post(
             "/api/v1/content-packs/quick-cards",
             json={
@@ -1144,7 +1194,7 @@ def test_v021_screen_advertises_cached_branded_fetch_asset(tmp_path: Path) -> No
             )
         },
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         saved = client.put(
             "/api/v1/loading-screens/X4-BRAND01",
             json={
@@ -1201,7 +1251,7 @@ def test_v021_loading_screen_studio_upload_preview_and_inheritance(
     logo_output = io.BytesIO()
     logo.save(logo_output, format="PNG")
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "X3-BRAND01"},
@@ -1275,7 +1325,7 @@ def test_v020_screen_history_can_preview_and_resend_exact_image(tmp_path: Path) 
         "X-FlexDisplay-Height": "800",
         "X-FlexDisplay-SD-Ready": "true",
     }
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get("/api/v1/screen", headers=headers)
         assert first.status_code == 200
         client.post("/api/v1/devices/X4-HISTORY/commands/next")
@@ -1330,7 +1380,7 @@ def test_x3_screen_history_resend_uses_bmp_delivery_digest(tmp_path: Path) -> No
         "X-FlexDisplay-Height": "792",
         "X-FlexDisplay-Image-Cached": "false",
     }
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get("/api/v1/screen", headers=headers)
         assert first.status_code == 200
         assert first.headers["content-type"] == "image/bmp"
@@ -1466,7 +1516,7 @@ def test_device_removal_clears_bridge_registry_and_mqtt_discovery(
         mqtt=MqttConfig(enabled=False, entity_source="mqtt"),
     )
     app = create_app(config)
-    with TestClient(app) as client:
+    with _ManagedDeviceReadClient(app, management_key="secret") as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -1478,7 +1528,7 @@ def test_device_removal_clears_bridge_registry_and_mqtt_discovery(
         app.state.mqtt.client = fake
         app.state.mqtt.connected = True
 
-        unauthorized = client.delete("/api/v1/devices/X3-REMOVE1")
+        unauthorized = client.delete("/api/v1/devices/X3-REMOVE1", headers={})
         assert unauthorized.status_code == 401
         removed = client.delete(
             "/api/v1/devices/X3-REMOVE1",
@@ -1504,6 +1554,7 @@ def test_device_removal_clears_bridge_registry_and_mqtt_discovery(
 def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> None:
     config = BridgeConfig(
         state_path=tmp_path / "state.json",
+        api_key=_MANAGEMENT_API_KEY,
         home_assistant=HomeAssistantConfig(token=""),
         mqtt=MqttConfig(enabled=False, entity_source="mqtt"),
         profiles={
@@ -1519,7 +1570,7 @@ def test_v020_mqtt_controls_update_provisioning_without_hacs(tmp_path: Path) -> 
         "X-FlexDisplay-Height": "792",
     }
     app = create_app(config)
-    with TestClient(app) as client:
+    with _ManagedDeviceReadClient(app, management_key=_MANAGEMENT_API_KEY) as client:
         client.get("/api/v1/screen", headers=headers)
         app.state.mqtt.on_command("X3-APPMQTT", "set-refresh-interval", "1800")
         app.state.mqtt.on_command("X3-APPMQTT", "set-mode", "photo_frame")
@@ -1828,7 +1879,7 @@ def test_unknown_device_is_zero_touch_provisioned_with_defaults(tmp_path: Path) 
         profiles={"wall": profile},
         default_profile="wall",
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         screen = client.get(
             "/api/v1/screen",
             headers={
@@ -1859,10 +1910,11 @@ def test_authenticated_provisioning_updates_device_policy(tmp_path: Path) -> Non
             "showroom": DashboardProfileConfig(name="showroom"),
         },
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         unauthorized = client.put(
             "/api/v1/devices/X4-DEMO01/provision",
+            headers={},
             json={"profile": "showroom"},
         )
         assert unauthorized.status_code == 401
@@ -1947,7 +1999,7 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
         state_path=tmp_path / "state.json",
         api_key="secret",
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id, model in (
             ("X3-FLEET01", "XTEINK_X3"),
             ("X4-FLEET02", "XTEINK_X4"),
@@ -1963,6 +2015,7 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
 
         unauthorized = client.put(
             "/api/v1/fleet/policy",
+            headers={},
             json={"profile": "balanced", "scope": "all"},
         )
         assert unauthorized.status_code == 401
@@ -2056,7 +2109,7 @@ def test_fleet_policy_tracks_pending_and_device_acknowledgement(tmp_path: Path) 
 
 def test_fleet_management_ui_exposes_complete_device_controls(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         html = client.get("/studio/").text
         assert "Waiting for wake" in html
         assert "% battery" in html
@@ -2070,7 +2123,7 @@ def test_fleet_management_ui_exposes_complete_device_controls(tmp_path: Path) ->
 def test_fleet_management_saves_and_deploys_custom_policy_profiles(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json", api_key="secret")
     headers = {"X-FlexDisplay-Bridge-Key": "secret"}
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "X3-MANAGE1", "X-FlexDisplay-Model": "XTEINK_X3"},
@@ -2170,7 +2223,7 @@ def test_screen_marks_matching_image_as_unchanged(tmp_path: Path) -> None:
             )
         },
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
         digest = first.headers["x-flexdisplay-image-sha256"]
         second = client.get(
@@ -2202,7 +2255,7 @@ def test_capable_device_skips_unchanged_screen_body_safely(
         state_path=tmp_path / "state.json",
         home_assistant=HomeAssistantConfig(token=""),
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get(
             "/api/v1/screen",
             headers={
@@ -2268,7 +2321,7 @@ def test_x4_keeps_compressed_png_delivery_with_matching_cache_digest(
         state_path=tmp_path / "state.json",
         home_assistant=HomeAssistantConfig(token=""),
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get(
             "/api/v1/screen",
             headers={
@@ -2309,7 +2362,7 @@ def test_device_image_conversion_diagnostic_is_bounded_and_clears_active_fault(
         home_assistant=HomeAssistantConfig(token=""),
     )
     detail = "png:inflate_init_failed free=59200 max=36800 " + ("x" * 200)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         failed = client.get(
             "/api/v1/screen",
             headers={
@@ -2345,7 +2398,7 @@ def test_device_image_conversion_diagnostic_is_bounded_and_clears_active_fault(
 def test_device_sd_write_and_fetch_diagnostics_are_actionable_and_recover(
     tmp_path: Path,
 ) -> None:
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+    with _managed_device_client(BridgeConfig(state_path=tmp_path / "state.json")) as client:
         failed = client.get(
             "/api/v1/screen",
             headers={
@@ -2385,8 +2438,10 @@ def test_device_sd_write_and_fetch_diagnostics_are_actionable_and_recover(
 
 def test_refresh_command_is_queued_then_consumed(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json", api_key="secret")
-    with TestClient(create_app(config)) as client:
-        unauthorized = client.post("/api/v1/devices/X4-DEMO01/commands/refresh")
+    with _managed_device_client(config) as client:
+        unauthorized = client.post(
+            "/api/v1/devices/X4-DEMO01/commands/refresh", headers={}
+        )
         assert unauthorized.status_code == 401
         queued = client.post(
             "/api/v1/devices/X4-DEMO01/commands/refresh",
@@ -2459,7 +2514,7 @@ def test_remote_power_commands_and_queue_cancellation(tmp_path: Path) -> None:
             )
         },
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X3-DEMO01"})
 
         client.post("/api/v1/devices/X3-DEMO01/commands/full-refresh")
@@ -2498,7 +2553,7 @@ def test_next_command_advances_readable_dashboard_pages(tmp_path: Path) -> None:
         home_assistant=HomeAssistantConfig(token=""),
         devices={"X4-DEMO01": DeviceConfig(name="Test X4", entities=entities)},
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert first.headers["x-flexdisplay-page"] == "1"
         assert first.headers["x-flexdisplay-page-count"] == "8"
@@ -2539,7 +2594,7 @@ def test_profile_navigation_and_page_selection(tmp_path: Path) -> None:
             )
         },
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         assert first.headers["x-flexdisplay-page-title"] == "CLIMATE"
         record = client.get("/api/v1/devices/X4-DEMO01").json()
@@ -2561,7 +2616,7 @@ def test_profile_navigation_and_page_selection(tmp_path: Path) -> None:
 
 def test_button_events_and_extended_telemetry_are_recorded(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get(
             "/api/v1/screen",
             headers={
@@ -2613,7 +2668,7 @@ def test_new_physical_button_events_navigate_once(tmp_path: Path) -> None:
         profiles={"wall": profile},
         devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         right = client.get(
             "/api/v1/screen",
             headers={
@@ -2672,7 +2727,7 @@ def test_configurable_double_press_calls_home_assistant_once(
         profiles={"wall": profile},
         devices={"X3-DEMO01": DeviceConfig(name="Test X3", profile="wall")},
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         initial_screen = client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "X3-DEMO01"},
@@ -2757,7 +2812,7 @@ def test_reader_mode_events_never_execute_home_assistant_mapping(
         state_path=tmp_path / "state.json",
         home_assistant=HomeAssistantConfig(token="test-token"),
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         client.put(
             "/api/v1/devices/X4-DEMO01/button-actions",
@@ -2792,7 +2847,7 @@ def test_reader_mode_events_never_execute_home_assistant_mapping(
 
 def test_button_action_validation_reserves_recovery_and_admin_services(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "X4-DEMO01"})
         reserved = client.put(
             "/api/v1/devices/X4-DEMO01/button-actions",
@@ -2883,14 +2938,14 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
         ],
     }
     headers = {"X-FlexDisplay-Bridge-Key": "studio-secret"}
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         assert client.get("/studio/").status_code == 200
         doubled_ingress = client.get("http://testserver//studio/")
         assert doubled_ingress.status_code == 200
         assert "FlexDisplay Dashboard Studio" in doubled_ingress.text
         assert "Fleet health v0.20" in doubled_ingress.text
         assert "data-resend-screen" in doubled_ingress.text
-        assert client.get("/api/v1/studio").status_code == 401
+        assert client.get("/api/v1/studio", headers={}).status_code == 401
         saved = client.put(
             "/api/v1/studio/profiles/showroom",
             headers=headers,
@@ -2916,7 +2971,7 @@ def test_dashboard_studio_persists_profiles_and_renders_x3_preview(tmp_path: Pat
     assert persisted["version"] == 2
     assert persisted["profiles"]["showroom"]["pages"][0]["activation"]["start"] == "07:00"
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         studio = client.get("/api/v1/studio", headers=headers).json()
         assert [item["name"] for item in studio["profiles"]] == ["default", "showroom"]
 
@@ -2929,7 +2984,7 @@ def test_dashboard_studio_uses_searchable_full_catalogue_entity_picker(
         home_assistant=HomeAssistantConfig(token=""),
     )
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get("/studio/")
 
     assert response.status_code == 200
@@ -2978,7 +3033,7 @@ def test_dashboard_studio_builds_standalone_name_card_and_qr_code(
         ]
     }
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         studio = client.get("/studio/")
         assert "Fixed content (no HA entity)" in studio.text
         assert "Name card / ID pass" in studio.text
@@ -3087,7 +3142,7 @@ def test_dashboard_studio_offers_qr_page_template_and_common_payload_types(
         "phone": "tel:+61300000000",
     }
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         studio = client.get("/studio/")
         assert '<option value="qr_code">QR code page</option>' in studio.text
         assert 'title: "QR CODE", layout: "single"' in studio.text
@@ -3173,7 +3228,7 @@ def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
         "legacy.bmp": "BMP",
     }
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         album = client.put(
             "/api/v1/photo-frame/albums/family",
             json={
@@ -3325,7 +3380,7 @@ def test_photo_frame_media_pipeline_uploads_converts_and_assigns_albums(
         )
         assert too_large.status_code == 413
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         persisted = client.get("/api/v1/photo-frame").json()
         assert persisted["albums"]["family"]["name"] == "Family"
         assert len(persisted["albums"]["family"]["items"]) == 4
@@ -3336,7 +3391,7 @@ def test_dashboard_studio_exposes_photo_frame_media_library(tmp_path: Path) -> N
         state_path=tmp_path / "state.json",
         home_assistant=HomeAssistantConfig(token=""),
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         html = client.get("/studio/").text
 
     assert "Photo Frame v0.18" in html
@@ -3407,7 +3462,7 @@ def test_photo_frame_empty_album_renders_setup_screen_instead_of_ha_error(
         state_path=tmp_path / "state.json",
         home_assistant=HomeAssistantConfig(token=""),
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         assigned = client.put(
             "/api/v1/photo-frame/devices/X3-EMPTY",
             json={"album_id": "default"},
@@ -3457,7 +3512,7 @@ def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> Non
             }
         ]
     }
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -3488,7 +3543,7 @@ def test_dashboard_studio_assignment_drives_device_screen(tmp_path: Path) -> Non
 
 def test_dashboard_studio_rejects_unsafe_profiles(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         invalid_name = client.put(
             "/api/v1/studio/profiles/not%20safe",
             json={"pages": [{"title": "Overview", "entities": []}]},
@@ -3606,7 +3661,7 @@ def test_dashboard_studio_accepts_an_external_image_without_an_ha_entity(tmp_pat
             }
         ]
     }
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         saved = client.put("/api/v1/studio/profiles/photos", json=profile)
 
     assert saved.status_code == 200
@@ -3737,7 +3792,7 @@ def test_state_aware_device_alert_restores_default_playlist(tmp_path: Path) -> N
         profiles={"aware": profile},
         default_profile="aware",
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         alert = client.get(
             "/api/v1/screen",
             headers={
@@ -3872,7 +3927,7 @@ def test_install_command_delivers_release_metadata(tmp_path: Path) -> None:
         minimum_battery_percent=45,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -3921,7 +3976,7 @@ def test_note4_controls_and_firmware_are_isolated_from_x4_rollout(tmp_path: Path
         firmware=x4_firmware,
         note4_firmware=note4_firmware,
     )
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         checkin = client.get(
             "/api/v1/screen",
             headers={
@@ -3976,7 +4031,7 @@ def test_firmware_rollout_requires_verified_usb_canary(tmp_path: Path) -> None:
         max_parallel=1,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id in ("X3-CANARY", "X4-FLEET01", "X3-FLEET02"):
             client.get(
                 "/api/v1/screen",
@@ -4070,7 +4125,7 @@ def test_fleet_management_plans_and_advances_safe_ota_rollout(tmp_path: Path) ->
         firmware=firmware,
     )
     auth = {"X-FlexDisplay-Bridge-Key": "secret"}
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id, model in (
             ("X3-MANAGE1", "XTEINK_X3"),
             ("X4-MANAGE2", "XTEINK_X4"),
@@ -4153,7 +4208,7 @@ def test_rollout_reset_does_not_bypass_usb_canary_gate(tmp_path: Path) -> None:
         max_parallel=1,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -4259,7 +4314,7 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
         firmware=firmware,
     )
     authorized = {"X-FlexDisplay-Bridge-Key": "bridge-secret"}
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -4314,6 +4369,7 @@ def test_usb_recovery_verification_is_guarded_and_audited(tmp_path: Path) -> Non
 
         unauthenticated = client.post(
             "/api/v1/devices/X4-USB001/firmware/verify-usb-recovery",
+            headers={},
             json={
                 "expected_target_version": firmware.version,
                 "expected_command_id": command_id,
@@ -4351,7 +4407,7 @@ def test_usb_recovery_accepts_recent_matching_macos_evidence(tmp_path: Path) -> 
         size=5_500_000,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -4428,7 +4484,7 @@ def test_usb_recovery_verifies_stuck_fleet_device_after_canary(tmp_path: Path) -
         require_usb_for_canary=True,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id in ("X4-CANARY", "X3-FLEET01"):
             client.get(
                 "/api/v1/screen",
@@ -4503,7 +4559,9 @@ def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Pa
         sha256="not-a-sha",
         size=5_500_000,
     )
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "bad.json", firmware=invalid))) as client:
+    with _managed_device_client(
+        BridgeConfig(state_path=tmp_path / "bad.json", firmware=invalid)
+    ) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -4523,7 +4581,9 @@ def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Pa
         sha256="ef" * 32,
         size=5_500_000,
     )
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "sd.json", firmware=valid))) as client:
+    with _managed_device_client(
+        BridgeConfig(state_path=tmp_path / "sd.json", firmware=valid)
+    ) as client:
         client.get(
             "/api/v1/screen",
             headers={
@@ -4539,7 +4599,7 @@ def test_firmware_preflight_rejects_missing_sd_and_invalid_manifest(tmp_path: Pa
 
 def test_invalid_device_id_is_rejected(tmp_path: Path) -> None:
     config = BridgeConfig(state_path=tmp_path / "state.json")
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get("/api/v1/screen", headers={"X-FlexDisplay-ID": "../../bad"})
         assert response.status_code == 400
 
@@ -4614,7 +4674,7 @@ def test_cancel_stops_dispatched_install_and_device_retry(tmp_path: Path) -> Non
         mirror_enabled=False,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         telemetry = {
             "X-FlexDisplay-ID": "X4-CANCEL",
             "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
@@ -4658,7 +4718,7 @@ def test_failed_rollout_can_reset_and_retry_with_backoff(tmp_path: Path) -> None
         mirror_enabled=False,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         telemetry = {
             "X-FlexDisplay-ID": "X3-RETRY1",
             "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
@@ -4707,7 +4767,7 @@ def test_exact_target_usb_checkin_auto_reconciles_failed_update(tmp_path: Path) 
         mirror_enabled=False,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         telemetry = {
             "X-FlexDisplay-ID": "X4-RECOVER",
             "X-FlexDisplay-Firmware": "1.4.1-flexdisplay.0.18.0",
@@ -4776,7 +4836,7 @@ def test_firmware_mirror_downloads_verifies_and_serves_release(
         mirror_enabled=True,
     )
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         response = client.get("/api/v1/firmware/current.bin")
         assert response.status_code == 200
         assert response.content == payload

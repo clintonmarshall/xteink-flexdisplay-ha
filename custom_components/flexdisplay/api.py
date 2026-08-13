@@ -168,6 +168,12 @@ class FlexDisplayApiClient:
             },
         )
 
+    async def clear_notification(self, device_id: str) -> dict[str, Any]:
+        """Clear the active Android receiver alert."""
+        return await self._request(
+            "DELETE", f"/api/v1/devices/{device_id}/notifications/current"
+        )
+
     async def apply_policy(
         self,
         profile: str,

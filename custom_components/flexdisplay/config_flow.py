@@ -34,15 +34,24 @@ class FlexDisplayConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             except FlexDisplayApiError:
                 errors["base"] = "cannot_connect"
             else:
-                await self.async_set_unique_id(url.lower())
-                self._abort_if_unique_id_configured()
-                return self.async_create_entry(
-                    title="FlexDisplay Bridge",
-                    data={
-                        CONF_URL: url,
-                        CONF_API_KEY: user_input.get(CONF_API_KEY, ""),
-                    },
-                )
+                try:
+                    await client.devices()
+                except FlexDisplayApiError:
+                    errors["base"] = (
+                        "invalid_auth"
+                        if user_input.get(CONF_API_KEY)
+                        else "api_key_required"
+                    )
+                else:
+                    await self.async_set_unique_id(url.lower())
+                    self._abort_if_unique_id_configured()
+                    return self.async_create_entry(
+                        title="FlexDisplay Bridge",
+                        data={
+                            CONF_URL: url,
+                            CONF_API_KEY: user_input.get(CONF_API_KEY, ""),
+                        },
+                    )
 
         schema = vol.Schema(
             {

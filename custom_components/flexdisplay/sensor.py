@@ -14,7 +14,11 @@ from homeassistant.components.sensor import (
     SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import PERCENTAGE, SIGNAL_STRENGTH_DECIBELS_MILLIWATT
+from homeassistant.const import (
+    PERCENTAGE,
+    SIGNAL_STRENGTH_DECIBELS_MILLIWATT,
+    EntityCategory,
+)
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
@@ -22,6 +26,7 @@ from homeassistant.util.dt import parse_datetime
 from .coordinator import FlexDisplayCoordinator
 from .device_capabilities import (
     firmware_manageable,
+    is_android_receiver,
     is_note4,
     reports_battery,
     supports_xteink_ota,
@@ -225,6 +230,70 @@ DESCRIPTIONS = (
         value_fn=lambda record: record.get("battery_voltage"),
     ),
     FlexDisplaySensorDescription(
+        key="battery_status",
+        translation_key="battery_status",
+        device_class=SensorDeviceClass.ENUM,
+        options=("charging", "full", "discharging", "not_charging"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("battery_status"),
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_health",
+        translation_key="battery_health",
+        device_class=SensorDeviceClass.ENUM,
+        options=(
+            "good",
+            "overheat",
+            "dead",
+            "over_voltage",
+            "unspecified_failure",
+            "cold",
+        ),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("battery_health"),
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_temperature_c",
+        translation_key="battery_temperature",
+        device_class=SensorDeviceClass.TEMPERATURE,
+        native_unit_of_measurement="°C",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("battery_temperature_c"),
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_current_ma",
+        translation_key="battery_current",
+        device_class=SensorDeviceClass.CURRENT,
+        native_unit_of_measurement="mA",
+        state_class=SensorStateClass.MEASUREMENT,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("battery_current_ma"),
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_plug_type",
+        translation_key="battery_plug_type",
+        device_class=SensorDeviceClass.ENUM,
+        options=("ac", "usb", "wireless", "dock", "none"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("battery_plug_type"),
+    ),
+    FlexDisplaySensorDescription(
+        key="battery_observed_at",
+        translation_key="battery_observed_at",
+        device_class=SensorDeviceClass.TIMESTAMP,
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: parse_datetime(record.get("battery_observed_at", "")),
+    ),
+    FlexDisplaySensorDescription(
+        key="camera_policy",
+        translation_key="camera_policy",
+        device_class=SensorDeviceClass.ENUM,
+        options=("off", "allow_while_open"),
+        entity_category=EntityCategory.DIAGNOSTIC,
+        value_fn=lambda record: record.get("camera_policy"),
+    ),
+    FlexDisplaySensorDescription(
         key="uptime_seconds",
         translation_key="uptime",
         device_class=SensorDeviceClass.DURATION,
@@ -407,7 +476,17 @@ def _device_sensors(
     record = next(
         (item for item in coordinator.data if item.get("device_id") == device_id), {}
     )
-    battery_keys = {"battery_percent", "battery_voltage"}
+    battery_keys = {
+        "battery_percent",
+        "battery_voltage",
+        "battery_status",
+        "battery_health",
+        "battery_temperature_c",
+        "battery_current_ma",
+        "battery_plug_type",
+        "battery_observed_at",
+    }
+    android_keys = {"screen_brightness", "camera_policy"}
     managed_firmware_keys = {
         "firmware_update_status",
         "firmware_update_stage",
@@ -421,6 +500,7 @@ def _device_sensors(
         for description in descriptions
         if not (
             (description.key in battery_keys and not reports_battery(record))
+            or (description.key in android_keys and not is_android_receiver(record))
             or (
                 description.key in managed_firmware_keys
                 and not firmware_manageable(record)
@@ -431,8 +511,7 @@ def _device_sensors(
             )
         )
     ]
-    model = str(record.get("model") or "").upper()
-    if is_note4(record) or model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}:
+    if is_note4(record) or is_android_receiver(record):
         descriptions.extend(VOICE_DESCRIPTIONS)
     return tuple(
         FlexDisplaySensor(coordinator, device_id, description)
@@ -457,8 +536,19 @@ class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
 
     def _record_supported(self, record: dict) -> bool:
         key = self.entity_description.key
-        if key in {"battery_percent", "battery_voltage"}:
+        if key in {
+            "battery_percent",
+            "battery_voltage",
+            "battery_status",
+            "battery_health",
+            "battery_temperature_c",
+            "battery_current_ma",
+            "battery_plug_type",
+            "battery_observed_at",
+        }:
             return reports_battery(record)
+        if key == "camera_policy":
+            return is_android_receiver(record)
         if key in {
             "firmware_update_status",
             "firmware_update_stage",
@@ -476,7 +566,7 @@ class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
             "last_voice_error",
             "last_voice_at",
         }:
-            return is_note4(record)
+            return is_note4(record) or is_android_receiver(record)
         return True
 
     @property

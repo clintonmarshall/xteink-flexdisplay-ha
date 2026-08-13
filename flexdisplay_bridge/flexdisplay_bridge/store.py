@@ -4,6 +4,7 @@ import json
 import hashlib
 import hmac
 import re
+import secrets
 import threading
 from collections.abc import Callable
 from copy import deepcopy
@@ -12,6 +13,32 @@ from pathlib import Path
 from typing import Any
 
 CHECKIN_HISTORY_LIMIT = 48
+NOTIFICATION_RESPONSE_HISTORY_LIMIT = 32
+ANDROID_COMPANION_REPLACE_FIELDS = frozenset(
+    {
+        "battery_percent",
+        "battery_voltage",
+        "battery_charging",
+        "battery_status",
+        "battery_health",
+        "battery_temperature_c",
+        "battery_voltage_mv",
+        "battery_plug_type",
+        "battery_current_ma",
+        "battery_observed_at",
+        "usb_connected",
+        "camera_available",
+        "camera_permission",
+        "microphone_available",
+        "microphone_permission",
+        "speaker_available",
+        "camera_policy",
+        "foreground_active",
+        "foreground_session",
+        "dock_enabled",
+        "dock_active",
+    }
+)
 RESET_HISTORY_LIMIT = 24
 IDENTITY_HISTORY_LIMIT = 24
 PROBLEM_RESET_REASONS = {
@@ -39,6 +66,11 @@ def _is_android_receiver(record: dict[str, Any]) -> bool:
         "ANDROIDPHONE",
         "ANDROIDCOMPANION",
     }
+
+
+def _is_android_companion(record: dict[str, Any]) -> bool:
+    model = re.sub(r"[^A-Z0-9]", "", str(record.get("model") or "").upper())
+    return model in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
 
 
 def utc_now() -> str:
@@ -181,6 +213,10 @@ class DeviceStore:
             previous_model = str(record.get("model") or "")
             previous_model_reported = record.get("model_reported") is True
             now = utc_now()
+            if is_checkin and _is_android_companion(telemetry):
+                for field in ANDROID_COMPANION_REPLACE_FIELDS:
+                    if telemetry.get(field) is None:
+                        record.pop(field, None)
             record.update({key: value for key, value in telemetry.items() if value is not None})
             record["last_seen"] = now
             if is_checkin:
@@ -211,6 +247,12 @@ class DeviceStore:
                     "at": now,
                     "battery_percent": telemetry.get("battery_percent"),
                     "battery_voltage": telemetry.get("battery_voltage"),
+                    "battery_status": telemetry.get("battery_status"),
+                    "battery_health": telemetry.get("battery_health"),
+                    "battery_temperature_c": telemetry.get("battery_temperature_c"),
+                    "battery_voltage_mv": telemetry.get("battery_voltage_mv"),
+                    "battery_current_ma": telemetry.get("battery_current_ma"),
+                    "battery_plug_type": telemetry.get("battery_plug_type"),
                     "rssi": telemetry.get("rssi"),
                     "usb_connected": telemetry.get("usb_connected"),
                     "sd_ready": telemetry.get("sd_ready"),
@@ -275,6 +317,142 @@ class DeviceStore:
                         record["last_problem_reset_reason"] = reason
             self._save()
             return deepcopy(record)
+
+    def record_notification_created(
+        self,
+        device_id: str,
+        *,
+        notification_id: str,
+        expires_at: str,
+    ) -> dict[str, Any] | None:
+        """Persist the public lifecycle of one active receiver notification."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None:
+                return None
+            now = utc_now()
+            record.update(
+                {
+                    "active_alert": True,
+                    "active_notification_id": notification_id[:96],
+                    "active_notification_created_at": now,
+                    "active_notification_expires_at": expires_at,
+                    "last_notification_delivery_status": "queued",
+                    "last_notification_id": notification_id[:96],
+                    "last_notification_at": now,
+                }
+            )
+            self._save()
+            return deepcopy(record)
+
+    def record_notification_fetched(
+        self, device_id: str, notification_id: str
+    ) -> dict[str, Any] | None:
+        """Mark the currently active notification as fetched by its receiver."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None:
+                return None
+            if notification_id != str(record.get("active_notification_id") or ""):
+                return deepcopy(record)
+            if record.get("last_notification_delivery_status") == "queued":
+                record["last_notification_delivery_status"] = "fetched"
+                record["last_notification_fetched_at"] = utc_now()
+                self._save()
+            return deepcopy(record)
+
+    def record_notification_response(
+        self,
+        device_id: str,
+        *,
+        notification_id: str,
+        outcome: str,
+        action_id: str = "",
+        device_reported_at: str | None = None,
+        trust: str = "paired_receiver",
+    ) -> tuple[dict[str, Any] | None, bool]:
+        """Atomically retain one bounded public outcome per notification ID."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None:
+                return None, False
+            history = list(record.get("notification_response_history") or [])
+            for response in history:
+                if str(response.get("notification_id") or "") == notification_id:
+                    return deepcopy(response), False
+            response = {
+                "event_id": secrets.token_urlsafe(12),
+                "notification_id": notification_id[:96],
+                "outcome": outcome,
+                "trust": "bridge" if trust == "bridge" else "paired_receiver",
+                "action_id": action_id[:64],
+                "device_reported_at": device_reported_at,
+                "received_at": utc_now(),
+            }
+            response = {key: value for key, value in response.items() if value not in {"", None}}
+            history.append(response)
+            record["notification_response_history"] = history[
+                -NOTIFICATION_RESPONSE_HISTORY_LIMIT:
+            ]
+            record["last_notification_response"] = deepcopy(response)
+            record["last_notification_response_at"] = response["received_at"]
+            record["last_notification_delivery_status"] = outcome
+            if notification_id == str(record.get("active_notification_id") or ""):
+                self._clear_active_notification_locked(record)
+            self._save()
+            return deepcopy(response), True
+
+    def record_notification_action_execution(
+        self,
+        device_id: str,
+        event_id: str,
+        *,
+        success: bool,
+    ) -> dict[str, Any] | None:
+        """Attach only a public execution result to one retained action outcome."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None:
+                return None
+            selected = None
+            for response in record.get("notification_response_history") or []:
+                if str(response.get("event_id") or "") == event_id:
+                    response["action_execution_success"] = bool(success)
+                    selected = response
+                    break
+            if selected is None:
+                return None
+            if str((record.get("last_notification_response") or {}).get("event_id") or "") == event_id:
+                record["last_notification_response"] = deepcopy(selected)
+            self._save()
+            return deepcopy(selected)
+
+    @staticmethod
+    def _clear_active_notification_locked(record: dict[str, Any]) -> bool:
+        fields = (
+            "active_notification_id",
+            "active_notification_created_at",
+            "active_notification_expires_at",
+            "last_notification_fetched_at",
+        )
+        changed = bool(record.get("active_alert")) or any(
+            field in record for field in fields
+        )
+        record["active_alert"] = False
+        for field in fields:
+            record.pop(field, None)
+        return changed
+
+    def clear_active_notification(self, device_id: str) -> bool:
+        """Clear only the receiver's active alert, preserving response history."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if record is None or not self._clear_active_notification_locked(record):
+                return False
+            record["last_notification_delivery_status"] = "cleared"
+            record["last_notification_cleared_at"] = utc_now()
+            self._save()
+            return True
 
     def pin_receiver_token(self, device_id: str, token: str) -> bool:
         """Atomically pin the first Android receiver token or verify the winner."""
@@ -515,6 +693,59 @@ class DeviceStore:
             listener(device_id, command, deepcopy(queued))
         return queued
 
+    def queue_camera_snapshot(
+        self, device_id: str, foreground_session: str
+    ) -> dict[str, Any] | None:
+        """Atomically queue and bind one capture to the requesting app session."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record or (
+                _is_android_companion(record) and not foreground_session
+            ):
+                return None
+            if record.get("pending_commands") or record.get("dispatched_commands"):
+                return None
+            sequence = int(self._state.get("command_sequence", 0)) + 1
+            self._state["command_sequence"] = sequence
+            record["pending_commands"] = ["camera-snapshot"]
+            record["pending_command_id"] = f"{device_id}-{sequence:08x}"
+            record["command_queued_at"] = utc_now()
+            if foreground_session:
+                record["camera_snapshot_foreground_session"] = foreground_session[:64]
+            else:
+                record.pop("camera_snapshot_foreground_session", None)
+            self._save()
+            queued = deepcopy(record)
+            listeners = list(self._command_listeners)
+        for listener in listeners:
+            listener(device_id, "camera-snapshot", deepcopy(queued))
+        return queued
+
+    def reject_camera_snapshot_session(
+        self, device_id: str, foreground_session: str
+    ) -> bool:
+        """Atomically cancel a capture if its bound onResume session has changed."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return False
+            pending = list(record.get("pending_commands") or [])
+            dispatched = list(record.get("dispatched_commands") or [])
+            if pending != ["camera-snapshot"] and dispatched != ["camera-snapshot"]:
+                return False
+            bound = str(record.get("camera_snapshot_foreground_session") or "")
+            if bound and hmac.compare_digest(bound, foreground_session or ""):
+                return False
+            record["pending_commands"] = []
+            record["dispatched_commands"] = []
+            record.pop("pending_command_id", None)
+            record.pop("dispatched_command_id", None)
+            record.pop("camera_snapshot_foreground_session", None)
+            record["last_command_result"] = "camera-snapshot:session-mismatch"
+            record["command_completed_at"] = utc_now()
+            self._save()
+            return True
+
     def consume_commands(self, device_id: str) -> list[str]:
         with self._lock:
             record = self._state["devices"].get(device_id)
@@ -735,6 +966,20 @@ class DeviceStore:
                 return False
             if list(record.get("dispatched_commands") or []) != ["camera-snapshot"]:
                 return False
+            if _is_android_companion(record):
+                current_session = str(record.get("foreground_session") or "")
+                bound_session = str(
+                    record.get("camera_snapshot_foreground_session") or ""
+                )
+                if (
+                    record.get("camera_available") is not True
+                    or record.get("camera_permission") is not True
+                    or record.get("camera_policy") != "allow_while_open"
+                    or record.get("foreground_active") is not True
+                    or not current_session
+                    or not hmac.compare_digest(current_session, bound_session)
+                ):
+                    return False
             try:
                 dispatched_at = datetime.fromisoformat(
                     str(record.get("command_dispatched_at") or "")
@@ -749,6 +994,7 @@ class DeviceStore:
             record["last_command_id"] = command_id[:96]
             record["command_completed_at"] = now
             record["camera_snapshot_command_id"] = command_id[:96]
+            record.pop("camera_snapshot_foreground_session", None)
             record["dispatched_commands"] = []
             record.pop("dispatched_command_id", None)
             history = record.setdefault("command_history", [])
@@ -794,6 +1040,7 @@ class DeviceStore:
             if dispatched == ["camera-snapshot"]:
                 record["dispatched_commands"] = []
                 record.pop("dispatched_command_id", None)
+            record.pop("camera_snapshot_foreground_session", None)
             record["last_command_result"] = "camera-snapshot:expired"
             record["command_completed_at"] = utc_now()
             self._save()
