@@ -12,9 +12,11 @@ jobs:
   bridge:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v4
+      # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # actions/setup-python v5
+        with:
+          persist-credentials: false
+      # actions/setup-python v5.6.0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065
         with:
           python-version: "3.13"
@@ -37,8 +39,10 @@ jobs:
   app:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v4
+      # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
       - name: Build Home Assistant App image
         run: |
           BUILD_VERSION="$(python3 scripts/check_release_metadata.py --print-version)"
@@ -50,17 +54,39 @@ jobs:
   hacs:
     runs-on: ubuntu-latest
     steps:
-      - name: HACS validation
-        # hacs/action main reviewed 2026-08-13
-        uses: hacs/action@1ebf01c408f29afcb6406bd431bc98fd8cbb15aa
+      # actions/checkout v4.4.0
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
-          category: integration
-          ignore: brands
+          persist-credentials: false
+      - name: Run partial content-addressed HACS schemas
+        run: |
+          set -eu
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --env PYTHONPATH=/hacs \
+            --volume "$GITHUB_WORKSPACE:/workspace:ro" \
+            --workdir /workspace \
+            --entrypoint python3 \
+            ghcr.io/hacs/action@sha256:41f6310585d9fb72c7a0e183cce0594355715bc24112b62bc4279b83412edccb \
+            scripts/check_hacs_local.py
 
   hassfest:
     runs-on: ubuntu-latest
     steps:
-      # actions/checkout v4
+      # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
-      # home-assistant/actions hassfest master reviewed 2026-08-13
-      - uses: home-assistant/actions/hassfest@a7c616ce81ccda50150bf1595786c71b1883fabb
+        with:
+          persist-credentials: false
+      - name: Run content-addressed hassfest container
+        run: |
+          set -eu
+          docker run --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            --env PYTHONDONTWRITEBYTECODE=1 \
+            --volume "$GITHUB_WORKSPACE:/github/workspace:ro" \
+            ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d

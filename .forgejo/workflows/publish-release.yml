@@ -1,0 +1,94 @@
+name: Publish authoritative Forgejo release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  verify-tagged-release:
+    runs-on: trusted-release
+    steps:
+      - name: Check out protected tag without credentials
+        env:
+          RELEASE_TAG: ${{ forgejo.ref_name }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --force --tags origin \
+            "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git checkout --detach "refs/tags/$RELEASE_TAG^{}"
+      - name: Verify protected immutable release tag
+        env:
+          RELEASE_TAG: ${{ forgejo.ref_name }}
+          EVENT_COMMIT: ${{ forgejo.sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Invalid release tag: $RELEASE_TAG" >&2; exit 1 ;;
+          esac
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = "tag"
+          tagged_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$tagged_commit" = "$EVENT_COMMIT"
+          test "$tagged_commit" = "$(git rev-parse HEAD)"
+          python3 scripts/check_release_metadata.py --release "${RELEASE_TAG#v}"
+      - name: Require reviewed publication controls
+        env:
+          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_RELEASE_AUTOMATION_ENABLED }}
+          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_RELEASE_RUNNER_ISOLATED }}
+          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_RELEASE_CREDENTIAL_PATH_APPROVED }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$AUTOMATION_ENABLED" = "true"
+          test "$RUNNER_ISOLATED" = "true"
+          test "$CREDENTIAL_PATH_APPROVED" = "true"
+          echo "Tagged release checks passed, but Forgejo release publication is" >&2
+          echo "intentionally disabled in this scaffold. Add the reviewed publisher" >&2
+          echo "plus authenticated tag-protection, required-check, and checksum" >&2
+          echo "verification in a separate change; no raw API fallback." >&2
+          exit 1

@@ -1,6 +1,9 @@
 # Compatibility matrix
 
 Update this table in every release that changes a protocol or minimum version.
+This document records released software compatibility, not live infrastructure.
+Live hostnames, IP addresses, credentials, and current deployment observations
+belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
@@ -9,10 +12,18 @@ Update this table in every release that changes a protocol or minimum version.
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
-| Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |
+| Home Assistant | No minimum declared | Bridge App and integration; each release must record the exact tested Home Assistant Core version in its release evidence |
 
 Protocol changes must document both the minimum compatible device version and
 the fallback behavior for older devices.
+
+Only device families represented in this matrix and admitted through the
+architecture process are supported release targets. A newly observed family
+remains external and read-only until its owning repository, stable identity and
+capability evidence, minimum versions and fallbacks, transport/security review,
+hardware validation, and recovery path are documented. Unknown families must
+not inherit firmware, provisioning, policy, reset, or command capabilities from
+a visually similar or historically inferred model.
 
 Platform 0.46.0 introduces a trusted capability contract shared by the Bridge,
 Studio, MQTT, and the Home Assistant integration. Legacy X3/X4 check-ins remain
