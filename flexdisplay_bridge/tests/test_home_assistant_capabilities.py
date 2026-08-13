@@ -270,6 +270,9 @@ def test_android_phone_entity_platform_contracts_are_privacy_bounded() -> None:
     assert "camera_ready" in binary_sensor
     assert "speaker_ready" in binary_sensor
     assert "battery_charging" in binary_sensor
+    assert binary_sensor.count('\n        key="microphone_available"') == 1
+    assert "for description in _command_descriptions(record)" in button
+    assert "descriptions.extend(ANDROID_DESCRIPTIONS)" in button
     for key in (
         "battery_status",
         "battery_health",

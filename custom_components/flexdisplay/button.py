@@ -12,6 +12,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from .coordinator import FlexDisplayCoordinator
 from .device_capabilities import (
     is_android_companion,
+    is_android_receiver,
     management_supports,
     supported_actions,
     supports_xteink_ota,
@@ -280,30 +281,12 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
-def _is_android_receiver(record: dict) -> bool:
-    model = str(record.get("model") or "").upper()
-    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
-
-
-def _device_buttons(
-    coordinator: FlexDisplayCoordinator, device_id: str
-) -> tuple[ButtonEntity, ...]:
-    record = next(
-        (item for item in coordinator.data if item.get("device_id") == device_id), {}
-    )
+def _command_descriptions(record: dict) -> tuple[FlexDisplayButtonDescription, ...]:
+    """Return commands owned by the receiver family."""
     descriptions = list(DESCRIPTIONS)
-    if _is_android_receiver(record):
+    if is_android_receiver(record):
         descriptions.extend(ANDROID_DESCRIPTIONS)
-    return (
-        *(
-            FlexDisplayCommandButton(coordinator, device_id, description)
-            for description in descriptions
-        ),
-        FlexDisplayCancelCommandsButton(coordinator, device_id),
-        FlexDisplayRetryFirmwareButton(coordinator, device_id),
-        FlexDisplayResetRolloutButton(coordinator, device_id),
-        FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
-    )
+    return tuple(descriptions)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -390,7 +373,7 @@ async def async_setup_entry(
         actions = supported_actions(record)
         command_buttons = tuple(
             FlexDisplayCommandButton(coordinator, device_id, description)
-            for description in DESCRIPTIONS
+            for description in _command_descriptions(record)
             if description.command in actions
         )
         firmware_buttons: tuple[ButtonEntity, ...] = ()

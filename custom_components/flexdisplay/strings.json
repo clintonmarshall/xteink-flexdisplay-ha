@@ -263,9 +263,6 @@
       "low_battery": {
         "name": "Low battery"
       },
-      "microphone_available": {
-        "name": "Microphone available"
-      },
       "home_assistant_error": {
         "name": "Home Assistant error"
       },

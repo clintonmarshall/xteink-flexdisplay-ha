@@ -113,7 +113,9 @@ Displays** to inspect larger fleets.
 4. Install **FlexDisplay** and restart Home Assistant.
 5. Open **Settings → Devices & services → Add integration → FlexDisplay**.
 6. Enter `http://HOME_ASSISTANT_IP:8099`.
-7. If the Bridge App has an API key, enter the same key.
+7. Enter the same API key configured in the Bridge App. The full device
+   inventory and management endpoints fail closed without it; only `/healthz`
+   remains public.
 
 ## 3. Provision each X3/X4
 

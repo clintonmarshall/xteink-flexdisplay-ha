@@ -12,6 +12,9 @@ android {
         applicationId "au.com.ldcs.flexdisplay.rook"
         minSdk 24
         targetSdk 33
+        // Android receiver versions are independent from the Bridge platform.
+        // versionCode must increase for every published Companion APK signed
+        // by the permanent FlexDisplay Companion release key.
         versionCode 5
         versionName "0.5.0"
     }

@@ -1096,19 +1096,24 @@ def test_quick_card_request_body_is_bounded_for_chunked_uploads(
 def test_content_rollouts_fail_closed_for_unsupported_device_families(
     tmp_path: Path,
 ) -> None:
-    with TestClient(create_app(BridgeConfig(state_path=tmp_path / "state.json"))) as client:
+    with _managed_device_client(
+        BridgeConfig(state_path=tmp_path / "state.json")
+    ) as client:
         for device_id, model in (
             ("X3-CONTENT01", "X3"),
             ("X4-CONTENT02", "X4"),
             ("ROOK-CONTENT03", "ROOK"),
             ("N4-CONTENT04", "ZECTRIX_NOTE4"),
         ):
+            headers = {
+                "X-FlexDisplay-ID": device_id,
+                "X-FlexDisplay-Model": model,
+            }
+            if model == "ROOK":
+                headers["X-FlexDisplay-Receiver-Token"] = "content-rook-token"
             assert client.get(
                 "/api/v1/screen",
-                headers={
-                    "X-FlexDisplay-ID": device_id,
-                    "X-FlexDisplay-Model": model,
-                },
+                headers=headers,
             ).status_code == 200
 
         built = client.post(

@@ -64,6 +64,23 @@ The debug APKs are written to:
 - `app/build/outputs/apk/kiosk/debug/app-kiosk-debug.apk`
 - `app/build/outputs/apk/companion/debug/app-companion-debug.apk`
 
+The first production Companion candidate is version `0.5.0-companion`
+(version code 5). Its unsigned packaging gate is:
+
+```bash
+./gradlew --no-daemon testCompanionReleaseUnitTest \
+  lintCompanionRelease assembleCompanionRelease
+```
+
+Do not distribute that unsigned output. The protected Forgejo Android release
+workflow signs it with the permanent production key, verifies the exact
+application ID, version, permissions, exported components, certificate and
+SHA-256, then attaches an immutable APK/checksum/metadata set to a draft
+Forgejo release. Signing material is never committed and never sent to GitHub.
+The workflow remains intentionally unavailable until a dedicated release runner
+is provisioned and the independently verified public certificate SHA-256 is
+committed in a reviewed release change.
+
 ## Install and configure
 
 Install the Echo kiosk flavor with:
@@ -80,6 +97,16 @@ adb install -r app/build/outputs/apk/companion/debug/app-companion-debug.apk
 adb shell am start \
   -n au.com.ldcs.flexdisplay.rook.companion/au.com.ldcs.flexdisplay.rook.MainActivity
 ```
+
+Those commands install the developer/debug build only. For a published APK,
+download all three release assets, verify the `.apk.sha256`, and verify the APK
+signer against the production certificate fingerprint retained independently in
+the release runbook or an offline trusted record—not only metadata downloaded
+beside the APK. Then install it on the explicitly selected serial. The first
+production build cannot update an existing debug-signed copy in place. Record
+non-secret connection settings, uninstall the debug build, re-pair its Bridge
+identity, and reinstall once; subsequent releases signed by the same key and
+using a higher version code can use `adb install -r`.
 
 The Bridge must be reachable directly from the receiver over the trusted LAN. A
 Home Assistant ingress URL is not suitable because it requires a browser
@@ -163,7 +190,7 @@ automation. If the installed LineageOS build or camera shim exposes camera
 hardware to Android, receiver `0.5.0` reports that capability to the Bridge so
 Home Assistant can show capability-aware entities and dashboards.
 
-Version 0.4.0 adds Android fleet controls. The Bridge and Home Assistant
+Version 0.4.0 added Android fleet controls. The Bridge and Home Assistant
 integration can set receiver speaker volume, mute/unmute, set app brightness,
 restart the receiver app, and trigger a test chime.
 
@@ -171,6 +198,12 @@ Version 0.5.0 adds hardware capability telemetry. The receiver reports camera,
 microphone, audio, touch, always-on colour display class, device class, and
 screen resolution through explicit Bridge headers. Older receivers still work;
 the Bridge falls back to the original comma-separated capabilities where it can.
+
+The separate `0.5.0-companion` (version code 5) release candidate adds the
+privacy-first phone companion, foreground camera/Assist lifecycle, Dock Mode,
+notification responses, battery telemetry, and the production APK publication
+contract. It is not a published kiosk or Companion release until its signed APK
+passes the draft, canary, and promotion gates above.
 
 ## Phone camera, microphone, and speaker entities
 

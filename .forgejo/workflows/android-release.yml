@@ -1,0 +1,373 @@
+name: Publish signed Android Companion candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing protected annotated platform tag (vX.Y.Z)
+        required: true
+        type: string
+      source_commit:
+        description: Exact tested commit resolved by the tag
+        required: true
+        type: string
+      draft_release_id:
+        description: Existing Forgejo draft release numeric ID
+        required: true
+        type: string
+
+concurrency:
+  # Serialize every attempt for a tag, even if a caller supplies a different
+  # draft ID, so two dispatches cannot race publication of the same identity.
+  group: android-companion-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  companion:
+    # This label is intentionally unavailable until the dedicated, disposable
+    # publication runner has been provisioned and reviewed.
+    runs-on: trusted-release
+    env:
+      REQUESTED_TAG: ${{ inputs.tag }}
+      CONFIRMED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+      FORGEJO_API_URL: ${{ forgejo.api_url }}
+      FORGEJO_REPOSITORY: ${{ forgejo.repository }}
+      FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+    steps:
+      - name: Verify exact Forgejo validation status
+        shell: bash
+        env:
+          RELEASE_API_TOKEN: ${{ forgejo.token }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CONFIRMED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DRAFT_RELEASE_ID" =~ ^[0-9]+$ ]]
+          test -n "$RELEASE_API_TOKEN"
+
+          preflight_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-preflight.XXXXXX")"
+          auth_config="$preflight_tmp/curl.conf"
+          status_json="$preflight_tmp/status.json"
+          cleanup_preflight() {
+            local exit_code=$?
+            set +e
+            if [[ -f "$auth_config" ]]; then
+              : > "$auth_config"
+              rm -f -- "$auth_config"
+            fi
+            find "$preflight_tmp" -depth -type f -delete 2>/dev/null || true
+            find "$preflight_tmp" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+            return "$exit_code"
+          }
+          trap cleanup_preflight EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$RELEASE_API_TOKEN" > "$auth_config"
+          unset RELEASE_API_TOKEN FORGEJO_TOKEN GITHUB_TOKEN
+
+          curl --config "$auth_config" --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            "$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/commits/$CONFIRMED_SOURCE_COMMIT/status?limit=100" \
+            > "$status_json"
+          STATUS_JSON="$status_json" \
+          EXPECTED_REPOSITORY="$FORGEJO_REPOSITORY" \
+          EXPECTED_SHA="$CONFIRMED_SOURCE_COMMIT" \
+          REQUIRED_CONTEXT='Validate / bridge (push)' \
+          python3 -I - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["STATUS_JSON"], encoding="utf-8") as source:
+              payload = json.load(source)
+          expected_sha = os.environ["EXPECTED_SHA"]
+          expected_repository = os.environ["EXPECTED_REPOSITORY"]
+          required_context = os.environ["REQUIRED_CONTEXT"]
+          if payload.get("sha") != expected_sha:
+              raise SystemExit("Forgejo status response did not resolve the exact source SHA")
+          repository = payload.get("repository")
+          if not isinstance(repository, dict) or repository.get("full_name") != expected_repository:
+              raise SystemExit("Forgejo status response identified an unexpected repository")
+          if payload.get("state") != "success":
+              raise SystemExit("Exact source SHA does not have an all-success combined status")
+          statuses = payload.get("statuses")
+          if not isinstance(statuses, list):
+              raise SystemExit("Forgejo status response did not contain status contexts")
+          required = [item for item in statuses if item.get("context") == required_context]
+          if len(required) != 1 or required[0].get("status") != "success":
+              raise SystemExit(f"Required Forgejo status is not successful: {required_context}")
+          print(f"Verified {required_context} for {expected_sha}")
+          PY
+
+      - name: Check out the exact release tag
+        # actions/checkout v6, reviewed 2026-08-13
+        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+
+      - name: Verify reviewed release source and metadata
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CONFIRMED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DRAFT_RELEASE_ID" =~ ^[0-9]+$ ]]
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git cat-file -t "refs/tags/$REQUESTED_TAG")" = tag
+          test "$(git rev-list -n 1 "refs/tags/$REQUESTED_TAG")" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test -n "${ANDROID_SDK_ROOT:-}"
+          python3 scripts/check_release_metadata.py "${REQUESTED_TAG#v}"
+          python3 scripts/check_android_release_metadata.py --require-signer
+
+      - name: Build and lint unsigned release package
+        working-directory: rook_receiver
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: >-
+          ./gradlew --no-daemon clean
+          testKioskDebugUnitTest testCompanionDebugUnitTest
+          assembleKioskDebug assembleCompanionDebug
+          lintKioskDebug lintCompanionDebug
+          testCompanionReleaseUnitTest lintCompanionRelease
+          assembleCompanionRelease
+
+      - name: Confirm build did not mutate tracked source
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          test -z "$(git status --porcelain --untracked-files=all)"
+          python3 scripts/check_release_metadata.py "${REQUESTED_TAG#v}"
+          python3 scripts/check_android_release_metadata.py --require-signer
+
+      - name: Sign and verify immutable companion assets
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+          RELEASE_KEYSTORE_B64: ${{ secrets.FLEXDISPLAY_COMPANION_KEYSTORE_B64 }}
+          RELEASE_STORE_PASSWORD: ${{ secrets.FLEXDISPLAY_COMPANION_STORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.FLEXDISPLAY_COMPANION_KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.FLEXDISPLAY_COMPANION_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$RELEASE_KEYSTORE_B64"
+          test -n "$RELEASE_STORE_PASSWORD"
+          test -n "$RELEASE_KEY_ALIAS"
+          test -n "$RELEASE_KEY_PASSWORD"
+
+          signing_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-signing.XXXXXX")"
+          keystore="$signing_tmp/release.p12"
+          store_pass="$signing_tmp/store.pass"
+          key_pass="$signing_tmp/key.pass"
+          cleanup_signing_secrets() {
+            local exit_code=$?
+            set +e
+            for secret_file in "$keystore" "$store_pass" "$key_pass"; do
+              if [[ -f "$secret_file" ]]; then
+                chmod u+w "$secret_file"
+                : > "$secret_file"
+                rm -f -- "$secret_file"
+              fi
+            done
+            rmdir "$signing_tmp" 2>/dev/null || true
+            return "$exit_code"
+          }
+          trap cleanup_signing_secrets EXIT
+
+          printf '%s' "$RELEASE_KEYSTORE_B64" | base64 --decode > "$keystore"
+          printf '%s' "$RELEASE_STORE_PASSWORD" > "$store_pass"
+          printf '%s' "$RELEASE_KEY_PASSWORD" > "$key_pass"
+
+          artifact_basename="$(sed -n 's/.*"artifact_basename": "\([^"]*\)".*/\1/p' rook_receiver/release/companion-release.json)"
+          [[ "$artifact_basename" =~ ^flexdisplay-companion-[0-9]+\.[0-9]+\.[0-9]+-vc[0-9]+$ ]]
+          expected_signer="$(tr -d '\r\n' < rook_receiver/release/companion-release-cert.sha256)"
+          [[ "$expected_signer" =~ ^[0-9a-f]{64}$ ]]
+
+          apksigner="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 2 -maxdepth 2 -type f -name apksigner | sort -V | tail -1)"
+          zipalign="$(find "$ANDROID_SDK_ROOT/build-tools" -mindepth 2 -maxdepth 2 -type f -name zipalign | sort -V | tail -1)"
+          apkanalyzer="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer"
+          test -x "$apksigner"
+          test -x "$zipalign"
+          test -x "$apkanalyzer"
+
+          unsigned='rook_receiver/app/build/outputs/apk/companion/release/app-companion-release-unsigned.apk'
+          test -f "$unsigned"
+          "$zipalign" -c -p -v 4 "$unsigned"
+
+          dist='rook_receiver/app/build/release-assets'
+          test ! -e "$dist"
+          mkdir "$dist"
+          apk="$dist/$artifact_basename.apk"
+          "$apksigner" sign \
+            --ks "$keystore" \
+            --ks-key-alias "$RELEASE_KEY_ALIAS" \
+            --ks-pass "file:$store_pass" \
+            --key-pass "file:$key_pass" \
+            --out "$apk" \
+            "$unsigned"
+          signer_report="$("$apksigner" verify --verbose --print-certs "$apk")"
+          actual_signer="$(printf '%s\n' "$signer_report" | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' | tr -d ':\r\n' | tr 'A-F' 'a-f')"
+          test "$actual_signer" = "$expected_signer"
+          printf '%s\n' "$signer_report" | grep -Eq '^Number of signers: 1$'
+          ! printf '%s\n' "$signer_report" | grep -Fq 'Android Debug'
+
+          cleanup_signing_secrets
+          trap - EXIT
+          set -e
+          unset RELEASE_KEYSTORE_B64 RELEASE_STORE_PASSWORD RELEASE_KEY_ALIAS RELEASE_KEY_PASSWORD
+
+          readarray -t contract < <(python3 -I - <<'PY'
+          import json
+          data = json.load(open('rook_receiver/release/companion-release.json', encoding='utf-8'))
+          print(data['application_id'])
+          print(data['version_name'])
+          print(data['version_code'])
+          PY
+          )
+          python3 scripts/verify_android_release.py \
+            --apk "$apk" \
+            --apkanalyzer "$apkanalyzer" \
+            --apksigner "$apksigner" \
+            --expected-package "${contract[0]}" \
+            --expected-version-name "${contract[1]}" \
+            --expected-version-code "${contract[2]}" \
+            --expected-signer-sha256 "$expected_signer" \
+            --source-tag "$REQUESTED_TAG" \
+            --source-commit "$CONFIRMED_SOURCE_COMMIT" \
+            --metadata-out "$dist/$artifact_basename.metadata.json"
+          "$apksigner" verify --verbose --print-certs "$apk" > /dev/null
+          (cd "$dist" && sha256sum "$artifact_basename.apk" > "$artifact_basename.apk.sha256")
+
+      - name: Upload or reconcile exact draft assets
+        shell: bash
+        env:
+          RELEASE_API_TOKEN: ${{ forgejo.token }}
+        run: |
+          set -euo pipefail
+          umask 077
+          test -n "$RELEASE_API_TOKEN"
+          auth_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-upload.XXXXXX")"
+          auth_config="$auth_tmp/curl.conf"
+          cleanup_auth() {
+            local exit_code=$?
+            set +e
+            if [[ -f "$auth_config" ]]; then
+              : > "$auth_config"
+              rm -f -- "$auth_config"
+            fi
+            find "$auth_tmp" -depth -type f -delete 2>/dev/null || true
+            find "$auth_tmp" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+            return "$exit_code"
+          }
+          trap cleanup_auth EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$RELEASE_API_TOKEN" > "$auth_config"
+          unset RELEASE_API_TOKEN FORGEJO_TOKEN GITHUB_TOKEN
+
+          dist='rook_receiver/app/build/release-assets'
+          forgejo_server="${FORGEJO_SERVER_URL%/}"
+          artifact_basename="$(sed -n 's/.*"artifact_basename": "\([^"]*\)".*/\1/p' rook_receiver/release/companion-release.json)"
+          apk="$dist/$artifact_basename.apk"
+          checksum="$dist/$artifact_basename.apk.sha256"
+          metadata="$dist/$artifact_basename.metadata.json"
+          test -f "$apk"
+          test -f "$checksum"
+          test -f "$metadata"
+
+          api_release="$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/releases/$DRAFT_RELEASE_ID"
+          curl --config "$auth_config" --fail-with-body --silent --show-error \
+            "$api_release" > "$auth_tmp/release.json"
+          RELEASE_JSON="$auth_tmp/release.json" EXPECTED_TAG="$REQUESTED_TAG" python3 -I - <<'PY'
+          import json
+          import os
+          release = json.load(open(os.environ['RELEASE_JSON'], encoding='utf-8'))
+          if release.get('tag_name') != os.environ['EXPECTED_TAG']:
+              raise SystemExit('Draft release tag does not match the requested tag')
+          if release.get('draft') is not True:
+              raise SystemExit('Android candidate assets may only be uploaded to a draft release')
+          PY
+
+          refresh_assets() {
+            curl --config "$auth_config" --fail-with-body --silent --show-error \
+              "$api_release/assets" > "$auth_tmp/assets.json"
+          }
+          existing_asset() {
+            local asset_name=$1
+            ASSETS_JSON="$auth_tmp/assets.json" ASSET_NAME="$asset_name" python3 -I - <<'PY'
+          import json
+          import os
+          matches = [
+              item for item in json.load(open(os.environ['ASSETS_JSON'], encoding='utf-8'))
+              if item.get('name') == os.environ['ASSET_NAME']
+          ]
+          if len(matches) > 1:
+              raise SystemExit('Duplicate release asset names are forbidden')
+          if matches:
+              print(matches[0].get('browser_download_url', ''))
+          PY
+          }
+          verify_remote_asset() {
+            local local_asset=$1
+            local asset_name=$2
+            local remote_url
+            refresh_assets
+            remote_url="$(existing_asset "$asset_name")"
+            test -n "$remote_url"
+            case "$remote_url" in
+              "$forgejo_server"/*) ;;
+              *) echo "Refusing unexpected asset URL: $remote_url" >&2; return 1 ;;
+            esac
+            curl --config "$auth_config" --location --fail-with-body --silent --show-error \
+              "$remote_url" > "$auth_tmp/downloaded"
+            cmp -s "$local_asset" "$auth_tmp/downloaded"
+            rm -f -- "$auth_tmp/downloaded"
+          }
+          upload_or_verify() {
+            local local_asset=$1
+            local asset_name
+            local remote_url
+            local encoded_name
+            asset_name="$(basename "$local_asset")"
+            refresh_assets
+            remote_url="$(existing_asset "$asset_name")"
+            if [[ -n "$remote_url" ]]; then
+              verify_remote_asset "$local_asset" "$asset_name"
+              return
+            fi
+            encoded_name="$(ASSET_NAME="$asset_name" python3 -I - <<'PY'
+          import os
+          import urllib.parse
+          print(urllib.parse.quote(os.environ['ASSET_NAME'], safe=''))
+          PY
+          )"
+            refresh_assets
+            test -z "$(existing_asset "$asset_name")"
+            curl --config "$auth_config" --fail-with-body --silent --show-error \
+              --request POST --form "attachment=@$local_asset" \
+              "$api_release/assets?name=$encoded_name" > /dev/null
+            verify_remote_asset "$local_asset" "$asset_name"
+          }
+
+          # Publish metadata and checksum first. The installable APK is last.
+          upload_or_verify "$metadata"
+          upload_or_verify "$checksum"
+          upload_or_verify "$apk"
+          verify_remote_asset "$metadata" "$(basename "$metadata")"
+          verify_remote_asset "$checksum" "$(basename "$checksum")"
+          verify_remote_asset "$apk" "$(basename "$apk")"
+
+          rm -f -- "$metadata" "$checksum" "$apk"
+          rmdir "$dist"

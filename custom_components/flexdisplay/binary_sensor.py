@@ -65,11 +65,6 @@ DESCRIPTIONS = (
         value_fn=lambda record: bool(record.get("camera_available")),
     ),
     FlexDisplayBinarySensorDescription(
-        key="microphone_available",
-        translation_key="microphone_available",
-        value_fn=lambda record: bool(record.get("microphone_available")),
-    ),
-    FlexDisplayBinarySensorDescription(
         key="audio_available",
         translation_key="audio_available",
         value_fn=lambda record: bool(record.get("audio_available")),

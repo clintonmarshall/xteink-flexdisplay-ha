@@ -7,6 +7,7 @@ Update this table in every release that changes a protocol or minimum version.
 | FlexDisplay platform | 0.46.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
+| Android phone companion | 0.5.0-companion (version code 5; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |
@@ -34,6 +35,13 @@ resolution. Older receivers remain compatible: the Bridge falls back to
 inferring touch, colour, audio, microphone, and always-on state from the
 existing comma-separated `X-FlexDisplay-Capabilities` header where possible,
 and reports unsupported or unknown capability fields as false/unknown.
+
+The phone flavor derives `0.5.0-companion` from the shared Android source
+version. It is an unpublished release candidate until a protected Forgejo job
+signs one immutable APK, that exact checksum passes the Galaxy canary, and the
+unchanged draft is promoted. The production signing/publication contract is
+Companion-only; the Echo Spot and Echo Show rows describe source and runtime
+compatibility and do not claim a production-signed kiosk APK channel.
 
 Home Assistant OpenDisplay uploads use BLE. Assign OpenDisplay as the device's
 persistent mode for on-demand uploads; temporary Quick Menu sessions retain a

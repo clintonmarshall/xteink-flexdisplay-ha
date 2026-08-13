@@ -34,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 final class FlexDisplayClient {
-    static final String FIRMWARE_VERSION = "android-0.5.0";
+    static final String FIRMWARE_VERSION = "android-" + BuildConfig.VERSION_NAME;
     static final int MAX_CAMERA_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
     static final class Interaction {
