@@ -19,7 +19,16 @@ _X_ACTIONS = frozenset(
         "install",
     }
 )
-_ANDROID_ACTIONS = _X_ACTIONS - {"install"}
+_ANDROID_ACTIONS = (_X_ACTIONS - {"install"}) | {
+    "restart-app",
+    "test-chime",
+    "volume-up",
+    "volume-down",
+    "mute",
+    "unmute",
+    "brightness-up",
+    "brightness-down",
+}
 _X3_ALIASES = frozenset({"X3", "XTEINKX3"})
 _X4_ALIASES = frozenset({"X4", "XTEINKX4"})
 _NOTE4_ALIASES = frozenset({"N4", "NOTE4", "ZECTRIXNOTE4"})

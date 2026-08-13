@@ -103,6 +103,14 @@ def test_legacy_actions_fail_closed_for_unknown_devices() -> None:
         "sleep",
         "power-off",
         "restart",
+        "restart-app",
+        "test-chime",
+        "volume-up",
+        "volume-down",
+        "mute",
+        "unmute",
+        "brightness-up",
+        "brightness-down",
     }
     assert CAPABILITIES.supported_actions({"model": "ESP32-S3-LCD"}) == {
         "refresh"
