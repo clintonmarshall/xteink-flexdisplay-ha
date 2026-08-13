@@ -1,11 +1,32 @@
 from __future__ import annotations
 
 import os
+import math
+import re
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlparse
 
 import yaml
+
+from .button_actions import ButtonActionValidationError, normalize_action
+
+
+COLOR_THEMES = {"auto", "midnight", "ocean", "sunrise", "paper"}
+COLOR_ROLES = {"auto", "primary", "info", "success", "warning", "danger"}
+CONTROL_STYLES = {"auto", "read_only", "button", "toggle"}
+TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image", "name_card"}
+TILE_SOURCES = {"home_assistant", "static"}
+IMAGE_FITS = {"cover", "contain"}
+BADGE_THEMES = {"classic", "bold", "diagonal", "halftone"}
+ICONS = {
+    "auto", "home", "temperature", "humidity", "battery", "power", "solar",
+    "wifi", "storage", "clock", "weather", "rain", "light", "lock", "alert",
+}
+LAYOUTS = {"auto", "single", "rows", "columns", "grid", "house_pulse"}
+BADGE_ASSET_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 
 
 def _env_bool(name: str, default: bool) -> bool:
@@ -18,6 +39,36 @@ def _env_bool(name: str, default: bool) -> bool:
 def _choice(value: Any, allowed: set[str], default: str) -> str:
     selected = str(value or default).strip().lower()
     return selected if selected in allowed else default
+
+
+def _finite_float(value: Any, default: float) -> float:
+    try:
+        selected = float(value)
+    except (TypeError, ValueError):
+        return default
+    return selected if math.isfinite(selected) else default
+
+
+def _bounded_text(value: Any, fallback: str, maximum: int) -> str:
+    selected = str(value or fallback).replace("\r", " ").replace("\n", " ").strip()
+    return selected[:maximum] or fallback
+
+
+def _bounded_value(value: Any, maximum: int = 1024) -> str:
+    selected = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return selected[:maximum]
+
+
+def _image_url(value: Any) -> str:
+    selected = _bounded_text(value, "", 2048)
+    if not selected:
+        return ""
+    parsed = urlparse(selected)
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        raise ValueError("Dashboard image URLs must use http:// or https://")
+    if parsed.username or parsed.password:
+        raise ValueError("Dashboard image URLs must not contain embedded credentials")
+    return selected
 
 
 @dataclass(frozen=True)
@@ -38,6 +89,12 @@ class EntityConfig:
     badge_theme: str = "classic"
     text_scale: int = 100
     qr_scale: int = 100
+    color_role: str = "auto"
+    control_style: str = "auto"
+    tap_action: dict[str, Any] = field(
+        default_factory=lambda: {"type": "none"},
+        hash=False,
+    )
 
 
 @dataclass(frozen=True)
@@ -65,6 +122,7 @@ class DashboardProfileConfig:
     name: str
     pages: tuple[DashboardPageConfig, ...] = ()
     auto_rotate_seconds: int = 0
+    color_theme: str = "auto"
 
 
 @dataclass(frozen=True)
@@ -179,6 +237,9 @@ class BridgeConfig:
     title: str = "HOME ASSISTANT"
     state_path: Path = Path("/data/flexdisplay-state.json")
     api_key: str = ""
+    # Bridge-only HMAC master. Receivers are provisioned with a derived,
+    # device-bound 64-character key and never receive this value.
+    receiver_key_master: str = ""
     home_assistant: HomeAssistantConfig = HomeAssistantConfig()
     mqtt: MqttConfig = MqttConfig()
     flexhub: FlexHubConfig = FlexHubConfig()
@@ -238,30 +299,24 @@ class BridgeConfig:
 
 
 def _entity(value: dict[str, Any]) -> EntityConfig:
-    minimum = float(value.get("minimum", 0))
-    maximum = float(value.get("maximum", 100))
-    if maximum <= minimum:
-        maximum = minimum + 1
-    return EntityConfig(
-        entity_id=str(value["entity_id"]),
-        label=str(value.get("label") or value["entity_id"]),
-        unit=str(value.get("unit") or ""),
-        icon=str(value.get("icon") or "auto"),
-        style=str(value.get("style") or "value"),
-        minimum=minimum,
-        maximum=maximum,
-        image_url=str(value.get("image_url") or ""),
-        image_fit=str(value.get("image_fit") or "cover"),
-        source=str(value.get("source") or "home_assistant"),
-        value=str(value.get("value") or ""),
-        text_scale=max(60, min(180, int(value.get("text_scale", 100)))),
-        qr_scale=max(50, min(150, int(value.get("qr_scale", 100)))),
-    )
+    # Keep hand-authored YAML and Studio/API profiles on one validation path.
+    # The local import avoids a module cycle: dashboard_store's model types are
+    # defined by this module, while configuration loading happens afterwards.
+    from .dashboard_store import DashboardValidationError, parse_profile
+
+    try:
+        parsed = parse_profile(
+            "config_entity",
+            {"pages": [{"title": "CONFIG", "entities": [value]}]},
+        )
+    except DashboardValidationError as err:
+        raise ValueError(f"Invalid dashboard entity: {err}") from err
+    return parsed.pages[0].entities[0]
 
 
 def _page_entity(value: Any) -> EntityConfig:
     if isinstance(value, str):
-        return EntityConfig(value, value)
+        return _entity({"entity_id": value, "label": value})
     if isinstance(value, dict):
         return _entity(value)
     raise ValueError("Dashboard page entities must be entity IDs or mappings")
@@ -285,21 +340,44 @@ def _page_activation(value: Any) -> PageActivationConfig:
 
 
 def _profile(name: str, value: dict[str, Any]) -> DashboardProfileConfig:
-    pages = tuple(
-        DashboardPageConfig(
-            title=str(page.get("title") or f"PAGE {index + 1}").upper(),
-            entities=tuple(_page_entity(item) for item in page.get("entities", [])),
-            layout=str(page.get("layout") or "auto"),
-            activation=_page_activation(page.get("activation")),
+    from .dashboard_store import DashboardValidationError, parse_profile
+
+    raw_pages = value.get("pages", [])
+    if raw_pages == []:
+        try:
+            rotation = int(value.get("auto_rotate_seconds", 0))
+        except (TypeError, ValueError) as err:
+            raise ValueError(
+                f"Invalid dashboard profile {name!r}: automatic rotation must be seconds"
+            ) from err
+        return DashboardProfileConfig(
+            name=name,
+            pages=(),
+            auto_rotate_seconds=max(0, min(86400, rotation)),
+            color_theme=_choice(value.get("color_theme"), COLOR_THEMES, "auto"),
         )
-        for index, page in enumerate(value.get("pages", []))
-        if isinstance(page, dict)
-    )
-    return DashboardProfileConfig(
-        name=name,
-        pages=pages,
-        auto_rotate_seconds=max(0, min(86400, int(value.get("auto_rotate_seconds", 0)))),
-    )
+    if isinstance(raw_pages, list):
+        normalized_pages: list[Any] = []
+        for page in raw_pages:
+            if not isinstance(page, dict):
+                normalized_pages.append(page)
+                continue
+            raw_entities = page.get("entities")
+            if isinstance(raw_entities, list):
+                normalized_entities = [
+                    {"entity_id": item, "label": item}
+                    if isinstance(item, str)
+                    else item
+                    for item in raw_entities
+                ]
+                normalized_pages.append({**page, "entities": normalized_entities})
+            else:
+                normalized_pages.append(page)
+        value = {**value, "pages": normalized_pages}
+    try:
+        return parse_profile(name, value)
+    except DashboardValidationError as err:
+        raise ValueError(f"Invalid dashboard profile {name!r}: {err}") from err
 
 
 def _merge_entities(*groups: tuple[EntityConfig, ...]) -> tuple[EntityConfig, ...]:
@@ -697,10 +775,42 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         )
     )
     api_key_env = str(raw.get("server", {}).get("api_key_env") or "FLEXDISPLAY_BRIDGE_API_KEY")
+    receiver_master_path = Path(
+        str(
+            raw.get("server", {}).get("lvgl_receiver_key_master_file")
+            or "/data/flexdisplay-lvgl-receiver-master"
+        )
+    )
+    receiver_key_master = ""
+    if receiver_master_path.is_symlink():
+        raise ValueError("Colour receiver master file must not be a symlink")
+    if receiver_master_path.exists():
+        metadata = receiver_master_path.lstat()
+        if (
+            not stat.S_ISREG(metadata.st_mode)
+            or metadata.st_uid != os.getuid()
+            or metadata.st_mode & 0o077
+        ):
+            raise ValueError(
+                "Colour receiver master must be an owner-only regular file owned by this process user"
+            )
+        if not 16 <= metadata.st_size <= 256:
+            raise ValueError("Colour receiver master file must contain 16-256 bytes")
+        encoded_master = receiver_master_path.read_bytes()
+        try:
+            receiver_key_master = encoded_master.decode("utf-8", errors="strict")
+        except UnicodeError as err:
+            raise ValueError("Colour receiver master file is not valid UTF-8") from err
+        if any(
+            character < " " or character == "\x7f"
+            for character in receiver_key_master
+        ):
+            raise ValueError("Colour receiver master must not contain control characters")
     return BridgeConfig(
         title=os.getenv("FLEXDISPLAY_DASHBOARD_TITLE", str(raw.get("dashboard", {}).get("title") or "HOME ASSISTANT")),
         state_path=state_path,
         api_key=os.getenv(api_key_env, str(raw.get("server", {}).get("api_key") or "")),
+        receiver_key_master=receiver_key_master,
         home_assistant=ha,
         mqtt=mqtt,
         flexhub=flexhub,

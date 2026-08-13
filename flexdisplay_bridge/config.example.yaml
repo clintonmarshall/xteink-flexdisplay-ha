@@ -1,6 +1,10 @@
 server:
   # Set FLEXDISPLAY_BRIDGE_API_KEY to protect command endpoints.
   api_key_env: FLEXDISPLAY_BRIDGE_API_KEY
+  # Fixed-purpose 0600 credential file containing the Bridge-only HMAC master.
+  # Never put the value in YAML/env or provision it to a receiver; the Home
+  # Assistant App runner writes this file from its protected password option.
+  lvgl_receiver_key_master_file: /data/flexdisplay-lvgl-receiver-master
 
 storage:
   state_path: /data/flexdisplay-state.json

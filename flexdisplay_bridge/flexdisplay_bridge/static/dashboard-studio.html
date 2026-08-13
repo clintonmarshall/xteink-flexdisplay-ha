@@ -119,7 +119,7 @@
     .toolbar > div:first-child { min-width: 145px; }
     .toolbar > div:first-child .eyebrow { white-space: nowrap; }
     .toolbar > div:first-child h2 { overflow: hidden; margin-bottom: 0; text-overflow: ellipsis; white-space: nowrap; }
-    .segment { display: flex; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
+    .segment { display: flex; flex-wrap: wrap; padding: 3px; border: 1px solid var(--line); border-radius: 10px; background: var(--panel); }
     .segment button { min-height: 30px; padding: 4px 12px; border: 0; background: transparent; color: var(--muted); }
     .segment button.active { background: var(--accent-2); color: #09221d; }
     .device-select { width: 170px; }
@@ -190,7 +190,19 @@
     }
     .tile-body { display: grid; gap: 10px; padding: 12px; }
     .tile-body .field-grid { gap: 8px; }
-    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden], .qr-size-field[hidden] { display: none; }
+    .range-fields[hidden], .image-fields[hidden], .standard-fields[hidden], .entity-source[hidden], .static-fields[hidden], .url-source[hidden], .badge-builder[hidden], .qr-size-field[hidden], .color-controls[hidden], .lvgl-tile-fields[hidden], .touch-action-fields[hidden] { display: none; }
+    .color-controls, .lvgl-tile-fields {
+      display: grid;
+      gap: 10px;
+      padding: 11px;
+      border: 1px solid rgba(103, 214, 193, .3);
+      border-radius: 10px;
+      background: rgba(103, 214, 193, .06);
+    }
+    .color-controls { margin-top: 12px; }
+    .lvgl-title { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+    .lvgl-title strong { color: var(--accent-2); font-size: 12px; letter-spacing: .05em; text-transform: uppercase; }
+    .touch-action-fields { display: grid; gap: 9px; }
     .scale-input { display: grid; grid-template-columns: minmax(0, 1fr) 54px; align-items: center; gap: 8px; }
     .scale-input input[type="range"] { min-height: 38px; padding: 0; accent-color: var(--accent-2); }
     .scale-input output {
@@ -393,6 +405,31 @@
     .dialog-body { display: grid; gap: 16px; padding: 20px; }
     .library-shell { display: grid; grid-template-columns: minmax(260px, 320px) 1fr; gap: 18px; padding: 20px; }
     .library-controls { display: grid; align-content: start; gap: 12px; }
+    .display-profile-shell { grid-template-columns: minmax(270px, 330px) minmax(480px, 1fr); }
+    .display-profile-list { display: grid; gap: 8px; max-height: 620px; overflow: auto; }
+    .display-profile-item {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 3px 10px;
+      width: 100%; padding: 11px; text-align: left; background: #0d151d;
+    }
+    .display-profile-item.active { border-color: var(--accent); background: rgba(255, 180, 84, .08); }
+    .display-profile-item strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .display-profile-item .profile-kind { grid-column: 2; grid-row: 1 / 3; align-self: center; }
+    .profile-kind {
+      padding: 2px 7px; border-radius: 999px; background: rgba(103, 214, 193, .16);
+      color: var(--accent-2); font-size: 9px; font-weight: 900; letter-spacing: .04em; text-transform: uppercase;
+    }
+    .profile-kind.builtin { background: var(--panel-2); color: var(--muted); }
+    .display-profile-form { display: grid; align-content: start; gap: 14px; }
+    .display-profile-contract {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      padding: 11px 12px; border: 1px solid rgba(103, 214, 193, .3);
+      border-radius: 10px; background: rgba(103, 214, 193, .06);
+    }
+    .display-profile-lock {
+      padding: 11px 12px; border: 1px solid var(--line); border-radius: 10px;
+      background: var(--panel-2); color: var(--muted); font-size: 12px;
+    }
+    .display-profile-help { margin: -4px 0 0; color: var(--muted); font-size: 11px; }
     .library-gallery { display: grid; grid-template-columns: repeat(3, minmax(170px, 1fr)); gap: 12px; align-content: start; }
     .photo-card { overflow: hidden; border: 1px solid var(--line); border-radius: 12px; background: #0d151d; }
     .photo-card img { display: block; width: 100%; aspect-ratio: 3 / 4; object-fit: contain; background: #f4f4ef; }
@@ -905,6 +942,7 @@
       .canvas-shell { min-height: 520px; padding: 18px; }
       .tile-list { grid-template-columns: 1fr; }
       .library-shell { grid-template-columns: 1fr; }
+      .display-profile-shell { grid-template-columns: 1fr; }
       .management-shell { grid-template-columns: 1fr; }
       .mesh-console-shell { grid-template-columns: 1fr; padding: 0 14px 14px; }
       .mesh-console-shell .mesh-panel:last-child { grid-column: auto; }
@@ -1004,22 +1042,28 @@
           </div>
           <p class="small muted" style="margin:12px 0 0">Profiles and pages are saved on the Bridge and survive App upgrades.</p>
         </div>
+        <div class="sidebar-footer">
+          <div class="section-head"><h2>Display hardware</h2><span class="rule-badge">LVGL</span></div>
+          <button id="openDisplayProfiles" style="width:100%">Open Profile Builder</button>
+          <p class="small muted" style="margin:10px 0 0">Add bounded colour/LVGL display profiles to Studio. Built-in X3, X4, and JC3636 hardware remains protected.</p>
+        </div>
       </div>
           </aside>
 
           <main class="workspace">
       <div class="toolbar">
         <div>
-          <div class="eyebrow">Live e-ink preview</div>
+          <div id="previewTechnology" class="eyebrow">Live e-ink preview</div>
           <h2 id="previewTitle">Dashboard preview</h2>
         </div>
         <div class="toolbar-group">
           <select id="deviceSelect" class="device-select" aria-label="Preview device">
             <option value="">Sample device</option>
           </select>
-          <div class="segment" aria-label="Device model">
+          <div id="modelSegment" class="segment" aria-label="Device model">
             <button data-model="X3">X3</button>
             <button data-model="X4" class="active">X4</button>
+            <button data-model="JC3636">JC3636</button>
             <button data-model="N4">N4</button>
             <button data-model="ROOK">Spot</button>
             <button data-model="CHECKERS">Show 5</button>
@@ -1037,7 +1081,7 @@
       <div class="canvas-shell">
         <div id="deviceFrame" class="device-frame">
           <div id="previewWrap" class="preview-wrap">
-            <img id="previewImage" alt="Rendered e-ink dashboard preview">
+            <img id="previewImage" alt="Rendered dashboard preview">
             <div id="previewState" class="preview-state">Building the first preview…</div>
           </div>
           <div class="status-strip">
@@ -1085,6 +1129,19 @@
           <option value="3600">Every hour</option>
         </select>
       </label>
+      <div id="colorProfileFields" class="color-controls" hidden>
+        <div class="lvgl-title"><strong>Colour &amp; LVGL</strong><span class="small muted">Colour displays</span></div>
+        <label>Colour theme
+          <select id="colorTheme">
+            <option value="auto">Automatic</option>
+            <option value="midnight">Midnight</option>
+            <option value="ocean">Ocean</option>
+            <option value="sunrise">Sunrise</option>
+            <option value="paper">Paper</option>
+          </select>
+        </label>
+        <span class="small muted">The monochrome X3/X4 renderers safely ignore this colour theme.</span>
+      </div>
 
       <div class="section">
         <div class="section-head">
@@ -1108,6 +1165,7 @@
               <option value="weather_alert">Weather alert</option>
               <option value="name_card">Name card / ID pass</option>
               <option value="qr_code">QR code page</option>
+              <option id="roundControlsTemplateOption" value="round_controls">Round touch controls</option>
               <option value="house_pulse">House Pulse</option>
             </select>
           </label>
@@ -1420,6 +1478,7 @@
         <select id="profileTemplate">
           <option value="blank">Blank page</option>
           <option value="current">Current profile</option>
+          <option value="jc3636">JC3636 round status + controls</option>
         </select>
       </label>
       <div class="button-row" style="justify-content:flex-end">
@@ -1427,6 +1486,72 @@
         <button id="createProfile" class="primary" value="default">Create profile</button>
       </div>
     </form>
+  </dialog>
+  <dialog id="displayProfileDialog" class="library-dialog">
+    <div class="subapp-header">
+      <div><div class="eyebrow">Hardware Profile Builder</div><h2>Display hardware</h2><p class="subapp-description">Describe a supported colour panel without adding executable code, board pins, or arbitrary geometry.</p></div>
+      <button id="closeDisplayProfiles" class="icon" type="button" title="Close">×</button>
+    </div>
+    <div class="library-shell display-profile-shell">
+      <div class="library-controls">
+        <div class="button-row">
+          <button id="newDisplayProfile" class="primary" type="button">New custom profile</button>
+          <button id="refreshDisplayProfiles" type="button">Refresh</button>
+        </div>
+        <div id="displayProfileList" class="display-profile-list" aria-label="Display hardware profiles">
+          <div class="empty">Loading display profiles…</div>
+        </div>
+        <p class="small muted">Profiles describe renderer-safe capabilities only. Pin mappings, firmware code, and executable callbacks remain outside Studio.</p>
+      </div>
+      <form id="displayProfileForm" class="display-profile-form">
+        <div class="section-head" style="margin-bottom:0">
+          <div><div id="displayProfileKind" class="eyebrow">Custom colour profile</div><h2 id="displayProfileTitle" style="font-size:20px">New display</h2></div>
+          <span id="displayProfileKindBadge" class="profile-kind">Colour · LVGL</span>
+        </div>
+        <div id="displayProfileLock" class="display-profile-lock" hidden>Built-in profiles are immutable. Their capabilities are shown here for reference.</div>
+        <div class="display-profile-contract">
+          <span><strong>Renderer contract</strong><span id="displayProfileContract" class="small muted" style="display:block">Colour display · LVGL UI</span></span>
+          <span class="profile-kind">Fixed</span>
+        </div>
+        <div class="field-grid">
+          <label>Profile ID<input id="displayProfileId" required maxlength="32" pattern="[a-z0-9][a-z0-9_-]{0,31}" placeholder="kitchen_panel" autocomplete="off"></label>
+          <label>Display name<input id="displayProfileName" required maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9+._ /-]{0,47}" placeholder="Kitchen Touch"></label>
+          <label>Hardware model<input id="displayProfileModel" required maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9+._ /-]{0,47}" placeholder="KITCHEN_TOUCH_480"></label>
+          <label>Display controller<input id="displayController" required maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9+._ /-]{0,47}" placeholder="ST7701S"></label>
+          <label>Width (pixels)<input id="displayWidth" type="number" required min="128" max="2048" step="1" value="480"></label>
+          <label>Height (pixels)<input id="displayHeight" type="number" required min="128" max="2048" step="1" value="480"></label>
+          <label>Display shape
+            <select id="displayShape">
+              <option value="rect">Rectangular</option>
+              <option value="round">Round</option>
+            </select>
+          </label>
+          <label>Pixel format
+            <select id="displayPixelFormat">
+              <option value="MONO1" disabled>MONO1 · 1-bit e-paper</option>
+              <option value="RGB565">RGB565 · 16-bit</option>
+              <option value="RGB888">RGB888 · 24-bit</option>
+            </select>
+          </label>
+        </div>
+        <label class="toggle-option">
+          <input id="displayTouch" type="checkbox">
+          <span><strong>Touch enabled</strong><span class="small muted" style="display:block">A touch controller is required when enabled.</span></span>
+        </label>
+        <div class="field-grid">
+          <label>Touch controller<input id="displayTouchController" maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9+._ /-]{0,47}" placeholder="GT911" disabled></label>
+          <label>MCU<input id="displayMcu" maxlength="48" pattern="[A-Za-z0-9][A-Za-z0-9+._ /-]{0,47}" placeholder="ESP32-S3"></label>
+          <label>Flash (MiB)<input id="displayFlashMib" type="number" min="0" max="64" step="1" value="16"></label>
+          <label>PSRAM (MiB)<input id="displayPsramMib" type="number" min="0" max="32" step="1" value="8"></label>
+        </div>
+        <label>Model aliases<textarea id="displayAliases" maxlength="587" placeholder="panel-480, kitchen-touch"></textarea></label>
+        <p class="display-profile-help">Separate up to 12 aliases with commas or new lines. Round displays must use equal width and height.</p>
+        <div class="button-row" style="justify-content:flex-end">
+          <button id="deleteDisplayProfile" class="danger" type="button" disabled>Delete</button>
+          <button id="saveDisplayProfile" class="primary" type="submit">Save display profile</button>
+        </div>
+      </form>
+    </div>
   </dialog>
   <dialog id="contentChannelDialog" class="library-dialog">
     <div class="subapp-header">
@@ -1939,6 +2064,23 @@
 
   <script>
     const $ = (selector) => document.querySelector(selector);
+    const FALLBACK_MODELS = {
+      X3: {id:"X3", display_name:"XTEINK X3", width:528, height:792, shape:"rect", technology:"eink", touch:false, lvgl:false},
+      X4: {id:"X4", display_name:"XTEINK X4", width:480, height:800, shape:"rect", technology:"eink", touch:false, lvgl:false},
+      JC3636: {id:"JC3636", display_name:"JC3636W518EN", width:360, height:360, shape:"round", technology:"color", touch:true, lvgl:true},
+      N4: {id:"N4", display_name:"Zectrix Note 4", width:400, height:300, shape:"rect", technology:"eink", touch:false, lvgl:false},
+      ROOK: {id:"ROOK", display_name:"Echo Spot", width:480, height:480, shape:"round", technology:"color", touch:true, lvgl:false},
+      CHECKERS: {id:"CHECKERS", display_name:"Echo Show 5", width:960, height:480, shape:"rect", technology:"color", touch:true, lvgl:false},
+    };
+    const FALLBACK_CAPABILITIES = {
+      color_themes: ["auto", "midnight", "ocean", "sunrise", "paper"],
+      color_roles: ["auto", "primary", "info", "success", "warning", "danger"],
+      control_styles: ["auto", "read_only", "button", "toggle"],
+      lvgl_layouts: ["auto", "single", "rows", "columns", "grid"],
+      lvgl_styles: ["gauge", "progress", "value"],
+    };
+    const DASHBOARD_TILE_STYLES = ["value", "gauge", "progress", "history", "qr", "name_card", "image"];
+    const LVGL_UNSUPPORTED_PAGE_TEMPLATES = new Set(["energy", "house_pulse", "name_card", "qr_code"]);
     const channelIdFromName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
     const uniqueId = (prefix = "item") => globalThis.crypto?.randomUUID
       ? `${prefix}-${crypto.randomUUID()}`
@@ -1985,6 +2127,9 @@
       devices: [],
       entities: [],
       services: [],
+      models: {...FALLBACK_MODELS},
+      displayProfiles: {profiles: [], capabilities: {}, selectedId: ""},
+      capabilities: {...FALLBACK_CAPABILITIES},
       buttonMappings: [],
       buttonIndicators: false,
       buttonActivation: {},
@@ -2037,6 +2182,100 @@
     const API = (path) => new URL(`../api/v1/${path}`, window.location.href);
     const clone = (value) => JSON.parse(JSON.stringify(value));
     const key = () => sessionStorage.getItem("flexdisplayBridgeKey") || "";
+
+    const BUILTIN_MODEL_ALIASES = new Map([
+      ["X3", "X3"],
+      ["XTEINKX3", "X3"],
+      ["X4", "X4"],
+      ["XTEINKX4", "X4"],
+      ["JC3636", "JC3636"],
+      ["JC3636W518", "JC3636"],
+      ["JC3636W518EN", "JC3636"],
+      ["GUITIONJC3636W518", "JC3636"],
+      ["TAICHIPI", "JC3636"],
+      ["N4", "N4"],
+      ["NOTE4", "N4"],
+      ["ZECTRIXNOTE4", "N4"],
+      ["ROOK", "ROOK"],
+      ["ECHOSPOT", "ROOK"],
+      ["ECHOSPOT2017", "ROOK"],
+      ["AMAZONECHOSPOT", "ROOK"],
+      ["CHECKERS", "CHECKERS"],
+      ["ECHOSHOW5", "CHECKERS"],
+      ["ECHOSHOW52019", "CHECKERS"],
+      ["AMAZONECHOSHOW5", "CHECKERS"],
+    ]);
+    const normalizedModelIdentity = (value) => String(value || "")
+      .trim()
+      .toUpperCase()
+      .replace(/[^A-Z0-9]/g, "");
+    const builtinModelId = (value) => BUILTIN_MODEL_ALIASES.get(normalizedModelIdentity(value)) || "";
+
+    function canonicalModelId(value) {
+      const supplied = String(value || "").trim();
+      const normalized = normalizedModelIdentity(supplied);
+      const builtinId = builtinModelId(supplied);
+      if (builtinId) return builtinId;
+      const match = Object.values(state?.models || {}).find((profile) => [
+        profile.id,
+        profile.model,
+        profile.display_name,
+        ...(profile.aliases || []),
+      ].some((candidate) => normalizedModelIdentity(candidate) === normalized));
+      return match?.id || supplied || "X4";
+    }
+
+    function normalizeModels(rawModels) {
+      const normalized = {...FALLBACK_MODELS};
+      const entries = Array.isArray(rawModels)
+        ? rawModels.map((model) => [model?.id || model?.model, model])
+        : Object.entries(rawModels || {});
+      for (const [key, value] of entries) {
+        if (!value || typeof value !== "object") continue;
+        const id = canonicalModelId(value.id || key || value.model);
+        normalized[id] = {
+          ...(FALLBACK_MODELS[id] || {}),
+          ...value,
+          id,
+          width: Number(value.width || FALLBACK_MODELS[id]?.width || 480),
+          height: Number(value.height || FALLBACK_MODELS[id]?.height || 800),
+        };
+      }
+      return normalized;
+    }
+
+    function modelSpec(model = state.model) {
+      const id = canonicalModelId(model);
+      return state.models[id] || FALLBACK_MODELS[id] || FALLBACK_MODELS.X4;
+    }
+
+    function isColourModel(model = state.model) {
+      const spec = modelSpec(model);
+      return spec.technology === "color" || Number(spec.color_depth || 1) > 1 || Boolean(spec.lvgl);
+    }
+
+    function isLvglModel(model = state.model) {
+      return Boolean(modelSpec(model).lvgl);
+    }
+
+    function capabilityValues(name, fallback) {
+      const values = state.capabilities?.[name];
+      return Array.isArray(values) && values.length ? values : fallback;
+    }
+
+    function renderModelSelector() {
+      const order = {X3: 0, X4: 1, JC3636: 2, N4: 3, ROOK: 4, CHECKERS: 5};
+      const shortLabels = {ROOK: "Spot", CHECKERS: "Show 5"};
+      const models = Object.values(state.models).sort((left, right) =>
+        (order[left.id] ?? 99) - (order[right.id] ?? 99) || left.id.localeCompare(right.id)
+      );
+      $("#modelSegment").innerHTML = models.map((model) =>
+        `<button data-model="${escapeHtml(model.id)}" class="${model.id === state.model ? "active" : ""}" title="${escapeHtml(model.display_name || model.id)}">${escapeHtml(shortLabels[model.id] || model.id)}</button>`
+      ).join("");
+      $("#modelSegment").querySelectorAll("[data-model]").forEach((button) =>
+        button.addEventListener("click", () => setModel(button.dataset.model))
+      );
+    }
 
     async function api(path, options = {}) {
       const headers = new Headers(options.headers || {});
@@ -2474,6 +2713,259 @@
       return String(value ?? "").replace(/[&<>"']/g, (character) => ({
         "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;",
       })[character]);
+    }
+
+    function sortedDisplayProfiles() {
+      return [...(state.displayProfiles.profiles || [])].sort((left, right) =>
+        Number(Boolean(right.builtin)) - Number(Boolean(left.builtin))
+        || String(left.display_name || left.id).localeCompare(String(right.display_name || right.id))
+      );
+    }
+
+    function selectedDisplayProfile() {
+      return (state.displayProfiles.profiles || []).find(
+        (profile) => profile.id === state.displayProfiles.selectedId
+      );
+    }
+
+    function renderDisplayProfileList() {
+      const profiles = sortedDisplayProfiles();
+      const list = $("#displayProfileList");
+      if (!profiles.length) {
+        list.innerHTML = '<div class="empty">No display profiles are available.</div>';
+        return;
+      }
+      list.innerHTML = profiles.map((profile) => `
+        <button class="display-profile-item ${profile.id === state.displayProfiles.selectedId ? "active" : ""}" type="button" data-display-profile="${escapeHtml(profile.id)}">
+          <strong>${escapeHtml(profile.display_name || profile.id)}</strong>
+          <span class="small muted">${escapeHtml(profile.model)} · ${escapeHtml(profile.width)} × ${escapeHtml(profile.height)} · ${escapeHtml(profile.shape)}</span>
+          <span class="profile-kind ${profile.builtin ? "builtin" : ""}">${profile.builtin ? "Built-in" : "Custom"}</span>
+        </button>
+      `).join("");
+    }
+
+    function syncDisplayTouchController() {
+      const locked = $("#displayProfileForm").dataset.locked === "true";
+      const enabled = $("#displayTouch").checked;
+      $("#displayTouchController").disabled = locked || !enabled;
+      $("#displayTouchController").required = !locked && enabled;
+    }
+
+    function populateDisplayProfileForm(profile = null) {
+      const existing = Boolean(profile);
+      const builtin = Boolean(profile?.builtin);
+      const form = $("#displayProfileForm");
+      const values = profile || {
+        id: "",
+        display_name: "",
+        model: "",
+        technology: "color",
+        width: 480,
+        height: 480,
+        shape: "rect",
+        pixel_format: "RGB565",
+        touch: false,
+        lvgl: true,
+        display_controller: "",
+        touch_controller: "",
+        mcu: "ESP32-S3",
+        flash_bytes: 16 * 1024 * 1024,
+        psram_bytes: 8 * 1024 * 1024,
+        aliases: [],
+      };
+      form.dataset.locked = String(builtin);
+      $("#displayProfileId").value = values.id || "";
+      $("#displayProfileName").value = values.display_name || "";
+      $("#displayProfileModel").value = values.model || "";
+      $("#displayController").value = values.display_controller || "";
+      $("#displayWidth").value = Number(values.width || 480);
+      $("#displayHeight").value = Number(values.height || 480);
+      $("#displayShape").value = values.shape || "rect";
+      $("#displayPixelFormat").value = values.pixel_format || "RGB565";
+      $("#displayTouch").checked = Boolean(values.touch);
+      $("#displayTouchController").value = values.touch_controller || "";
+      $("#displayMcu").value = values.mcu || "";
+      $("#displayFlashMib").value = Number(values.flash_bytes || 0) / (1024 * 1024);
+      $("#displayPsramMib").value = Number(values.psram_bytes || 0) / (1024 * 1024);
+      $("#displayAliases").value = (values.aliases || []).join(", ");
+      form.querySelectorAll("input, select, textarea").forEach((field) => { field.disabled = builtin; });
+      $("#displayProfileId").disabled = existing;
+      $("#displayProfileLock").hidden = !builtin;
+      $("#saveDisplayProfile").disabled = builtin;
+      $("#deleteDisplayProfile").disabled = !existing || builtin;
+      $("#displayProfileTitle").textContent = existing
+        ? values.display_name || values.id
+        : "New display";
+      $("#displayProfileKind").textContent = builtin
+        ? "Built-in hardware"
+        : existing
+        ? "Custom colour profile"
+        : "New custom profile";
+      const colour = values.technology === "color";
+      $("#displayProfileKindBadge").textContent = colour
+        ? `Colour · ${values.lvgl ? "LVGL" : "bitmap"}`
+        : "E-paper · bitmap";
+      $("#displayProfileKindBadge").classList.toggle("builtin", builtin);
+      $("#displayProfileContract").textContent = colour
+        ? `Colour display · ${values.lvgl ? "LVGL UI" : "static bitmap"}`
+        : "Monochrome e-paper · static bitmap";
+      syncDisplayTouchController();
+    }
+
+    function chooseDisplayProfile(profileId) {
+      state.displayProfiles.selectedId = profileId || "";
+      renderDisplayProfileList();
+      populateDisplayProfileForm(selectedDisplayProfile() || null);
+    }
+
+    function newDisplayProfile() {
+      state.displayProfiles.selectedId = "";
+      renderDisplayProfileList();
+      populateDisplayProfileForm();
+      $("#displayProfileId").focus();
+    }
+
+    async function loadDisplayProfileRegistry(preferredId = "") {
+      const response = await api("display-profiles");
+      const payload = await response.json();
+      const previousModel = state.model;
+      state.displayProfiles = {
+        profiles: payload.profiles || [],
+        capabilities: payload.capabilities || {},
+        selectedId: "",
+      };
+      state.models = normalizeModels(state.displayProfiles.profiles);
+      state.model = state.models[previousModel] ? previousModel : "X4";
+      renderModelSelector();
+      setModel(state.model);
+      const profiles = sortedDisplayProfiles();
+      const selected = profiles.find((profile) => profile.id === preferredId)
+        || profiles.find((profile) => canonicalModelId(profile.id) === state.model)
+        || profiles[0];
+      chooseDisplayProfile(selected?.id || "");
+      return payload;
+    }
+
+    async function openDisplayProfileBuilder() {
+      $("#displayProfileDialog").showModal();
+      $("#displayProfileList").innerHTML = '<div class="empty">Loading display profiles…</div>';
+      try {
+        await loadDisplayProfileRegistry(state.displayProfiles.selectedId);
+      } catch (error) {
+        $("#displayProfileList").innerHTML = '<div class="empty">Display profiles could not be loaded.</div>';
+        toast(error.message, true);
+      }
+    }
+
+    function customDisplayProfilePayload() {
+      const form = $("#displayProfileForm");
+      if (!form.reportValidity()) return null;
+      const profileId = $("#displayProfileId").value.trim();
+      if (!/^[a-z0-9][a-z0-9_-]{0,31}$/.test(profileId)) {
+        throw new Error("Profile IDs use lowercase letters, numbers, underscores, and hyphens.");
+      }
+      const displayName = $("#displayProfileName").value.trim();
+      const hardwareModel = $("#displayProfileModel").value.trim();
+      const width = Number($("#displayWidth").value);
+      const height = Number($("#displayHeight").value);
+      const shape = $("#displayShape").value;
+      const maximumPixels = Number(state.displayProfiles.capabilities?.maximum_pixels || 2097152);
+      if (!Number.isInteger(width) || !Number.isInteger(height)) {
+        throw new Error("Display width and height must be whole pixels.");
+      }
+      if (width * height > maximumPixels) {
+        throw new Error(`Display profiles may contain at most ${maximumPixels.toLocaleString()} pixels.`);
+      }
+      if (shape === "round" && width !== height) {
+        throw new Error("Round display profiles must use equal width and height.");
+      }
+      const touch = $("#displayTouch").checked;
+      const touchController = $("#displayTouchController").value.trim();
+      if (touch && !touchController) {
+        throw new Error("Enter a touch controller when touch is enabled.");
+      }
+      const aliases = $("#displayAliases").value
+        .split(/[\n,]+/)
+        .map((alias) => alias.trim())
+        .filter(Boolean);
+      if (aliases.length > 12) throw new Error("Enter no more than 12 model aliases.");
+      if ([profileId, displayName, hardwareModel, ...aliases].some(
+        (value) => Boolean(builtinModelId(value))
+      )) {
+        throw new Error("This ID, name, model, or alias is reserved by an existing receiver family.");
+      }
+      const pixelFormat = $("#displayPixelFormat").value;
+      return {
+        profileId,
+        payload: {
+          id: profileId,
+          version: 1,
+          display_name: displayName,
+          model: hardwareModel,
+          technology: "color",
+          width,
+          height,
+          shape,
+          pixel_format: pixelFormat,
+          color_depth: pixelFormat === "RGB888" ? 24 : 16,
+          touch,
+          lvgl: true,
+          display_controller: $("#displayController").value.trim(),
+          touch_controller: touch ? touchController : "",
+          mcu: $("#displayMcu").value.trim(),
+          flash_bytes: Math.round(Number($("#displayFlashMib").value || 0) * 1024 * 1024),
+          psram_bytes: Math.round(Number($("#displayPsramMib").value || 0) * 1024 * 1024),
+          aliases,
+        },
+      };
+    }
+
+    async function saveDisplayHardwareProfile(event) {
+      event.preventDefault();
+      if (selectedDisplayProfile()?.builtin) {
+        toast("Built-in display profiles are immutable.", true);
+        return;
+      }
+      let candidate;
+      try {
+        candidate = customDisplayProfilePayload();
+      } catch (error) {
+        toast(error.message, true);
+        return;
+      }
+      if (!candidate) return;
+      $("#saveDisplayProfile").disabled = true;
+      try {
+        await api(`display-profiles/${encodeURIComponent(candidate.profileId)}`, {
+          method: "PUT",
+          body: candidate.payload,
+        });
+        await loadDisplayProfileRegistry(candidate.profileId);
+        toast(`Display profile ${candidate.profileId} saved.`);
+      } catch (error) {
+        toast(error.message, true);
+      } finally {
+        $("#saveDisplayProfile").disabled = Boolean(selectedDisplayProfile()?.builtin);
+      }
+    }
+
+    async function deleteDisplayHardwareProfile() {
+      const profile = selectedDisplayProfile();
+      if (!profile || profile.builtin) {
+        toast("Built-in display profiles are immutable.", true);
+        return;
+      }
+      if (!confirm(`Delete display profile ${profile.id}?`)) return;
+      $("#deleteDisplayProfile").disabled = true;
+      try {
+        await api(`display-profiles/${encodeURIComponent(profile.id)}`, {method: "DELETE"});
+        if (state.model === canonicalModelId(profile.id)) state.model = "X4";
+        await loadDisplayProfileRegistry();
+        toast(`Display profile ${profile.id} deleted.`);
+      } catch (error) {
+        toast(error.message, true);
+        $("#deleteDisplayProfile").disabled = false;
+      }
     }
 
     function sparkline(history, key) {
@@ -3988,6 +4480,10 @@
 
     function normalizeProfile(profile) {
       const selected = clone(profile);
+      const themes = capabilityValues("color_themes", FALLBACK_CAPABILITIES.color_themes);
+      const colorRoles = capabilityValues("color_roles", FALLBACK_CAPABILITIES.color_roles);
+      const controlStyles = capabilityValues("control_styles", FALLBACK_CAPABILITIES.control_styles);
+      selected.color_theme = themes.includes(selected.color_theme) ? selected.color_theme : "auto";
       selected.pages = selected.pages?.length ? selected.pages : [defaultPage()];
       selected.pages = selected.pages.map((page) => ({
         ...page,
@@ -4001,6 +4497,11 @@
           badge_theme: entity.badge_theme || "classic",
           text_scale: Math.max(60, Math.min(180, Number(entity.text_scale) || 100)),
           qr_scale: Math.max(50, Math.min(150, Number(entity.qr_scale) || 100)),
+          color_role: colorRoles.includes(entity.color_role) ? entity.color_role : "auto",
+          control_style: controlStyles.includes(entity.control_style) ? entity.control_style : "auto",
+          tap_action: entity.tap_action && typeof entity.tap_action === "object" && !Array.isArray(entity.tap_action)
+            ? entity.tap_action
+            : {type: "none"},
         })),
       }));
       selected.auto_rotate_seconds ||= 0;
@@ -4014,9 +4515,19 @@
         const payload = await response.json();
         state.profiles = payload.profiles;
         state.devices = payload.devices;
+        state.models = normalizeModels(payload.models);
+        state.displayProfiles = {
+          profiles: payload.display_profiles?.profiles || [],
+          capabilities: payload.display_profiles?.capabilities || {},
+          selectedId: state.displayProfiles.selectedId || "",
+        };
+        state.capabilities = {...FALLBACK_CAPABILITIES, ...(payload.capabilities || {})};
+        state.model = state.models[state.model] ? state.model : "X4";
+        renderModelSelector();
         $("#authPanel").hidden = true;
         populateDevices();
         chooseProfile(state.profile?.name || state.profiles[0]?.name);
+        setModel(state.model);
         $("#saveState").textContent = "Saved";
         renderHeaderStatus();
         loadEntities();
@@ -4934,6 +5445,22 @@
       return state.profile.pages[state.pageIndex];
     }
 
+    function renderColorProfileFields() {
+      const panel = $("#colorProfileFields");
+      panel.hidden = !isLvglModel();
+      $("#roundControlsTemplateOption").hidden = !isLvglModel();
+      if (!state.profile) return;
+      const themes = capabilityValues("color_themes", FALLBACK_CAPABILITIES.color_themes);
+      $("#colorTheme").innerHTML = options(themes, state.profile.color_theme || "auto", (value) => ({
+        auto: "Automatic",
+        midnight: "Midnight",
+        ocean: "Ocean",
+        sunrise: "Sunrise",
+        paper: "Paper",
+      })[value] || titleCase(value));
+      $("#colorTheme").value = state.profile.color_theme || "auto";
+    }
+
     function renderAll() {
       const profileSelect = $("#profileSelect");
       profileSelect.innerHTML = state.profiles.map((profile) =>
@@ -4942,6 +5469,7 @@
       profileSelect.value = state.profile.name;
       $("#autoRotate").value = String(state.profile.auto_rotate_seconds || 0);
       if (!$("#autoRotate").value) $("#autoRotate").value = "0";
+      renderColorProfileFields();
       renderPages();
       renderInspector();
       updateDirtyState();
@@ -4998,9 +5526,28 @@
       $("#movePageUp").disabled = state.pageIndex === 0;
       $("#movePageDown").disabled = state.pageIndex === state.profile.pages.length - 1;
       $("#deletePage").disabled = state.profile.pages.length === 1;
+      $("#addPage").disabled = state.profile.pages.length >= 12;
       $("#addTile").disabled = page.entities.length >= 4;
       $("#addStaticTile").disabled = page.entities.length >= 4;
-      $("#addQrTile").disabled = page.entities.length >= 4;
+      const showLvgl = isLvglModel();
+      const lvglLayouts = new Set(capabilityValues("lvgl_layouts", FALLBACK_CAPABILITIES.lvgl_layouts));
+      for (const option of $("#pageLayout").options) {
+        const unsupported = showLvgl && !lvglLayouts.has(option.value);
+        option.hidden = unsupported;
+        option.disabled = unsupported;
+      }
+      $("#addQrTile").hidden = showLvgl;
+      $("#addQrTile").disabled = showLvgl || page.entities.length >= 4;
+      for (const value of LVGL_UNSUPPORTED_PAGE_TEMPLATES) {
+        const option = $(`#pageTemplate option[value="${value}"]`);
+        if (!option) continue;
+        option.hidden = showLvgl;
+        option.disabled = showLvgl;
+      }
+      if (showLvgl && LVGL_UNSUPPORTED_PAGE_TEMPLATES.has($("#pageTemplate").value)) {
+        $("#pageTemplate").value = "";
+      }
+      renderColorProfileFields();
       renderTiles();
     }
 
@@ -5252,11 +5799,111 @@
       return "";
     }
 
+    function tileTapActionMarkup(tile) {
+      const action = tile.tap_action || {type: "none"};
+      const selectedPreset = actionPreset(action) === "default" ? "none" : actionPreset(action);
+      const target = action.entity_id || (
+        tile.source !== "static" && !tile.entity_id?.startsWith("static.")
+          ? tile.entity_id
+          : ""
+      );
+      const needsEntity = ["toggle", "turn_on", "turn_off", "activate", "service"].includes(selectedPreset);
+      return `
+        <label>On tap
+          <select class="tile-action-type">
+            ${options([
+              "none", "navigation_next", "navigation_previous", "navigation_overview",
+              "navigation_refresh", "toggle", "turn_on", "turn_off", "activate", "service",
+            ], selectedPreset, (value) => ({
+              none: "No action",
+              navigation_next: "Next page",
+              navigation_previous: "Previous page",
+              navigation_overview: "Dashboard overview",
+              navigation_refresh: "Refresh values",
+              toggle: "Toggle Home Assistant entity",
+              turn_on: "Turn entity on",
+              turn_off: "Turn entity off",
+              activate: "Run scene, script, or automation",
+              service: "Call Home Assistant service",
+            })[value])}
+          </select>
+        </label>
+        <div class="touch-action-fields tile-action-entity-fields" ${needsEntity ? "" : "hidden"}>
+          <label>Target entity<input class="tile-action-entity" value="${escapeHtml(target)}" placeholder="Search entity name or ID…" autocomplete="off"></label>
+        </div>
+        <div class="touch-action-fields tile-action-service-fields" ${selectedPreset === "service" ? "" : "hidden"}>
+          <label>Service<input class="tile-action-service" list="serviceOptions" value="${escapeHtml(action.service || "")}" placeholder="light.toggle"></label>
+          <label>Service data (optional JSON)<textarea class="tile-action-data" spellcheck="false" placeholder='{"brightness_pct": 50}'>${escapeHtml(action.data ? JSON.stringify(action.data, null, 2) : "")}</textarea></label>
+        </div>`;
+    }
+
+    function buildTileTapAction(card) {
+      const type = card.querySelector(".tile-action-type").value;
+      if (type === "none") return {type: "none"};
+      if (type.startsWith("navigation_")) {
+        return {type: "navigation", command: type.replace("navigation_", "")};
+      }
+      const entityId = card.querySelector(".tile-action-entity").value.trim().toLowerCase();
+      if (!entityId.includes(".")) throw new Error("Choose a valid Home Assistant target entity for this tile.");
+      const domain = entityId.split(".", 1)[0];
+      let service = "";
+      if (type === "toggle") service = "homeassistant.toggle";
+      if (type === "turn_on") service = `${domain}.turn_on`;
+      if (type === "turn_off") service = `${domain}.turn_off`;
+      if (type === "activate") {
+        if (domain === "automation") service = "automation.trigger";
+        else if (["scene", "script"].includes(domain)) service = `${domain}.turn_on`;
+        else throw new Error("Run supports scene, script, or automation entities.");
+      }
+      if (type === "service") service = card.querySelector(".tile-action-service").value.trim().toLowerCase();
+      if (!service.includes(".")) throw new Error("Choose a valid domain.service for this tile.");
+      let data = {};
+      const encodedData = card.querySelector(".tile-action-data").value.trim();
+      if (type === "service" && encodedData) {
+        try { data = JSON.parse(encodedData); }
+        catch (_) { throw new Error("Tile service data must be valid JSON."); }
+        if (!data || Array.isArray(data) || typeof data !== "object") {
+          throw new Error("Tile service data must be a JSON object.");
+        }
+      }
+      return {
+        type: "home_assistant",
+        service,
+        entity_id: entityId,
+        ...(Object.keys(data).length ? {data} : {}),
+      };
+    }
+
+    function syncTileTapAction(card, tile, showError = true) {
+      try {
+        const action = buildTileTapAction(card);
+        if (JSON.stringify(tile.tap_action || {type:"none"}) !== JSON.stringify(action)) {
+          tile.tap_action = action;
+          changed();
+        }
+        return true;
+      } catch (error) {
+        if (showError) toast(error.message, true);
+        return false;
+      }
+    }
+
+    function toggleTileTapActionFields(card) {
+      const type = card.querySelector(".tile-action-type")?.value || "none";
+      const needsEntity = ["toggle", "turn_on", "turn_off", "activate", "service"].includes(type);
+      const entityFields = card.querySelector(".tile-action-entity-fields");
+      const serviceFields = card.querySelector(".tile-action-service-fields");
+      if (entityFields) entityFields.hidden = !needsEntity;
+      if (serviceFields) serviceFields.hidden = type !== "service";
+    }
+
     function renderTiles() {
       if (!state.profile) return;
       const page = currentPage();
       if (!page.entities.length) {
-        $("#tileList").innerHTML = '<div class="empty">This page is blank. Add a Home Assistant tile, fixed text, or a QR code.</div>';
+        $("#tileList").innerHTML = isLvglModel()
+          ? '<div class="empty">This page is blank. Add a Home Assistant value/gauge tile or fixed text.</div>'
+          : '<div class="empty">This page is blank. Add a Home Assistant tile, fixed text, or a QR code.</div>';
         return;
       }
       $("#tileList").innerHTML = page.entities.map((tile, index) => {
@@ -5264,6 +5911,12 @@
         const isQr = tile.style === "qr";
         const isBadge = tile.style === "name_card";
         const isStatic = tile.source === "static" || tile.entity_id?.startsWith("static.");
+        const showLvgl = isLvglModel();
+        const lvglStyles = capabilityValues("lvgl_styles", FALLBACK_CAPABILITIES.lvgl_styles);
+        const tileStyles = showLvgl ? lvglStyles : DASHBOARD_TILE_STYLES;
+        const unsupportedLvgl = showLvgl && !lvglStyles.includes(tile.style || "value");
+        const colorRoles = capabilityValues("color_roles", FALLBACK_CAPABILITIES.color_roles);
+        const controlStyles = capabilityValues("control_styles", FALLBACK_CAPABILITIES.control_styles);
         const imageSource = tile.image_url || tile.entity_id?.startsWith("image_url.")
           ? "url"
           : "entity";
@@ -5282,6 +5935,7 @@
         <article class="tile-card" data-tile="${index}">
           <div class="tile-head"><h3>Tile ${index + 1}</h3><button class="icon danger remove-tile" title="Remove tile">×</button></div>
           <div class="tile-body">
+            ${unsupportedLvgl ? `<div class="helper-callout"><strong>Not supported by LVGL receiver v1:</strong> ${escapeHtml(styleLabel(tile.style))}. Choose Value card, Gauge, or Progress bar before previewing or assigning this profile to an LVGL display.</div>` : ""}
             <label class="data-source" ${isImage ? "hidden" : ""}>Data source
               <select class="tile-data-source">
                 ${options(["home_assistant", "static"], isStatic ? "static" : "home_assistant", (value) => value === "static" ? "Fixed content (no HA entity)" : "Home Assistant entity")}
@@ -5294,7 +5948,7 @@
               <textarea class="tile-static-value" maxlength="1024" rows="${tile.style === "qr" ? "4" : "2"}" placeholder="${tile.style === "qr" ? "A URL, Wi-Fi details, contact card, or any text" : "Text shown on the display"}">${escapeHtml(tile.value || "")}</textarea>
             </label>
             ${isQr && isStatic ? qrBuilderMarkup(tile) : ""}
-            <div class="badge-builder" ${isBadge ? "" : "hidden"}>
+            <div class="badge-builder" ${isBadge && !showLvgl ? "" : "hidden"}>
               <label>Badge design
                 <select class="badge-theme">
                   ${options(["classic", "bold", "diagonal", "halftone"], tile.badge_theme || "classic", (value) => ({
@@ -5318,7 +5972,7 @@
                 <span class="small muted">JPEG, PNG, WebP, or BMP · maximum 5 MB. Photos are automatically center-cropped and converted for e-ink.</span>
               </div>
             </div>
-            <div class="image-fields" ${isImage ? "" : "hidden"}>
+            <div class="image-fields" ${isImage && !showLvgl ? "" : "hidden"}>
               <div class="field-grid">
                 <label>Image source
                   <select class="tile-image-source">
@@ -5340,10 +5994,11 @@
             <div class="field-grid">
               <label>Visual
                 <select class="tile-style">
-                  ${options(["value", "gauge", "progress", "history", "qr", "name_card", "image"], tile.style || "value", styleLabel)}
+                  ${unsupportedLvgl ? `<option value="${escapeHtml(tile.style)}" selected disabled>${escapeHtml(styleLabel(tile.style))} · unsupported on LVGL v1</option>` : ""}
+                  ${options(tileStyles, unsupportedLvgl ? "" : (tile.style || "value"), styleLabel)}
                 </select>
               </label>
-              <label class="standard-fields" ${isImage ? "hidden" : ""}>Icon
+              <label class="tile-icon-field" ${isImage || showLvgl ? "hidden" : ""}>Icon
                 <select class="tile-icon">
                   ${options(["auto","home","temperature","humidity","battery","power","solar","wifi","storage","clock","weather","rain","light","lock","alert"], tile.icon || "auto", titleCase)}
                 </select>
@@ -5353,7 +6008,32 @@
               <label>${unitLabel}<input class="tile-unit" maxlength="64" value="${escapeHtml(tile.unit || "")}" placeholder="${isStatic ? "Optional" : "From entity"}"></label>
               <span></span>
             </div>
-            <div class="field-grid tile-sizing">
+            <div class="lvgl-tile-fields" ${showLvgl ? "" : "hidden"}>
+              <div class="lvgl-title"><strong>Colour &amp; touch</strong><span class="small muted">Native LVGL</span></div>
+              <div class="field-grid">
+                <label>Colour role
+                  <select class="tile-color-role">
+                    ${options(colorRoles, tile.color_role || "auto", (value) => ({
+                      auto:"Automatic", primary:"Primary", info:"Information", success:"Success",
+                      warning:"Warning", danger:"Danger",
+                    })[value] || titleCase(value))}
+                  </select>
+                </label>
+                <label>Control style
+                  <select class="tile-control-style">
+                    ${options(controlStyles, tile.control_style || "auto", (value) => ({
+                      auto:"Automatic", read_only:"Read-only", button:"Button", toggle:"Toggle",
+                    })[value] || titleCase(value))}
+                  </select>
+                </label>
+              </div>
+              <div class="touch-action-fields">
+                ${tileTapActionMarkup(tile)}
+              </div>
+              <span class="small muted">LVGL receiver v1 uses receiver-native widgets and does not consume dashboard icons.</span>
+              <span class="small muted">The Bridge validates actions and keeps Home Assistant credentials off the display. Other receiver families ignore these LVGL controls.</span>
+            </div>
+            <div class="field-grid tile-sizing" ${showLvgl ? "hidden" : ""}>
               <label>Text size
                 <div class="scale-input">
                   <input class="tile-text-scale" type="range" min="60" max="180" step="5" value="${Number(tile.text_scale || 100)}">
@@ -5387,7 +6067,11 @@
         renderPages();
       });
       card.querySelector(".tile-entity").addEventListener("change", (event) => {
+        const previousEntityId = tile.entity_id;
         tile.entity_id = event.target.value.trim();
+        if (tile.tap_action?.entity_id === previousEntityId) {
+          tile.tap_action.entity_id = tile.entity_id;
+        }
         const entity = state.entities.find((candidate) => candidate.entity_id === tile.entity_id);
         if (entity) {
           tile.label = entity.label;
@@ -5438,6 +6122,47 @@
         tile.badge_theme = event.target.value;
         changed();
       });
+      card.querySelector(".tile-color-role")?.addEventListener("change", (event) => {
+        tile.color_role = event.target.value;
+        changed();
+      });
+      card.querySelector(".tile-control-style")?.addEventListener("change", (event) => {
+        tile.control_style = event.target.value;
+        if (
+          tile.control_style === "read_only"
+          && (tile.tap_action?.type || "none") !== "none"
+        ) {
+          tile.tap_action = {type: "none"};
+          changed();
+          renderTiles();
+          return;
+        }
+        if (
+          tile.control_style === "toggle"
+          && (tile.tap_action?.type || "none") === "none"
+          && tile.source !== "static"
+          && tile.entity_id?.includes(".")
+        ) {
+          tile.tap_action = {
+            type: "home_assistant",
+            service: "homeassistant.toggle",
+            entity_id: tile.entity_id,
+          };
+          changed();
+          renderTiles();
+          return;
+        }
+        changed();
+      });
+      const tileActionType = card.querySelector(".tile-action-type");
+      tileActionType?.addEventListener("change", () => {
+        toggleTileTapActionFields(card);
+        syncTileTapAction(card, tile, false);
+      });
+      for (const selector of [".tile-action-entity", ".tile-action-service", ".tile-action-data"]) {
+        card.querySelector(selector)?.addEventListener("change", () => syncTileTapAction(card, tile));
+      }
+      bindEntityPicker(card.querySelector(".tile-action-entity"));
       for (const [selector, outputSelector, field] of [
         [".tile-text-scale", ".tile-text-scale-value", "text_scale"],
         [".tile-qr-scale", ".tile-qr-scale-value", "qr_scale"],
@@ -5544,8 +6269,9 @@
     async function renderPreview() {
       if (!state.profile) return;
       const requestId = ++state.previewRequest;
+      const spec = modelSpec();
       $("#previewState").hidden = false;
-      $("#previewState").textContent = "Rendering live Home Assistant values…";
+      $("#previewState").textContent = `Rendering live Home Assistant values for ${spec.display_name || state.model}…`;
       try {
         const selected = state.devices.find((device) => device.device_id === $("#deviceSelect").value);
         const response = await api("studio/preview", {
@@ -5555,6 +6281,8 @@
             device_id: selected?.device_id || "",
             profile: state.profile,
             page_index: state.pageIndex,
+            width: spec.width,
+            height: spec.height,
           },
         });
         if (requestId !== state.previewRequest) return;
@@ -5578,7 +6306,29 @@
       }
     }
 
+    function syncVisibleTileActions() {
+      if (!isLvglModel()) return true;
+      const supportedLayouts = capabilityValues("lvgl_layouts", FALLBACK_CAPABILITIES.lvgl_layouts);
+      if (!supportedLayouts.includes(currentPage().layout || "auto")) {
+        toast(`${layoutLabel(currentPage().layout)} is not supported by LVGL receiver v1. Choose Automatic, Single spotlight, Stacked, Side-by-side, or Grid.`, true);
+        return false;
+      }
+      const supportedStyles = capabilityValues("lvgl_styles", FALLBACK_CAPABILITIES.lvgl_styles);
+      const unsupported = currentPage().entities.find((tile) => !supportedStyles.includes(tile.style || "value"));
+      if (unsupported) {
+        toast(`${styleLabel(unsupported.style)} is not supported by LVGL receiver v1. Choose Value card, Gauge, or Progress bar.`, true);
+        return false;
+      }
+      for (const card of document.querySelectorAll("#tileList .tile-card")) {
+        if (!card.querySelector(".tile-action-type")) continue;
+        const tile = currentPage().entities[Number(card.dataset.tile)];
+        if (tile && !syncTileTapAction(card, tile)) return false;
+      }
+      return true;
+    }
+
     async function saveProfile() {
+      if (!syncVisibleTileActions()) return false;
       try {
         $("#saveProfile").disabled = true;
         const response = await api(`studio/profiles/${encodeURIComponent(state.profile.name)}`, {
@@ -5620,22 +6370,30 @@
     }
 
     function setModel(model) {
-      state.model = model;
-      document.querySelectorAll("[data-model]").forEach((button) =>
-        button.classList.toggle("active", button.dataset.model === model)
+      const selectedModel = canonicalModelId(model);
+      const spec = modelSpec(selectedModel);
+      state.model = selectedModel;
+      document.querySelectorAll("#modelSegment [data-model]").forEach((button) =>
+        button.classList.toggle("active", button.dataset.model === selectedModel)
       );
-      const specs = model === "X3" ? [528, 792] : model === "N4" ? [400, 300] : model === "ROOK" ? [480, 480] : model === "CHECKERS" ? [960, 480] : [480, 800];
-      $("#deviceFrame").classList.toggle("x3", model === "X3");
-      $("#deviceFrame").classList.toggle("n4", model === "N4");
-      $("#deviceFrame").classList.toggle("round", model === "ROOK");
-      $("#previewWrap").style.setProperty("--ratio", `${specs[0]}/${specs[1]}`);
-      $("#modelLabel").textContent = `${model} · ${specs[0]} × ${specs[1]}`;
-      $("#canvasDimensions").textContent = `Canvas ${specs[0]} × ${specs[1]}`;
+      $("#deviceFrame").classList.toggle("x3", selectedModel === "X3");
+      $("#deviceFrame").classList.toggle("n4", selectedModel === "N4");
+      $("#deviceFrame").classList.toggle("round", spec.shape === "round");
+      $("#previewWrap").style.setProperty("--ratio", `${spec.width}/${spec.height}`);
+      $("#modelLabel").textContent = `${spec.display_name || selectedModel} · ${spec.width} × ${spec.height}`;
+      $("#canvasDimensions").textContent = `Canvas ${spec.width} × ${spec.height}`;
+      $("#previewTechnology").textContent = spec.lvgl
+        ? "Live LVGL v1 preview · value, control, and gauge cards"
+        : isColourModel(selectedModel)
+        ? "Live colour receiver preview"
+        : "Live e-ink preview";
+      if (state.profile) renderInspector();
       renderHeaderStatus();
       schedulePreview();
     }
 
     function addPage() {
+      if (state.profile.pages.length >= 12) return toast("Dashboard profiles support up to 12 pages.", true);
       state.profile.pages.push({
         title: `PAGE ${state.profile.pages.length + 1}`,
         layout: "auto",
@@ -5683,15 +6441,20 @@
       const name = $("#profileName").value.trim();
       if (!$("#profileName").checkValidity()) return $("#profileName").reportValidity();
       if (state.profiles.some((profile) => profile.name === name)) return toast("That profile already exists.", true);
-      const profile = $("#profileTemplate").value === "current"
+      const template = $("#profileTemplate").value;
+      const profile = template === "current"
         ? {...clone(state.profile), name}
-        : {name, auto_rotate_seconds: 0, pages: [defaultPage()]};
+        : template === "jc3636"
+          ? roundStarterProfile(name)
+          : {name, color_theme: "auto", auto_rotate_seconds: 0, pages: [defaultPage()]};
       state.profiles.push(profile);
       state.profile = normalizeProfile(profile);
       state.pageIndex = 0;
       state.dirty = true;
+      if (template === "jc3636") state.model = "JC3636";
       $("#profileDialog").close();
       renderAll();
+      setModel(state.model);
     }
 
     function inferIcon(entity) {
@@ -5721,9 +6484,95 @@
       return "";
     }
 
+    function roundStatusPage() {
+      return {
+        title: "HOME STATUS",
+        layout: "grid",
+        activation: defaultActivation(),
+        entities: [
+          {
+            entity_id: "sensor.living_temperature", label: "Living room", unit: "°C",
+            icon: "temperature", style: "gauge", minimum: 0, maximum: 40,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "warning", control_style: "read_only", tap_action: {type: "none"},
+          },
+          {
+            entity_id: "sensor.home_humidity", label: "Humidity", unit: "%",
+            icon: "humidity", style: "progress", minimum: 0, maximum: 100,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "info", control_style: "read_only", tap_action: {type: "none"},
+          },
+          {
+            entity_id: "binary_sensor.front_door", label: "Front door", unit: "",
+            icon: "lock", style: "value", minimum: 0, maximum: 100,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "primary", control_style: "read_only", tap_action: {type: "none"},
+          },
+          {
+            entity_id: "sensor.solar_power", label: "Solar", unit: "kW",
+            icon: "solar", style: "gauge", minimum: 0, maximum: 20,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "success", control_style: "read_only", tap_action: {type: "none"},
+          },
+        ],
+      };
+    }
+
+    function roundControlsPage() {
+      return {
+        title: "HOME CONTROL",
+        layout: "grid",
+        activation: defaultActivation(),
+        entities: [
+          {
+            entity_id: "light.living_room", label: "Living lights", unit: "Tap to toggle",
+            icon: "light", style: "value", minimum: 0, maximum: 100,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "primary", control_style: "toggle",
+            tap_action: {type: "home_assistant", service: "homeassistant.toggle", entity_id: "light.living_room"},
+          },
+          {
+            entity_id: "switch.ceiling_fan", label: "Ceiling fan", unit: "Tap to toggle",
+            icon: "home", style: "value", minimum: 0, maximum: 100,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "success", control_style: "toggle",
+            tap_action: {type: "home_assistant", service: "homeassistant.toggle", entity_id: "switch.ceiling_fan"},
+          },
+          {
+            entity_id: "scene.relax", label: "Relax", unit: "Activate scene",
+            icon: "home", style: "value", minimum: 0, maximum: 100,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "info", control_style: "button",
+            tap_action: {type: "home_assistant", service: "scene.turn_on", entity_id: "scene.relax"},
+          },
+          {
+            entity_id: "sensor.living_temperature", label: "Living room", unit: "°C",
+            icon: "temperature", style: "value", minimum: 0, maximum: 40,
+            source: "home_assistant", value: "", text_scale: 100, qr_scale: 100,
+            color_role: "warning", control_style: "read_only", tap_action: {type: "none"},
+          },
+        ],
+      };
+    }
+
+    function roundStarterProfile(name) {
+      return {
+        name,
+        color_theme: "midnight",
+        auto_rotate_seconds: 0,
+        pages: [
+          roundStatusPage(),
+          roundControlsPage(),
+        ],
+      };
+    }
+
     function applyPageTemplate() {
       const template = $("#pageTemplate").value;
       if (!template) return toast("Choose a template first.", true);
+      if (isLvglModel() && LVGL_UNSUPPORTED_PAGE_TEMPLATES.has(template)) {
+        return toast("That page template uses a visual not supported by LVGL receiver v1.", true);
+      }
       const templates = {
         doorbell: {
           title: "FRONT DOOR", layout: "single",
@@ -5753,6 +6602,7 @@
           activation: {...defaultActivation(), type:"condition", entity_id:"binary_sensor.weather_alert", operator:"on", priority:90, expires_after_seconds:3600},
           entities: [{entity_id:"binary_sensor.weather_alert", label:"Weather Alert", unit:"", icon:"weather", style:"value", minimum:0, maximum:100}],
         },
+        round_controls: roundControlsPage(),
         house_pulse: {
           title: "HOME", layout: "house_pulse",
           activation: defaultActivation(),
@@ -5794,11 +6644,16 @@
         },
       };
       state.profile.pages[state.pageIndex] = clone(templates[template]);
+      const roundTarget = template === "round_controls";
+      if (roundTarget && state.profile.color_theme === "auto") state.profile.color_theme = "midnight";
       $("#pageTemplate").value = "";
       changed();
       renderPages();
-      renderInspector();
-      toast("Template applied. Replace the example entity IDs with your own if needed.");
+      if (roundTarget) setModel("JC3636");
+      else renderInspector();
+      toast(roundTarget
+        ? "Round touch controls added. Replace the example Home Assistant entities with your own."
+        : "Template applied. Replace the example entity IDs with your own if needed.");
     }
 
     function escapeHtml(value) {
@@ -5861,6 +6716,23 @@
     $("#deleteProfile").addEventListener("click", deleteProfile);
     $("#profileForm").addEventListener("submit", createNewProfile);
     $("#cancelProfile").addEventListener("click", () => $("#profileDialog").close());
+    $("#openDisplayProfiles").addEventListener("click", openDisplayProfileBuilder);
+    $("#closeDisplayProfiles").addEventListener("click", () => $("#displayProfileDialog").close());
+    $("#newDisplayProfile").addEventListener("click", newDisplayProfile);
+    $("#refreshDisplayProfiles").addEventListener("click", async () => {
+      try {
+        await loadDisplayProfileRegistry(state.displayProfiles.selectedId);
+      } catch (error) {
+        toast(error.message, true);
+      }
+    });
+    $("#displayProfileForm").addEventListener("submit", saveDisplayHardwareProfile);
+    $("#deleteDisplayProfile").addEventListener("click", deleteDisplayHardwareProfile);
+    $("#displayTouch").addEventListener("change", syncDisplayTouchController);
+    $("#displayProfileList").addEventListener("click", (event) => {
+      const profile = event.target.closest("[data-display-profile]");
+      if (profile) chooseDisplayProfile(profile.dataset.displayProfile);
+    });
     $("#addPage").addEventListener("click", addPage);
     $("#movePageUp").addEventListener("click", () => movePage(-1));
     $("#movePageDown").addEventListener("click", () => movePage(1));
@@ -5872,6 +6744,9 @@
     });
     function addTile(source = "home_assistant", style = "value") {
       if (currentPage().entities.length >= 4) return;
+      if (isLvglModel() && !capabilityValues("lvgl_styles", FALLBACK_CAPABILITIES.lvgl_styles).includes(style)) {
+        return toast("That visual is not supported by LVGL receiver v1.", true);
+      }
       const index = currentPage().entities.length;
       const isStatic = source === "static";
       currentPage().entities.push({
@@ -5888,6 +6763,9 @@
         value: isStatic ? (style === "qr" ? "https://example.com" : "Your text") : "",
         text_scale: 100,
         qr_scale: style === "qr" ? 130 : 100,
+        color_role: "auto",
+        control_style: "auto",
+        tap_action: {type: "none"},
       });
       changed(); renderInspector(); renderPages();
     }
@@ -5925,6 +6803,10 @@
     $("#applyTemplate").addEventListener("click", applyPageTemplate);
     $("#autoRotate").addEventListener("change", (event) => {
       state.profile.auto_rotate_seconds = Number(event.target.value);
+      changed();
+    });
+    $("#colorTheme").addEventListener("change", (event) => {
+      state.profile.color_theme = event.target.value;
       changed();
     });
     $("#assignProfile").addEventListener("click", assignProfile);
@@ -6215,15 +7097,9 @@
     $("#deviceSelect").addEventListener("change", (event) => {
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       renderHeaderStatus();
-      if (selected?.model) {
-        const model = selected.model.toUpperCase();
-        setModel(model.includes("CHECKERS") || model.includes("ECHO_SHOW_5") || model.includes("ECHOSHOW5") ? "CHECKERS" : model.includes("ROOK") || model.includes("ECHO_SPOT") ? "ROOK" : model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
-      }
+      if (selected?.model) setModel(canonicalModelId(selected.model));
       else schedulePreview();
     });
-    document.querySelectorAll("[data-model]").forEach((button) =>
-      button.addEventListener("click", () => setModel(button.dataset.model))
-    );
     window.addEventListener("beforeunload", (event) => {
       if (!state.dirty) return;
       event.preventDefault();
@@ -6231,6 +7107,7 @@
     });
     activateWorkspace(state.workspace);
     setPreviewZoom(1);
+    renderModelSelector();
     setModel("X4");
     load();
   </script>

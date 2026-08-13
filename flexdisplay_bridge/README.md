@@ -188,3 +188,60 @@ cropped and dithered specifically for the X3/X4 e-paper display. Preview and
 assign the finished pass like any other dashboard profile. A profile
 containing only fixed content does not require Home Assistant entity access
 and displays `STANDALONE` in its status footer.
+
+## Colour and LVGL displays
+
+Dashboard Studio includes a built-in **JC3636W518EN** target with a 360 × 360
+round colour preview and a starter profile containing receiver-supported Home
+Assistant status, gauge/progress, and touch-control pages. LVGL profiles are
+declarative and bounded to 12 pages and four tiles per page. Receiver contract
+v1 supports value cards, gauge/progress bars, button/toggle affordances,
+approved themes, semantic colour roles, and tap actions. House Pulse layouts,
+dashboard icons, QR, history, image, name-card/profile-photo, badge-theme, and
+text/QR scale controls remain e-paper features until a receiver version
+implements them. LVGL v1 uses receiver-native widget affordances and omits the
+unused icon field from its manifest. Studio hides those choices for LVGL v1,
+and both preview and device delivery reject an incompatible saved profile
+instead of silently rendering a different screen. The contract does not accept
+free-form coordinates, executable callbacks, firmware pins, or source code.
+
+Use **Display hardware → Open Profile Builder** to add another RGB565 or
+RGB888 colour/LVGL panel. A custom hardware profile records display metadata,
+dimensions, shape, touch/controller capability, MCU, memory, and model aliases.
+It does not generate board firmware or prove that a pin mapping is compatible.
+Built-in profiles are read-only, and profiles already assigned to a device are
+protected from incompatible edits or deletion by the Bridge API.
+
+LVGL-only colour and touch fields remain hidden for X3/X4 e-paper and Android
+receiver previews, while e-paper-only visual and scaling fields remain hidden
+for LVGL v1. Home Assistant actions are saved as validated declarative data and
+resolved by the Bridge; Home Assistant credentials are never included in the
+receiver manifest.
+
+Colour receivers use device-bound authentication. Configure a distinct
+Bridge-only `lvgl_receiver_key_master` containing 16–256 UTF-8 bytes; never
+copy that master onto a panel. The provisioning workflow derives one lowercase
+64-character HMAC-SHA256 key using the domain separator
+`flexdisplay.lvgl-receiver-key.v1` plus a NUL byte and the receiver's canonical
+uppercase device ID. Credential rotations insert ASCII `epoch:<decimal>` plus
+a second NUL byte after the v1 domain and before the device ID. Provision only
+the derived key; the Bridge
+API never returns the master or a derived value. JC3636 identities use `JC36-`
+plus all 12 uppercase hexadecimal MAC digits, for example
+`JC36-001122AABBCC`.
+
+The Home Assistant App stores the master as a password option, then hands it to
+the Bridge through an owner-only fixed-purpose file rather than an environment
+variable or YAML literal. Receiver credentials remain separate from the Bridge
+administrator key, Home Assistant, Wi-Fi, ESPHome API encryption, and OTA
+credentials. An administrator can revoke a lost receiver or advance its epoch
+through the authenticated `/api/v1/receiver-credentials/{device_id}/revoke`
+and `/rotate` routes; rotation requires provisioning the newly derived key on
+that panel before it can reconnect.
+
+The derived key is a bearer credential, so receivers must use verified HTTPS
+for manifests, assets, and events. Event bindings are frozen with the delivered
+manifest and each event is durably recorded before its side effect. Exact
+duplicates return the stored terminal result; pending or failed events are not
+re-executed. This is deliberate durable at-most-once behavior, not exactly-once
+delivery.

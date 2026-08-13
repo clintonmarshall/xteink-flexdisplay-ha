@@ -34,6 +34,7 @@ from .button_actions import (
     MODE as BUTTON_ACTION_MODE,
 )
 from .config import BridgeConfig, DeviceConfig, EntityConfig, FirmwareConfig, load_config
+from .color_renderer import ColorDisplayRenderer, ColorRenderError
 from .content_channels import (
     ContentChannelStore,
     ContentChannelValidationError,
@@ -56,6 +57,9 @@ from .dashboard_assets import (
 )
 from .dashboard_store import (
     BADGE_THEMES,
+    COLOR_ROLES,
+    COLOR_THEMES,
+    CONTROL_STYLES,
     DashboardProfileStore,
     DashboardValidationError,
     parse_profile,
@@ -66,6 +70,16 @@ from .device_capabilities import (
     DeviceCapabilityDescriptor,
     resolve_device_capabilities,
 )
+from .display_profiles import (
+    MAX_DIMENSION,
+    MAX_PIXELS,
+    DisplayProfile,
+    DisplayProfileStateError,
+    DisplayProfileStore,
+    DisplayProfileValidationError,
+    parse_custom_profile,
+    profile_payload as display_profile_payload,
+)
 from .firmware_mirror import FirmwareMirror, FirmwareMirrorError
 from .flexhub_client import FlexHubClient, FlexHubClientError
 from .home_assistant import HomeAssistantClient
@@ -73,6 +87,21 @@ from .loading_screen import (
     MAX_LOGO_BYTES,
     LoadingScreenStore,
     LoadingScreenValidationError,
+)
+from .lvgl_manifest import (
+    LVGL_UI_CAPABILITY,
+    LVGL_UI_EVENT_GESTURES,
+    LVGL_UI_LAYOUTS,
+    LVGL_UI_MEDIA_TYPE,
+    LVGL_UI_TILE_STYLES,
+    LVGL_UI_VERSION,
+    MAX_LVGL_MANIFEST_BYTES,
+    LvglManifestError,
+    build_lvgl_manifest,
+    canonical_manifest_bytes,
+    color_theme,
+    manifest_action_bindings,
+    validate_lvgl_profile,
 )
 from .meshtastic_console import (
     MeshtasticConsoleStore,
@@ -85,6 +114,8 @@ from .photo_frame import (
     PhotoFrameValidationError,
 )
 from .renderer import DashboardRenderer
+from .receiver_auth import ReceiverAuthError, verify_receiver_key
+from .receiver_credentials import ReceiverCredentialStore
 from .rook_interactions import (
     RookBroker,
     RookInteractionError,
@@ -103,6 +134,7 @@ from .voice_assistant import (
 LOGGER = logging.getLogger(__name__)
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
+JC36_DEVICE_ID_PATTERN = re.compile(r"^JC36-[0-9A-F]{12}$")
 SUPPORTED_COMMANDS = {
     "refresh",
     "full-refresh",
@@ -620,11 +652,19 @@ def _transfer_capabilities(record: dict[str, Any]) -> set[str]:
 
 def _is_always_on_color_display(record: dict[str, Any]) -> bool:
     capabilities = _transfer_capabilities(record)
-    color = bool(record.get("color_available")) or "color" in capabilities
+    descriptor = _device_capabilities(record)
+    color = (
+        descriptor.display.color
+        or bool(record.get("color_available"))
+        or "color" in capabilities
+    )
     explicitly_always_on = bool(
         capabilities.intersection({"always-on-color", "always-on", "mains-powered"})
     )
-    return color and (_is_android_display(record) or explicitly_always_on)
+    return color and (
+        descriptor.family in {"android_receiver", "esp_color_receiver"}
+        or explicitly_always_on
+    )
 
 
 def _supports_mqtt_screen_refresh(record: dict[str, Any]) -> bool:
@@ -637,9 +677,10 @@ def _supports_mqtt_screen_refresh(record: dict[str, Any]) -> bool:
 
 def _display_runtime(record: dict[str, Any]) -> dict[str, str]:
     capabilities = _transfer_capabilities(record)
-    if _is_android_display(record):
-        technology = "lcd"
-        delivery = "long_poll"
+    descriptor = _device_capabilities(record)
+    if descriptor.display.technology != "unknown":
+        technology = descriptor.display.technology
+        delivery = descriptor.delivery.refresh_delivery
     else:
         technology = (
             "oled"
@@ -1061,6 +1102,7 @@ def _decorate_device(
     result["device_capabilities"] = descriptor.to_dict()
     result["device_family"] = descriptor.family
     result["firmware_provider"] = descriptor.firmware.provider
+    result["firmware_target_supported"] = descriptor.firmware.manageable
     result["supported_actions"] = list(descriptor.management.actions)
     result["identity"] = _device_identity(result)
     result.update(_display_runtime(result))
@@ -1542,6 +1584,23 @@ def _capabilities(value: str | None) -> set[str]:
     }
 
 
+def _accepts_lvgl_manifest(value: str | None) -> bool:
+    """Require the versioned receiver media type instead of a generic JSON accept."""
+    for raw_item in str(value or "").split(","):
+        parts = [part.strip() for part in raw_item.split(";")]
+        if not parts or parts[0].lower() != "application/vnd.flexdisplay.lvgl+json":
+            continue
+        parameters = {
+            key.strip().lower(): selected.strip()
+            for part in parts[1:]
+            if "=" in part
+            for key, selected in [part.split("=", 1)]
+        }
+        if parameters.get("version") == "1":
+            return True
+    return False
+
+
 def _clock_minutes(value: str, fallback: int) -> int:
     try:
         hour, minute = (int(part) for part in value.split(":", 1))
@@ -1883,6 +1942,18 @@ def _device_id(value: str | None) -> str:
     return selected
 
 
+def _canonical_receiver_admin_id(value: str | None) -> str:
+    """Canonicalise an administrator-supplied receiver ID without aliasing JC36."""
+
+    selected = _device_id(value).upper()
+    if selected.startswith("JC36-") and not JC36_DEVICE_ID_PATTERN.fullmatch(selected):
+        raise HTTPException(
+            status_code=400,
+            detail="JC36 receiver ID must contain the full hardware MAC",
+        )
+    return selected
+
+
 def _valid_command(command: str) -> bool:
     return command in SUPPORTED_COMMANDS or bool(
         re.fullmatch(r"page-[1-9][0-9]?", command)
@@ -1910,6 +1981,21 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.state_path.with_name("flexdisplay-dashboards.json"),
         settings.profiles,
         settings.default_profile,
+    )
+    display_profile_path = settings.state_path.with_name(
+        "flexdisplay-display-profiles.json"
+    )
+    display_profile_error = ""
+    try:
+        display_profiles = DisplayProfileStore(display_profile_path)
+    except DisplayProfileStateError:
+        LOGGER.exception("Colour display profile state is unavailable")
+        display_profile_error = (
+            "Colour display profile state requires operator recovery"
+        )
+        display_profiles = DisplayProfileStore(display_profile_path, load=False)
+    receiver_credentials = ReceiverCredentialStore(
+        settings.state_path.with_name("flexdisplay-receiver-credentials.json")
     )
     dashboard_assets = DashboardAssetStore(
         settings.state_path.with_name("dashboard-assets")
@@ -1948,7 +2034,38 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ha = HomeAssistantClient(settings.home_assistant)
     voice_assistant = HomeAssistantVoiceClient(settings.home_assistant)
     renderer = DashboardRenderer()
+    color_renderer = ColorDisplayRenderer()
     rook = RookBroker()
+
+    def resolve_display_profile(
+        model: str,
+        width: int,
+        height: int,
+    ) -> DisplayProfile | None:
+        # Authenticated colour receivers must identify a canonical model,
+        # profile ID, or registered alias. Resolution alone is not identity:
+        # otherwise an unknown 360x360 client could inherit the JC profile.
+        if display_profile_error:
+            return None
+        selected = display_profiles.resolve(model)
+        if selected is None or selected.resolution != (width, height):
+            return None
+        return selected
+
+    def devices_using_display_profile(profile_id: str) -> list[str]:
+        active: list[str] = []
+        for candidate in store.all():
+            try:
+                width = int(candidate.get("width") or 0)
+                height = int(candidate.get("height") or 0)
+            except (TypeError, ValueError):
+                continue
+            resolved = resolve_display_profile(
+                str(candidate.get("model") or ""), width, height
+            )
+            if resolved is not None and resolved.id == profile_id:
+                active.append(str(candidate.get("device_id") or ""))
+        return sorted(device_id for device_id in active if device_id)
 
     def fleet_policy_profiles() -> dict[str, dict[str, Any]]:
         profiles = {
@@ -2743,6 +2860,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.config = settings
     app.state.store = store
     app.state.dashboards = dashboards
+    app.state.display_profiles = display_profiles
+    app.state.display_profile_error = display_profile_error
+    app.state.receiver_credentials = receiver_credentials
     app.state.photo_frames = photo_frames
     app.state.loading_screens = loading_screens
     app.state.content_packs = content_packs
@@ -2846,6 +2966,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "mqtt_discovery_enabled": mqtt.discovery_enabled,
             "screen_history_enabled": settings.screen_history.enabled,
             "screen_history_limit": settings.screen_history.limit,
+            "color_display_profiles": {
+                "available": not bool(display_profile_error),
+                "error": display_profile_error,
+            },
             "firmware_mirror": _public_mirror_status(mirror_health),
             "firmware_maintenance": _firmware_maintenance_status(settings),
             "flexhub": {
@@ -3876,6 +4000,98 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         ):
             raise HTTPException(status_code=401, detail="Bridge API key required")
 
+    def authorize_color_device(device_id: str, device_key: str | None) -> None:
+        """Authenticate one receiver without reading or mutating fleet state."""
+
+        if device_id != device_id.upper():
+            raise HTTPException(
+                status_code=400,
+                detail="Colour receiver IDs must use their canonical uppercase form",
+            )
+        if device_id.startswith("JC36-") and not JC36_DEVICE_ID_PATTERN.fullmatch(
+            device_id
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="JC36 receiver ID must contain the full hardware MAC",
+            )
+        master = str(settings.receiver_key_master or "")
+        try:
+            master_bytes = master.encode("utf-8", errors="strict")
+            admin_key_bytes = str(settings.api_key or "").encode(
+                "utf-8", errors="strict"
+            )
+        except UnicodeError as err:
+            raise HTTPException(
+                status_code=503,
+                detail="Invalid colour receiver auth configuration",
+            ) from err
+        if (
+            not 16 <= len(master_bytes) <= 256
+            or (
+                admin_key_bytes
+                and hmac.compare_digest(master_bytes, admin_key_bytes)
+            )
+        ):
+            raise HTTPException(
+                status_code=503,
+                detail=(
+                    "Set a distinct Bridge-only colour receiver key master of "
+                    "16–256 UTF-8 bytes before enabling LVGL receivers"
+                ),
+            )
+        try:
+            credential = receiver_credentials.get(device_id)
+            if credential["disabled"] is True:
+                raise HTTPException(
+                    status_code=401, detail="Colour receiver credential is revoked"
+                )
+            authenticated = verify_receiver_key(
+                master,
+                device_id,
+                device_key,
+                int(credential["epoch"]),
+            )
+        except ReceiverAuthError as err:
+            raise HTTPException(
+                status_code=503, detail="Invalid colour receiver auth configuration"
+            ) from err
+        if not authenticated:
+            raise HTTPException(status_code=401, detail="Colour receiver key required")
+
+    def authorize_receiver_credential_admin(request: Request) -> None:
+        if not settings.api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="Configure the Bridge admin key before managing receiver credentials",
+            )
+        authorize(request)
+
+    @app.get("/api/v1/receiver-credentials")
+    def list_receiver_credentials(request: Request) -> dict[str, Any]:
+        authorize_receiver_credential_admin(request)
+        return {"receivers": receiver_credentials.all()}
+
+    @app.post("/api/v1/receiver-credentials/{device_id}/revoke")
+    def revoke_receiver_credential(
+        device_id: str, request: Request
+    ) -> dict[str, Any]:
+        authorize_receiver_credential_admin(request)
+        selected = _canonical_receiver_admin_id(device_id)
+        return {"device_id": selected, **receiver_credentials.revoke(selected)}
+
+    @app.post("/api/v1/receiver-credentials/{device_id}/rotate")
+    def rotate_receiver_credential(
+        device_id: str, request: Request
+    ) -> dict[str, Any]:
+        authorize_receiver_credential_admin(request)
+        selected = _canonical_receiver_admin_id(device_id)
+        try:
+            status = receiver_credentials.rotate(selected)
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {"device_id": selected, **status}
+
     def authorize_receiver(request: Request, device_id: str) -> dict[str, Any]:
         selected = _device_id(device_id)
         record = store.get(selected)
@@ -3887,6 +4103,244 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if not expected or not hmac.compare_digest(expected, observed):
             raise HTTPException(status_code=401, detail="Receiver token required")
         return record
+
+    def lvgl_dashboard_profile(record: dict[str, Any]):
+        configured = settings.device(
+            str(record.get("device_id") or ""),
+            int(record.get("width") or 0),
+            int(record.get("height") or 0),
+            str(record.get("model") or ""),
+        )
+        effective = _effective_device(configured, record)
+        return dashboards.resolve(effective.profile)
+
+    def require_lvgl_record(
+        device_id: str,
+        *,
+        interactive: bool = False,
+    ) -> dict[str, Any]:
+        if display_profile_error:
+            raise HTTPException(status_code=503, detail=display_profile_error)
+        record = store.get(device_id)
+        if record is None:
+            raise HTTPException(status_code=404, detail="Colour receiver not found")
+        descriptor = _device_capabilities(record)
+        display = resolve_display_profile(
+            str(record.get("model") or ""),
+            int(record.get("width") or 0),
+            int(record.get("height") or 0),
+        )
+        if (
+            descriptor.family not in {"esp_color_receiver", "generic_embedded"}
+            or display is None
+            or not display.is_color
+            or LVGL_UI_CAPABILITY not in _transfer_capabilities(record)
+            or (
+                interactive
+                and (
+                    not display.touch
+                    or "touch" not in _transfer_capabilities(record)
+                )
+            )
+        ):
+            raise HTTPException(status_code=409, detail="Device is not an LVGL colour receiver")
+        return record
+
+    @app.get("/api/v1/devices/{device_id}/ui-assets/{asset_id}.png")
+    def lvgl_ui_asset(
+        device_id: str,
+        asset_id: str,
+        x_flexdisplay_device_key: str | None = Header(default=None),
+    ) -> Response:
+        selected = _device_id(device_id)
+        authorize_color_device(selected, x_flexdisplay_device_key)
+        record = require_lvgl_record(selected)
+        if not re.fullmatch(r"[a-f0-9]{24}", asset_id):
+            raise HTTPException(status_code=404, detail="UI asset not found")
+        dashboard_profile = lvgl_dashboard_profile(record)
+        assigned_assets = {
+            tile.badge_photo_id
+            for page in dashboard_profile.pages
+            for tile in page.entities
+            if tile.style == "name_card" and tile.badge_photo_id
+        }
+        if asset_id not in assigned_assets:
+            raise HTTPException(status_code=404, detail="UI asset not found")
+        content = dashboard_assets.profile_photo(asset_id)
+        if not content:
+            raise HTTPException(status_code=404, detail="UI asset not found")
+        return Response(
+            content=content,
+            media_type="image/png",
+            headers={"Cache-Control": "private, max-age=300"},
+        )
+
+    @app.post("/api/v1/devices/{device_id}/ui-events")
+    async def lvgl_ui_event(
+        device_id: str,
+        request: Request,
+        x_flexdisplay_device_key: str | None = Header(default=None),
+        x_flexdisplay_id: str | None = Header(default=None),
+        x_flexdisplay_boot_id: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        # Authentication precedes every record read and all replay-state writes.
+        selected = _device_id(device_id)
+        authorize_color_device(selected, x_flexdisplay_device_key)
+        header_device_id = _device_id(x_flexdisplay_id)
+        if not hmac.compare_digest(selected, header_device_id):
+            raise HTTPException(status_code=409, detail="Device identity mismatch")
+        record = require_lvgl_record(selected, interactive=True)
+        encoded_payload = await _bounded_request_body(
+            request,
+            4096,
+            "UI event is too large",
+        )
+        try:
+            decoded_payload = encoded_payload.decode("utf-8", errors="strict")
+
+            def reject_constant(value: str) -> None:
+                raise ValueError(f"Unsupported JSON constant: {value}")
+
+            payload = json.loads(decoded_payload, parse_constant=reject_constant)
+        except (UnicodeError, json.JSONDecodeError, ValueError) as err:
+            raise HTTPException(status_code=400, detail="Invalid UI event JSON or UTF-8") from err
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="UI event must be a JSON object")
+        try:
+            canonical_manifest_bytes(payload)
+        except LvglManifestError as err:
+            raise HTTPException(status_code=400, detail="Invalid UI event JSON or UTF-8") from err
+        version = payload.get("version")
+        sequence = payload.get("sequence")
+        if (
+            isinstance(version, bool)
+            or not isinstance(version, int)
+            or isinstance(sequence, bool)
+            or not isinstance(sequence, int)
+        ):
+            raise HTTPException(status_code=400, detail="Invalid UI event version or sequence")
+        session_id = str(payload.get("session_id") or "")
+        boot_id = str(x_flexdisplay_boot_id or "")
+        event_id = str(payload.get("event_id") or "")
+        manifest_revision = str(payload.get("manifest_revision") or "")
+        page_id = str(payload.get("page_id") or "")
+        tile_id = str(payload.get("tile_id") or "")
+        action_id_value = str(payload.get("action_id") or "")
+        gesture = str(payload.get("gesture") or "")
+        if version != LVGL_UI_VERSION:
+            raise HTTPException(status_code=400, detail="Unsupported UI event version")
+        if gesture not in LVGL_UI_EVENT_GESTURES:
+            raise HTTPException(status_code=400, detail="Unsupported UI gesture")
+        if not re.fullmatch(r"[0-9a-f]{32}", session_id):
+            raise HTTPException(status_code=400, detail="Invalid UI event session")
+        if session_id != boot_id or boot_id != str(record.get("boot_id") or ""):
+            raise HTTPException(status_code=409, detail="Stale UI event session")
+        if not 1 <= sequence <= 0x7FFFFFFF:
+            raise HTTPException(status_code=400, detail="Invalid UI event sequence")
+        if event_id != f"{session_id}-{sequence:08X}":
+            raise HTTPException(status_code=400, detail="Invalid UI event ID")
+        for value, maximum, label in (
+            (manifest_revision, 48, "manifest revision"),
+            (page_id, 32, "page ID"),
+            (tile_id, 32, "tile ID"),
+            (action_id_value, 64, "action ID"),
+        ):
+            if (
+                not value
+                or len(value.encode("utf-8")) > maximum
+                or not re.fullmatch(r"[A-Za-z0-9._:-]+", value)
+            ):
+                raise HTTPException(status_code=400, detail=f"Invalid UI event {label}")
+        event = {
+            "version": version,
+            "event_id": event_id,
+            "session_id": session_id,
+            "sequence": sequence,
+            "manifest_revision": manifest_revision,
+            "page_id": page_id,
+            "tile_id": tile_id,
+            "gesture": gesture,
+            "action_id": action_id_value,
+        }
+        event_record, is_new, status = store.record_ui_event(selected, event)
+        if status == "duplicate_succeeded":
+            previous = next(
+                (
+                    item
+                    for item in reversed(event_record.get("recent_ui_events") or [])
+                    if str(item.get("event_id") or "") == event_id
+                ),
+                {},
+            )
+            previous_result = previous.get("result") or {}
+            return {
+                "accepted": True,
+                "duplicate": True,
+                "refresh": False,
+                "command": previous_result.get("command") or None,
+            }
+        if status == "duplicate_pending":
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "UI event was already accepted but has no terminal result; "
+                    "it will not be retried"
+                ),
+            )
+        if status == "duplicate_failed":
+            raise HTTPException(
+                status_code=502,
+                detail="The previously accepted UI action failed and will not be retried",
+            )
+        if not is_new:
+            status_code = 404 if status == "missing" else 409
+            raise HTTPException(status_code=status_code, detail=f"UI event rejected: {status}")
+
+        persisted_binding = next(
+            (
+                item
+                for item in (event_record.get("last_ui_manifest_actions") or [])
+                if str(item.get("action_id") or "") == action_id_value
+                and str(item.get("page_id") or "") == page_id
+                and str(item.get("tile_id") or "") == tile_id
+            ),
+            None,
+        )
+        if not isinstance(persisted_binding, dict) or not isinstance(
+            persisted_binding.get("action"), dict
+        ):
+            store.record_ui_event_result(
+                selected, event_id, {"type": "none"}, False, "Action binding is stale"
+            )
+            raise HTTPException(status_code=409, detail="UI action binding is stale")
+        action = persisted_binding["action"]
+        command = ""
+        if action.get("type") == "navigation":
+            command = str(action.get("command") or "")
+            if command not in {"next", "previous", "overview", "refresh"}:
+                store.record_ui_event_result(
+                    selected, event_id, action, False, "Navigation action is invalid"
+                )
+                raise HTTPException(status_code=409, detail="UI navigation action is invalid")
+            store.queue_command(selected, command)
+            success, detail = True, f"navigation {command}"
+        elif action.get("type") == "home_assistant":
+            success, detail = ha.call_service(
+                str(action.get("service") or ""),
+                str(action.get("entity_id") or ""),
+                action.get("data") if isinstance(action.get("data"), dict) else None,
+            )
+        else:
+            success, detail = False, "Action type is not executable"
+        store.record_ui_event_result(selected, event_id, action, success, detail)
+        if not success:
+            raise HTTPException(status_code=502, detail="The saved Home Assistant action failed")
+        return {
+            "accepted": True,
+            "duplicate": False,
+            "refresh": True,
+            "command": command or None,
+        }
 
     def execute_rook_action(
         device_id: str,
@@ -4069,6 +4523,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.get("/api/v1/studio")
     def studio(request: Request) -> dict[str, Any]:
         authorize(request)
+        hardware_registry = display_profiles.payload()
+        models = {
+            str(item["id"]).upper(): item
+            for item in hardware_registry["profiles"]
+        }
+        models.update(
+            {
+                "N4": {"width": 400, "height": 300},
+                "ROOK": {"width": 480, "height": 480, "shape": "round"},
+                "CHECKERS": {"width": 960, "height": 480},
+            }
+        )
         return {
             "version": __version__,
             "profiles": dashboards.all(),
@@ -4086,13 +4552,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 }
                 for record in store.all()
             ],
-            "models": {
-                "X3": {"width": 528, "height": 792},
-                "X4": {"width": 480, "height": 800},
-                "N4": {"width": 400, "height": 300},
-                "ROOK": {"width": 480, "height": 480},
-                "CHECKERS": {"width": 960, "height": 480},
-            },
+            "models": models,
+            "display_profiles": hardware_registry,
             "capabilities": {
                 "layouts": [
                     "auto",
@@ -4101,6 +4562,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "columns",
                     "grid",
                     "house_pulse",
+                ],
+                "lvgl_layouts": [
+                    layout
+                    for layout in ("auto", "single", "rows", "columns", "grid")
+                    if layout in LVGL_UI_LAYOUTS
                 ],
                 "styles": [
                     "value",
@@ -4111,8 +4577,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "image",
                     "name_card",
                 ],
+                "lvgl_styles": sorted(LVGL_UI_TILE_STYLES),
+                "lvgl_icons": [],
                 "image_fits": ["cover", "contain"],
                 "badge_themes": sorted(BADGE_THEMES),
+                "color_themes": sorted(COLOR_THEMES),
+                "color_roles": sorted(COLOR_ROLES),
+                "control_styles": sorted(CONTROL_STYLES),
                 "text_scale": {"minimum": 60, "maximum": 180, "default": 100},
                 "qr_scale": {"minimum": 50, "maximum": 150, "default": 100},
                 "activation_types": ["always", "schedule", "condition"],
@@ -4159,6 +4630,59 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 ],
             },
         }
+
+    @app.get("/api/v1/display-profiles")
+    def list_display_profiles(request: Request) -> dict[str, Any]:
+        authorize(request)
+        return {
+            **display_profiles.payload(),
+            "available": not bool(display_profile_error),
+            "error": display_profile_error,
+        }
+
+    @app.put("/api/v1/display-profiles/{profile_id}")
+    def save_display_profile(
+        profile_id: str,
+        payload: dict[str, Any],
+        request: Request,
+    ) -> dict[str, Any]:
+        authorize(request)
+        if display_profile_error:
+            raise HTTPException(status_code=503, detail=display_profile_error)
+        try:
+            proposed = parse_custom_profile(profile_id, payload)
+            existing = display_profiles.get(profile_id)
+            active = devices_using_display_profile(proposed.id)
+            if existing is not None and proposed != existing and active:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Display profile is in use by: {', '.join(active)}",
+                )
+            saved = display_profiles.put(profile_id, payload)
+        except DisplayProfileValidationError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return {"profile": display_profile_payload(saved)}
+
+    @app.delete("/api/v1/display-profiles/{profile_id}")
+    def delete_display_profile(profile_id: str, request: Request) -> dict[str, Any]:
+        authorize(request)
+        if display_profile_error:
+            raise HTTPException(status_code=503, detail=display_profile_error)
+        selected = display_profiles.get(profile_id)
+        if selected is not None:
+            active = devices_using_display_profile(selected.id)
+            if active:
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Display profile is in use by: {', '.join(active)}",
+                )
+        try:
+            display_profiles.delete(profile_id)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Display profile not found") from err
+        except DisplayProfileValidationError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+        return {"deleted": profile_id}
 
     @app.get("/api/v1/studio/entities")
     def studio_entities(request: Request) -> dict[str, Any]:
@@ -4713,7 +5237,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         except DashboardValidationError as err:
             raise HTTPException(status_code=400, detail=str(err)) from err
         model = str(payload.get("model") or "X4").upper()
+        requested_display = display_profiles.resolve(model)
         default_width, default_height = (
+            requested_display.resolution
+            if requested_display is not None
+            else
             (528, 792)
             if model == "X3"
             else (400, 300)
@@ -4724,12 +5252,45 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if model == "CHECKERS"
             else (480, 800)
         )
-        width = _integer(
-            str(payload.get("width") or default_width), default_width, 240, 1200
-        )
-        height = _integer(
-            str(payload.get("height") or default_height), default_height, 240, 1600
-        )
+        if requested_display is not None and requested_display.is_color:
+            if display_profile_error:
+                raise HTTPException(status_code=503, detail=display_profile_error)
+            try:
+                width = int(payload.get("width") or default_width)
+                height = int(payload.get("height") or default_height)
+            except (TypeError, ValueError) as err:
+                raise HTTPException(
+                    status_code=400, detail="Preview dimensions must be integers"
+                ) from err
+            if (
+                isinstance(payload.get("width"), bool)
+                or isinstance(payload.get("height"), bool)
+                or not 128 <= width <= MAX_DIMENSION
+                or not 128 <= height <= MAX_DIMENSION
+                or width * height > MAX_PIXELS
+            ):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Preview dimensions exceed the colour display profile limits",
+                )
+            if (width, height) != requested_display.resolution:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Preview dimensions must match the selected colour display profile",
+                )
+            try:
+                validate_lvgl_profile(draft)
+            except LvglManifestError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+        else:
+            # Preserve the legacy bitmap preview bounds for existing e-paper
+            # and Android models.
+            width = _integer(
+                str(payload.get("width") or default_width), default_width, 240, 1200
+            )
+            height = _integer(
+                str(payload.get("height") or default_height), default_height, 240, 1600
+            )
         device_id = str(payload.get("device_id") or f"{model}-PREVIEW")
         record = store.get(device_id) or {
             "device_id": device_id,
@@ -4755,23 +5316,49 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             max(0, len(pages) - 1),
         )
         page = pages[page_index]
-        image = renderer.render(
-            title=page.title,
-            device=record,
-            width=width,
-            height=height,
-            entities=page.entities,
-            page_index=page_index,
-            page_count=len(pages),
-            ha_error=ha_error,
-            layout=page.layout,
-            button_actions=mappings_payload(record.get("button_action_mappings")),
-            show_button_indicators=bool(record.get("button_action_indicators")),
-        )
+        preview_renderer = "bitmap"
+        if requested_display is not None and requested_display.is_color:
+            try:
+                preview_manifest = build_lvgl_manifest(
+                    draft,
+                    pages,
+                    pages,
+                    record,
+                    requested_display,
+                    active_page_index=page_index,
+                    ha_error=ha_error,
+                    poll_after_seconds=5,
+                )
+                image = color_renderer.render_manifest(
+                    requested_display,
+                    preview_manifest["pages"][page_index],
+                    subtitle=("HA DEGRADED" if ha_error else "HOME ASSISTANT • LIVE"),
+                    theme=color_theme(draft.color_theme),
+                )
+            except (ColorRenderError, LvglManifestError) as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+            preview_renderer = "lvgl-color"
+        else:
+            image = renderer.render(
+                title=page.title,
+                device=record,
+                width=width,
+                height=height,
+                entities=page.entities,
+                page_index=page_index,
+                page_count=len(pages),
+                ha_error=ha_error,
+                layout=page.layout,
+                button_actions=mappings_payload(record.get("button_action_mappings")),
+                show_button_indicators=bool(record.get("button_action_indicators")),
+            )
         return Response(
             content=image,
             media_type="image/png",
-            headers={"X-FlexDisplay-Preview-HA-Error": "true" if ha_error else "false"},
+            headers={
+                "X-FlexDisplay-Preview-HA-Error": "true" if ha_error else "false",
+                "X-FlexDisplay-Preview-Renderer": preview_renderer,
+            },
         )
 
     @app.post("/api/v1/devices/{device_id}/commands/{command}")
@@ -5825,6 +6412,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_content_error: str | None = Header(default=None),
         x_flexdisplay_policy_revision: str | None = Header(default=None),
         x_flexdisplay_receiver_token: str | None = Header(default=None),
+        x_flexdisplay_device_key: str | None = Header(default=None),
         x_flexdisplay_quick_action: str | None = Header(default=None),
         x_flexdisplay_opendisplay_transport_policy: str | None = Header(default=None),
         x_flexdisplay_opendisplay_last_transport: str | None = Header(default=None),
@@ -5834,8 +6422,27 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_opendisplay_lan_memory_blocked: str | None = Header(default=None),
     ):
         device_id = _device_id(x_flexdisplay_id)
-        width = _integer(x_flexdisplay_width, 480, 240, 1200)
-        height = _integer(x_flexdisplay_height, 800, 240, 1600)
+        width = _integer(x_flexdisplay_width, 480, 128, 2048)
+        height = _integer(x_flexdisplay_height, 800, 128, 2048)
+        capabilities = _capabilities(x_flexdisplay_capabilities)
+        reported_display_profile = display_profiles.resolve(x_flexdisplay_model)
+        jc36_namespace_intent = device_id.upper().startswith("JC36-")
+        explicit_lvgl_request = (
+            LVGL_UI_CAPABILITY in capabilities
+            or _accepts_lvgl_manifest(request.headers.get("Accept"))
+            or bool(
+                reported_display_profile
+                and reported_display_profile.is_color
+            )
+            or jc36_namespace_intent
+            or x_flexdisplay_device_key is not None
+        )
+        if explicit_lvgl_request:
+            if display_profile_error:
+                raise HTTPException(status_code=503, detail=display_profile_error)
+            # Bind the credential to the path/header ID before fleet state is
+            # read, so revoked/incorrect keys cannot probe or replace records.
+            authorize_color_device(device_id, x_flexdisplay_device_key)
         existing_record = store.get(device_id) or {}
         if x_flexdisplay_model:
             model = x_flexdisplay_model
@@ -5855,14 +6462,100 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # default. The device can advertise an explicit model next check-in.
             model = "UNKNOWN"
         device_firmware = _device_firmware(settings, model)
-        capabilities = _capabilities(x_flexdisplay_capabilities)
-
         def capability_flag(raw: str | None, *names: str) -> bool:
             parsed = _boolean(raw)
             if parsed is not None:
                 return parsed
             return any(name in capabilities for name in names)
 
+        model_display_profile = display_profiles.resolve(model)
+        existing_display_profile = None
+        existing_descriptor = None
+        if existing_record:
+            existing_descriptor = _device_capabilities(existing_record)
+            existing_display_profile = resolve_display_profile(
+                str(existing_record.get("model") or ""),
+                int(existing_record.get("width") or 0),
+                int(existing_record.get("height") or 0),
+            )
+        lvgl_requested = (
+            explicit_lvgl_request
+            or bool(existing_display_profile and existing_display_profile.is_color)
+        )
+        lvgl_display: DisplayProfile | None = None
+        if lvgl_requested:
+            if display_profile_error:
+                raise HTTPException(status_code=503, detail=display_profile_error)
+            # Receiver authentication and complete family validation happen
+            # before store.touch can enroll or mutate any device state.
+            if not explicit_lvgl_request:
+                raise HTTPException(
+                    status_code=406,
+                    detail="Colour receivers must explicitly identify the LVGL protocol on every poll",
+                )
+            if not _accepts_lvgl_manifest(request.headers.get("Accept")):
+                raise HTTPException(
+                    status_code=406,
+                    detail=f"Colour receivers must accept {LVGL_UI_MEDIA_TYPE}",
+                )
+            if LVGL_UI_CAPABILITY not in capabilities:
+                raise HTTPException(
+                    status_code=406,
+                    detail="Colour receivers must advertise lvgl-ui-v1; e-paper fallback is disabled",
+                )
+            admission_descriptor = resolve_device_capabilities(
+                model,
+                capabilities=capabilities,
+                width=width,
+                height=height,
+            )
+            if admission_descriptor.family not in {
+                "esp_color_receiver",
+                "generic_embedded",
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Known non-LVGL device families cannot enroll as colour receivers",
+                )
+            if existing_descriptor is not None and existing_descriptor.family in {
+                "xteink_eink",
+                "note4_eink",
+                "android_receiver",
+            }:
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Device is already bound to a known non-LVGL family; "
+                        "remove its fleet record before intentional reprovisioning"
+                    ),
+                )
+            lvgl_display = resolve_display_profile(model, width, height)
+            if lvgl_display is None or not lvgl_display.is_color or not lvgl_display.lvgl:
+                raise HTTPException(
+                    status_code=409,
+                    detail="Reported model and dimensions do not match a colour/LVGL display profile",
+                )
+            if lvgl_display.touch and "touch" not in capabilities:
+                raise HTTPException(
+                    status_code=406,
+                    detail="Touch-capable colour receivers must advertise touch",
+                )
+            if (
+                existing_display_profile is not None
+                and existing_display_profile.id != lvgl_display.id
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail=(
+                        "Device is already bound to a different display family; "
+                        "remove its fleet record before intentional reprovisioning"
+                    ),
+                )
+            if not re.fullmatch(r"[0-9a-f]{32}", str(x_flexdisplay_boot_id or "")):
+                raise HTTPException(
+                    status_code=400,
+                    detail="Colour receivers require a 32-character lowercase boot ID",
+                )
         image_cached = bool(_boolean(x_flexdisplay_image_cached))
         last_image_error = (
             _header_value(x_flexdisplay_last_image_error).strip()
@@ -5920,9 +6613,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "reset_reason": x_flexdisplay_reset_reason or None,
             "boot_id": x_flexdisplay_boot_id or None,
             "transfer_capabilities": sorted(capabilities),
-            "display_shape": "round" if "round-display" in capabilities else "rectangular",
-            "touch_available": capability_flag(x_flexdisplay_touch_available, "touch"),
-            "color_available": "color" in capabilities,
+            "display_shape": (
+                lvgl_display.shape
+                if lvgl_display is not None
+                else "round"
+                if "round-display" in capabilities
+                else "rectangular"
+            ),
+            "display_profile": lvgl_display.id if lvgl_display is not None else None,
+            "touch_available": (
+                lvgl_display.touch
+                if lvgl_display is not None
+                else capability_flag(x_flexdisplay_touch_available, "touch")
+            ),
+            "color_available": (
+                True if lvgl_display is not None else "color" in capabilities
+            ),
             "camera_available": capability_flag(
                 x_flexdisplay_camera_available, "camera", "camera-snapshot"
             ),
@@ -6174,7 +6880,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             commands = list(record.get("dispatched_commands") or [])
         command_id = str(record.get("dispatched_command_id") or "") if commands else ""
         override_id = str(record.get("screen_override_id") or "")
-        if override_id:
+        if override_id and lvgl_display is None:
             try:
                 override_path, override_item = screen_history.get(
                     device_id, override_id
@@ -6528,6 +7234,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 uncompressed_bytes=one_bit_bytes,
             )
         dashboard_profile = dashboards.resolve(profile.profile)
+        if lvgl_display is not None:
+            try:
+                validate_lvgl_profile(dashboard_profile)
+            except LvglManifestError as err:
+                raise HTTPException(status_code=409, detail=str(err)) from err
         profile = replace(
             profile,
             profile=dashboard_profile.name,
@@ -6549,8 +7260,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             record,
             profile.timezone,
         )
-        mixed_pages = content_channels.pages(
-            device_id, [candidate.title for candidate in pages]
+        mixed_pages = (
+            []
+            if lvgl_display is not None
+            else content_channels.pages(
+                device_id, [candidate.title for candidate in pages]
+            )
         )
         playlist_count = len(mixed_pages) if mixed_pages else len(pages)
         page_index = int(record.get("dashboard_page_index") or 0) % playlist_count
@@ -6637,6 +7352,75 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
             or record
         )
+        if lvgl_display is not None:
+            try:
+                manifest = build_lvgl_manifest(
+                    dashboard_profile,
+                    configured_pages,
+                    pages,
+                    {
+                        **record,
+                        "name": profile.name,
+                        "area": profile.area,
+                    },
+                    lvgl_display,
+                    active_page_index=page_index,
+                    ha_error=ha_error,
+                    poll_after_seconds=profile.refresh_interval_seconds,
+                )
+                content = canonical_manifest_bytes(manifest)
+                if len(content) > MAX_LVGL_MANIFEST_BYTES:
+                    raise LvglManifestError(
+                        "LVGL manifest exceeds the receiver's 64 KiB response limit"
+                    )
+            except LvglManifestError as err:
+                raise HTTPException(status_code=409, detail=str(err)) from err
+            manifest_bindings = manifest_action_bindings(
+                dashboard_profile,
+                interactive=lvgl_display.touch and "touch" in capabilities,
+            )
+            advertised_actions = [
+                {
+                    "action_id": str(tile["action_id"]),
+                    "page_id": str(tile["page_id"]),
+                    "tile_id": str(tile["id"]),
+                    "action": manifest_bindings[str(tile["action_id"])].action,
+                }
+                for manifest_page in manifest["pages"]
+                for tile in manifest_page["tiles"]
+                if tile.get("action_id") in manifest_bindings
+            ]
+            record = (
+                store.record_ui_manifest(
+                    device_id,
+                    str(manifest["revision"]),
+                    dashboard_profile.name,
+                    int(manifest["page_count"]),
+                    advertised_actions,
+                )
+                or record
+            )
+            store.touch(
+                device_id,
+                {
+                    "last_ui_manifest_size": len(content),
+                    "last_screen_refresh_at": datetime.now(UTC).isoformat(
+                        timespec="seconds"
+                    ),
+                    "ha_error": bool(ha_error),
+                },
+            )
+            publish_current(device_id)
+            return Response(
+                content=content,
+                media_type=LVGL_UI_MEDIA_TYPE,
+                headers={
+                    "ETag": f'"{manifest["revision"]}"',
+                    "Cache-Control": "no-store",
+                    "X-FlexDisplay-UI-Revision": str(manifest["revision"]),
+                    "X-FlexDisplay-UI-Profile": lvgl_display.id,
+                },
+            )
         if _is_android_display(model) and page is not None:
             public_interactions, private_interactions = build_page_interactions(
                 page.entities,

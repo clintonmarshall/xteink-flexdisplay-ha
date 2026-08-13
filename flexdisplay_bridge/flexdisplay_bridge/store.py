@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import threading
 from collections.abc import Callable
@@ -8,6 +9,8 @@ from copy import deepcopy
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+
+from .button_actions import ButtonActionValidationError, normalize_action
 
 CHECKIN_HISTORY_LIMIT = 48
 RESET_HISTORY_LIMIT = 24
@@ -19,6 +22,10 @@ PROBLEM_RESET_REASONS = {
     "watchdog",
     "brownout",
 }
+
+
+class DeviceStoreStateError(RuntimeError):
+    """Raised when persisted fleet/replay state cannot be trusted."""
 
 
 def _is_android_receiver(record: dict[str, Any]) -> bool:
@@ -63,12 +70,17 @@ class DeviceStore:
             return
         try:
             loaded = json.loads(self.path.read_text(encoding="utf-8"))
-            if isinstance(loaded, dict) and isinstance(loaded.get("devices"), dict):
-                self._state = loaded
-                self._migrate_legacy_commands()
-                self._purge_legacy_invalid_devices()
-        except (OSError, json.JSONDecodeError):
-            self._state = {"devices": {}}
+        except (OSError, UnicodeError, json.JSONDecodeError) as err:
+            raise DeviceStoreStateError(
+                f"FlexDisplay device state is unreadable: {self.path}"
+            ) from err
+        if not isinstance(loaded, dict) or not isinstance(loaded.get("devices"), dict):
+            raise DeviceStoreStateError(
+                f"FlexDisplay device state has an unsupported schema: {self.path}"
+            )
+        self._state = loaded
+        self._migrate_legacy_commands()
+        self._purge_legacy_invalid_devices()
 
     def _purge_legacy_invalid_devices(self) -> None:
         """Remove identity-less records created by older Bridge releases."""
@@ -155,8 +167,24 @@ class DeviceStore:
     def _save(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         temporary = self.path.with_suffix(self.path.suffix + ".tmp")
-        temporary.write_text(json.dumps(self._state, indent=2, sort_keys=True), encoding="utf-8")
-        temporary.replace(self.path)
+        encoded = json.dumps(self._state, indent=2, sort_keys=True).encode("utf-8")
+        try:
+            with temporary.open("wb") as output:
+                output.write(encoded)
+                output.flush()
+                os.fsync(output.fileno())
+            temporary.replace(self.path)
+            directory = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            try:
+                temporary.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
 
     def touch(self, device_id: str, telemetry: dict[str, Any]) -> dict[str, Any]:
         with self._lock:
@@ -1538,6 +1566,172 @@ class DeviceStore:
             record["last_button_action_result"] = detail[:240]
             record["last_button_action_success"] = success
             record["last_button_action_at"] = result["executed_at"]
+            self._save()
+            return deepcopy(record)
+
+    def record_ui_manifest(
+        self,
+        device_id: str,
+        revision: str,
+        profile: str,
+        page_count: int,
+        actions: list[dict[str, str]] | None = None,
+    ) -> dict[str, Any] | None:
+        """Remember the exact declarative UI revision sent for this boot."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            record["last_ui_manifest_revision"] = str(revision)[:48]
+            record["last_ui_manifest_session_id"] = str(record.get("boot_id") or "")[:64]
+            record["last_ui_manifest_profile"] = str(profile)[:32]
+            record["last_ui_manifest_page_count"] = max(0, min(12, int(page_count)))
+            persisted_actions: list[dict[str, Any]] = []
+            encoded_total = 0
+            for item in (actions or [])[:48]:
+                try:
+                    action = normalize_action(item.get("action"))
+                except ButtonActionValidationError:
+                    continue
+                if action.get("type") == "none":
+                    continue
+                binding = {
+                    "action_id": str(item.get("action_id") or "")[:64],
+                    "page_id": str(item.get("page_id") or "")[:32],
+                    "tile_id": str(item.get("tile_id") or "")[:32],
+                    "action": action,
+                }
+                encoded_size = len(
+                    json.dumps(
+                        binding,
+                        ensure_ascii=False,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ).encode("utf-8", errors="strict")
+                )
+                if encoded_total + encoded_size > 64 * 1024:
+                    break
+                encoded_total += encoded_size
+                persisted_actions.append(binding)
+            record["last_ui_manifest_actions"] = persisted_actions
+            record["last_ui_manifest_at"] = utc_now()
+            self._save()
+            return deepcopy(record)
+
+    def record_ui_event(
+        self,
+        device_id: str,
+        event: dict[str, Any],
+    ) -> tuple[dict[str, Any] | None, bool, str]:
+        """Persist and de-duplicate a touch event before any side effect runs."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None, False, "missing"
+            session_id = str(event.get("session_id") or "")
+            if (
+                not session_id
+                or session_id != str(record.get("boot_id") or "")
+                or session_id != str(record.get("last_ui_manifest_session_id") or "")
+            ):
+                return deepcopy(record), False, "stale_session"
+            if str(event.get("manifest_revision") or "") != str(
+                record.get("last_ui_manifest_revision") or ""
+            ):
+                return deepcopy(record), False, "stale"
+            allowed = any(
+                str(item.get("action_id") or "") == str(event.get("action_id") or "")
+                and str(item.get("page_id") or "") == str(event.get("page_id") or "")
+                and str(item.get("tile_id") or "") == str(event.get("tile_id") or "")
+                for item in (record.get("last_ui_manifest_actions") or [])
+                if isinstance(item, dict)
+            )
+            if not allowed:
+                return deepcopy(record), False, "not_allowed"
+            event_id = str(event.get("event_id") or "")[:96]
+            recent = record.setdefault("recent_ui_events", [])
+            previous = next(
+                (
+                    item
+                    for item in recent
+                    if str(item.get("event_id") or "") == event_id
+                ),
+                None,
+            )
+            if previous is not None:
+                previous_result = previous.get("result")
+                if not isinstance(previous_result, dict):
+                    return deepcopy(record), False, "duplicate_pending"
+                return (
+                    deepcopy(record),
+                    False,
+                    "duplicate_succeeded"
+                    if previous_result.get("success") is True
+                    else "duplicate_failed",
+                )
+            sequence = int(event.get("sequence") or 0)
+            if not 1 <= sequence <= 0x7FFFFFFF:
+                return deepcopy(record), False, "invalid_sequence"
+            if (
+                str(record.get("ui_event_session_id") or "") == session_id
+                and sequence <= int(record.get("ui_event_sequence") or 0)
+            ):
+                # Only an exact previously recorded event ID is idempotent.
+                # A different event at an old/lower sequence is a replay.
+                return deepcopy(record), False, "replay"
+            received = {
+                "event_id": event_id,
+                "session_id": session_id[:64],
+                "sequence": sequence,
+                "manifest_revision": str(event.get("manifest_revision") or "")[:48],
+                "page_id": str(event.get("page_id") or "")[:32],
+                "tile_id": str(event.get("tile_id") or "")[:32],
+                "gesture": str(event.get("gesture") or "")[:24],
+                "action_id": str(event.get("action_id") or "")[:64],
+                "received_at": utc_now(),
+                # Persist before the side effect. A crash between this write
+                # and the terminal result remains pending and is never retried,
+                # providing v1 at-most-once (not exactly-once) semantics.
+                "status": "pending",
+            }
+            recent.append(received)
+            record["recent_ui_events"] = recent[-32:]
+            record["last_ui_event_id"] = event_id
+            record["last_ui_event_at"] = received["received_at"]
+            record["ui_event_count"] = int(record.get("ui_event_count") or 0) + 1
+            record["ui_event_session_id"] = session_id[:64]
+            record["ui_event_sequence"] = sequence
+            self._save()
+            return deepcopy(record), True, "accepted"
+
+    def record_ui_event_result(
+        self,
+        device_id: str,
+        event_id: str,
+        action: dict[str, Any],
+        success: bool,
+        detail: str,
+    ) -> dict[str, Any] | None:
+        """Attach a resolved server-owned action result to a persisted event."""
+        with self._lock:
+            record = self._state["devices"].get(device_id)
+            if not record:
+                return None
+            result: dict[str, Any] = {
+                "type": str(action.get("type") or "none")[:32],
+                "success": bool(success),
+                "detail": str(detail)[:240],
+                "executed_at": utc_now(),
+            }
+            if action.get("command"):
+                result["command"] = str(action["command"])[:32]
+            for event in reversed(record.get("recent_ui_events") or []):
+                if str(event.get("event_id") or "") == event_id:
+                    event["result"] = result
+                    event["status"] = "succeeded" if success else "failed"
+                    break
+            record["last_ui_event_success"] = bool(success)
+            record["last_ui_event_result"] = str(detail)[:240]
             self._save()
             return deepcopy(record)
 
