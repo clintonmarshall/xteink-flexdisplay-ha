@@ -3,8 +3,10 @@
 ## Repository authority
 
 - Forgejo is the source of truth and the canonical remote is `origin`.
-- GitHub is a read-only compatibility mirror for HACS, public downloads, and
-  GitHub Actions. Do not push feature branches, `main`, or tags to GitHub.
+- GitHub is a downstream compatibility mirror for HACS, public downloads, and
+  GitHub Actions. Developer checkouts must not push feature branches, `main`,
+  tags, releases, or assets to GitHub. Only the Forgejo push mirror and the
+  trusted downstream compatibility-release workflow may write there.
 - Start every change from an up-to-date `origin/main` in a dedicated Codex
   worktree. Use branches named `codex/<component>-<outcome>`.
 - Merge through a Forgejo pull request. Do not commit directly to `main`.
@@ -29,10 +31,16 @@ python3 -m compileall -q flexdisplay_bridge/flexdisplay_bridge \
 (cd flexdisplay_bridge && python3 -m pytest tests)
 ```
 
+Also run `python3 scripts/check_studio_javascript.py` when Dashboard Studio
+changes. When Bridge packaging changes, build a wheel and install it
+non-editably before the test run. When the Home Assistant App changes, build
+the supported architecture image and smoke-test `/healthz` for the expected
+version under an isolated read-only configuration.
+
 If the Android receiver changes, also run from `rook_receiver/`:
 
 ```bash
-./gradlew assembleDebug
+./gradlew clean assembleDebug lintDebug
 ```
 
 ## Versions and releases
@@ -45,8 +53,32 @@ If the Android receiver changes, also run from `rook_receiver/`:
   `custom_components/flexdisplay/manifest.json`.
 - Only a release task may bump versions, update the changelog, merge the
   release, create a `vX.Y.Z` tag, or publish release assets.
+- Publish only through the reviewed Forgejo workflow on the dedicated trusted
+  `trusted-release` Runner. The workflow must use a protected immutable
+  `vX.Y.Z` tag at the exact tested `main` commit. If the workflow, Runner, tag
+  protection, or required credential path is unavailable, publication is
+  blocked; do not fall back to local tags, raw APIs, the browser, or direct
+  GitHub publication.
+- When release notes say packaged firmware is unchanged, compare every
+  firmware artifact plus its configured version, URL, size, and SHA-256 with
+  the previous published platform tag, and require complete source/build
+  provenance in `flexdisplay_bridge/firmware/provenance.json`. Identical bytes
+  do not substitute for provenance. Any byte or metadata difference makes the
+  release firmware-bearing and activates the firmware gates below.
 - Never publish an OTA firmware change without the USB-powered canary and
   checksum gates documented in `docs/RELEASE.md`.
+
+## Deployment and device safety
+
+- Publishing never authorizes Home Assistant deployment, restart, restore, or
+  device operations. Follow `docs/RELEASE.md` and obtain the required fresh
+  confirmation for each production mutation.
+- A software-only release uses read-only device telemetry and non-destructive
+  Studio preview checks. It must not send restart, refresh, install, OTA, flash,
+  or other device commands merely to prove compatibility.
+- Determine whether an existing installation uses HACS, a manual integration,
+  or MQTT-owned entities before changing it. A release must not create a new
+  HACS config entry or change entity ownership implicitly.
 
 ## Task ownership
 

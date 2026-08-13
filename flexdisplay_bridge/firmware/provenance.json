@@ -1,0 +1,49 @@
+{
+  "schema_version": 1,
+  "artifacts": [
+    {
+      "id": "default-packaged-firmware",
+      "path": "flexdisplay_bridge/firmware/firmware.bin",
+      "config_prefix": "firmware",
+      "app_runner_constant": "DEFAULT_FIRMWARE",
+      "version": "1.5.0-flexdisplay.0.39.0",
+      "url": "packaged",
+      "size": 5976336,
+      "sha256": "eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7",
+      "provenance": {
+        "source_repository": null,
+        "source_commit": null,
+        "source_tag": null,
+        "source_clean": null,
+        "target_family": null,
+        "target_board": null,
+        "build_command": null,
+        "toolchain": null,
+        "artifact_type": null,
+        "partition_write_scope": null
+      }
+    },
+    {
+      "id": "note4-packaged-firmware",
+      "path": "flexdisplay_bridge/firmware/note4.bin",
+      "config_prefix": "note4_firmware",
+      "app_runner_constant": "DEFAULT_NOTE4_FIRMWARE",
+      "version": "1.2.2-voice-remote",
+      "url": "packaged",
+      "size": 2730112,
+      "sha256": "1619c9788c050038d28e0f927b19d830ce7de18694ae1b407a639bcbd013ef18",
+      "provenance": {
+        "source_repository": null,
+        "source_commit": null,
+        "source_tag": null,
+        "source_clean": null,
+        "target_family": null,
+        "target_board": null,
+        "build_command": null,
+        "toolchain": null,
+        "artifact_type": null,
+        "partition_write_scope": null
+      }
+    }
+  ]
+}

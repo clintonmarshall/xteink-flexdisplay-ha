@@ -1,35 +1,54 @@
 name: Publish compatibility release
 
 on:
-  push:
-    tags:
-      - "v*"
   workflow_dispatch:
     inputs:
       tag:
-        description: Existing vX.Y.Z tag to publish
+        description: Existing mirrored vX.Y.Z tag
+        required: true
+        type: string
+      commit_sha:
+        description: Exact commit peeled from the mirrored tag
         required: true
         type: string
 
 permissions:
   contents: write
 
+concurrency:
+  group: compatibility-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
 jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_SHA: ${{ inputs.commit_sha }}
       GH_TOKEN: ${{ github.token }}
     steps:
-      - uses: actions/checkout@v4
+      # actions/checkout v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Verify version metadata
-        run: python3 scripts/check_release_metadata.py "${RELEASE_TAG#v}"
-      - name: Publish GitHub release if missing
-        run: >-
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
-          gh release create "$RELEASE_TAG"
-          --verify-tag
-          --generate-notes
-          --title "FlexDisplay $RELEASE_TAG"
+          ref: ${{ inputs.tag }}
+      - name: Verify exact mirrored tag and canonical notes
+        run: |
+          test "$(git rev-list -n 1 "$RELEASE_TAG")" = "$RELEASE_SHA"
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag
+          python3 scripts/check_release_metadata.py --release "${RELEASE_TAG#v}"
+          python3 scripts/release_notes.py "$RELEASE_TAG" > /tmp/release-notes.md
+      - name: Publish compatibility release if absent
+        run: |
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release view "$RELEASE_TAG" \
+              --json tagName,isDraft,isPrerelease,body \
+              --jq 'select(.tagName == env.RELEASE_TAG and .isDraft == false and .isPrerelease == false) | .body' \
+              > /tmp/existing-release-notes.md
+            diff -u /tmp/release-notes.md /tmp/existing-release-notes.md
+            exit 0
+          fi
+          gh release create "$RELEASE_TAG" \
+            --verify-tag \
+            --notes-file /tmp/release-notes.md \
+            --title "FlexDisplay $RELEASE_TAG"

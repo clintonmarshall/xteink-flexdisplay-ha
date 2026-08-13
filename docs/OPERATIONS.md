@@ -17,8 +17,10 @@ deployment that remains.
 
 ## Git remotes
 
-`origin` is Forgejo and is the only push target. `github` is fetch-only for
-diagnostics; its push URL is deliberately disabled. Confirm the invariant with:
+`origin` is Forgejo and is the only developer push target. `github` is
+fetch-only for diagnostics; its push URL is deliberately disabled. Only the
+Forgejo-controlled mirror and trusted downstream compatibility-release
+automation may write GitHub. Confirm the invariant with:
 
 ```bash
 git remote -v
@@ -42,11 +44,17 @@ mirror is the only writer to GitHub.
 `main` is protected against direct pushes. Status-check enforcement must only
 be enabled after a Forgejo runner with the `linux-amd64` label is continuously
 online and has completed the validation workflow successfully.
+Pull-request validation must not receive publication or deployment secrets and
+must not have unrestricted access to Home Assistant, devices, or management
+networks. Publication runs only on the separately trusted
+`trusted-release` Runner.
 
 ## Releases
 
-Follow `docs/RELEASE.md`. Tags and release notes originate in Forgejo. Confirm
-the push mirror copied the tag and that GitHub Actions created a full GitHub
+Follow `docs/RELEASE.md`. Tags and canonical release notes originate in
+Forgejo through the reviewed trusted workflow. There is no local-tag, raw-API,
+browser, or direct-GitHub fallback. Confirm the push mirror copied the exact
+tag object and commit and that downstream automation created a full GitHub
 Release; a bare GitHub tag is insufficient for HACS.
 
 ## Home Assistant sources
@@ -61,9 +69,10 @@ Forgejo remains authoritative in both supported deployment arrangements:
 - HACS installations must use the public GitHub mirror because HACS does not
   consume arbitrary Forgejo repositories.
 
-After every Bridge release, refresh the Home Assistant app store, confirm the
-expected version, create a backup, update, and verify `/healthz`, MQTT, FlexHub,
-Studio ingress, and one device from each affected family.
+The authoritative deployment and rollback checklist is in `docs/RELEASE.md`.
+Do not duplicate a shorter sequence here: publication is not deployment
+authorization, automatic App updates require a pre-publication rollback
+backup, and software-only releases must not queue device firmware or commands.
 
 ## Archiving
 
