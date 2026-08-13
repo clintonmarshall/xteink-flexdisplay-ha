@@ -292,6 +292,12 @@ during an update and honours cancellation before validation or flashing.
 
 ## Safer firmware rollout
 
+This section describes Bridge runtime behaviour. The canonical physical-device
+identity, recovery, serial-access, USB-canary and acceptance gates are maintained
+in [`docs/EMBEDDED_DEVICE_SAFETY.md`](../docs/EMBEDDED_DEVICE_SAFETY.md);
+completing a Bridge UI gate does not replace them or authorise a serial operation
+or firmware write.
+
 Firmware 0.13.0 and integration 0.10.0 assign durable IDs to commands and keep
 results on the device SD card until the Bridge confirms the matching ID. Stale
 results cannot clear a newer command.
@@ -319,15 +325,15 @@ devices a local Bridge URL. A failed mirror never replaces a previously
 verified image. Its status is available from the Bridge health endpoint, and
 the authenticated mirror-refresh API forces another verification attempt.
 
-If an old canary firmware consumes an install but cannot acknowledge it, first
-make and verify a complete flash backup, install the exact configured target
-over USB, and confirm the device checks in with USB power and a ready SD card.
-The **Verify USB firmware recovery** button becomes available only while all
-those conditions pass. A `0.19.0` Bridge also automatically reconciles a device
-that checks in over USB with the exact target firmware, even if its earlier
-durable command was lost. Manual verification records separate USB-recovery
-evidence in the Bridge audit history; neither route impersonates a device
-acknowledgement.
+For an authorised legacy-device recovery, complete the identity, recovery,
+fresh-confirmation, and canary-acceptance procedure in
+`docs/EMBEDDED_DEVICE_SAFETY.md`. The **Verify USB firmware recovery** button
+becomes available only when the Bridge observes the required exact target,
+USB-power, SD-card, and check-in evidence. A `0.19.0` Bridge also automatically
+reconciles a device that checks in over USB with the exact target firmware, even
+if its earlier durable command was lost. Manual verification records separate
+USB-recovery evidence in the Bridge audit history; neither route impersonates a
+device acknowledgement.
 
 Some X4 revisions stop reporting USB power after charging completes even while
 their USB serial connection remains active. The recovery API can additionally

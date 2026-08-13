@@ -3,8 +3,8 @@
 ## Codex projects and tasks
 
 Use one Codex project for the platform repository. Make the canonical checkout
-the project's primary folder and remove historical folders after their
-uncommitted work has been archived.
+the project's primary folder. Do not remove a historical folder while it is the
+only copy of source, a patch, build evidence, or recovery material.
 
 Use one task per outcome, for example a Studio feature, Echo Spot receiver
 change, Home Assistant integration change, or release. Let Codex create a
@@ -12,8 +12,16 @@ dedicated worktree for implementation tasks. Do not reuse a feature task to
 publish a release or perform unrelated cleanup.
 
 Before starting a task, state the affected component and intended outcome. At
-handoff, record the Forgejo pull request, validation performed, and any runtime
-deployment that remains.
+handoff, record the branch, full HEAD SHA, clean/dirty state, Forgejo pull request
+or explicitly unpushed status, every applicable validation command and result,
+and any physical validation, release, or runtime deployment that remains. Never
+leave uncommitted source or patches solely in an ephemeral Codex task mirror.
+
+A physical firmware canary is a separate validation outcome. Feature work may
+build or simulate a firmware target, but it does not inherit permission to open
+a device serial port, write a lab canary, deploy, or widen a fleet rollout.
+Follow the staged identity, read/backup, durable recovery, fresh-confirmation,
+and acceptance gates in `docs/EMBEDDED_DEVICE_SAFETY.md`.
 
 ## Git remotes
 
@@ -42,7 +50,8 @@ mirror is the only writer to GitHub.
 3. Run the checks in `AGENTS.md` plus component-specific builds.
 4. Push the branch to Forgejo and open a Forgejo pull request.
 5. Merge only after the branch is current and reviews/checks permit it.
-6. Delete the merged branch and remove its worktree.
+6. Confirm the handoff record and durable copies exist, then delete the merged
+   branch and remove its worktree.
 
 `main` is protected against direct pushes. Status-check enforcement must only
 be enabled after a Forgejo runner with the `linux-amd64` label is continuously
@@ -66,14 +75,18 @@ Forgejo remains authoritative in both supported deployment arrangements:
 - HACS installations must use the public GitHub mirror because HACS does not
   consume arbitrary Forgejo repositories.
 
-After every Bridge release, refresh the Home Assistant app store, confirm the
-expected version, create a backup, update, and verify `/healthz`, MQTT, FlexHub,
-Studio ingress, and one device from each affected family.
+The authoritative deployment and rollback checklist is in `docs/RELEASE.md`.
+Publication is not deployment authorization; obtain fresh confirmation for the
+exact target before an update, restart, restore, or device operation.
 
 ## Archiving
 
-Archive rather than delete until the next successful release cycle. An archive
-should include a short README recording its source, reason, date, and whether
-uncommitted files are present. Never archive the canonical checkout, active
-worktrees, runtime configuration, credentials, Home Assistant backups, or the
-latest known-good release artifacts.
+Archive rather than delete until the next successful release cycle. A source
+archive should include a short README recording its source, branch and full SHA,
+reason, date, validation, and whether uncommitted files are present. Never place
+runtime configuration, credentials, full-flash/NVS/configuration backups, Home
+Assistant backups, or the latest known-good release artifacts in a repository or
+general source archive. Store required recovery material separately in an
+approved durable, owner-only location, record size and SHA-256 without exposing
+secret contents, and verify its recoverability before removing the original.
+Never archive or remove the canonical checkout or an active worktree.
