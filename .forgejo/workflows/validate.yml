@@ -140,9 +140,16 @@ jobs:
           set -eu
           runtime="$(command -v docker || command -v podman || true)"
           test -n "$runtime"
-          "$runtime" run --rm \
-            -v "$PWD:/github/workspace" \
-            ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d
+          hassfest_image='ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d'
+          hassfest_container="$("$runtime" create "$hassfest_image")"
+          cleanup_hassfest() {
+            "$runtime" rm -f "$hassfest_container" >/dev/null 2>&1 || true
+          }
+          trap cleanup_hassfest EXIT HUP INT TERM
+          "$runtime" cp \
+            custom_components \
+            "$hassfest_container:/github/workspace/custom_components"
+          "$runtime" start --attach "$hassfest_container"
 
   android:
     needs: changes
