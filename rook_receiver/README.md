@@ -18,6 +18,8 @@ and device-specific screen capabilities.
 - press-and-hold Assist voice control through the FlexDisplay Bridge and Home
   Assistant Assist pipeline, with local speaker playback
 - immediate camera notifications, local chimes, dismissal, and action buttons
+- explicit camera, microphone, audio, touch, always-on, screen-resolution, and
+  device-class telemetry for Home Assistant capability entities
 - immediate screen invalidation over the notification long poll, with a
   one-minute safety poll if the push connection is interrupted
 - long press for local Bridge URL and device ID settings
@@ -117,10 +119,21 @@ granted over ADB:
 adb shell pm grant au.com.ldcs.flexdisplay.rook android.permission.RECORD_AUDIO
 ```
 
-This uses Home Assistant's configured Assist pipeline. It does not expose the
-Echo camera as a Home Assistant camera entity; current LineageOS builds report
-camera hardware features but no public camera devices through Android's camera
-service.
+This uses Home Assistant's configured Assist pipeline. FlexDisplay does not yet
+expose the Echo camera as a Home Assistant camera entity. Notification snapshots
+come from a Home Assistant `camera.*` or `image.*` entity configured in the
+automation. If the installed LineageOS build or camera shim exposes camera
+hardware to Android, receiver `0.5.0` reports that capability to the Bridge so
+Home Assistant can show capability-aware entities and dashboards.
+
+Version 0.4.0 adds Android fleet controls. The Bridge and Home Assistant
+integration can set receiver speaker volume, mute/unmute, set app brightness,
+restart the receiver app, and trigger a test chime.
+
+Version 0.5.0 adds hardware capability telemetry. The receiver reports camera,
+microphone, audio, touch, always-on colour display class, device class, and
+screen resolution through explicit Bridge headers. Older receivers still work;
+the Bridge falls back to the original comma-separated capabilities where it can.
 
 The LineageOS builds are experimental and SELinux-permissive. Keep ADB and the
 Bridge API on a trusted LAN; do not expose either directly to the internet.

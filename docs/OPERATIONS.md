@@ -20,7 +20,11 @@ deployment that remains.
 `origin` is Forgejo and is the only developer push target. `github` is
 fetch-only for diagnostics; its push URL is deliberately disabled. Only the
 Forgejo-controlled mirror and trusted downstream compatibility-release
-automation may write GitHub. Confirm the invariant with:
+automation may write GitHub. For this repository only, that downstream mirror
+is an approved compatibility exception for HACS, existing Home Assistant
+consumers, and public release downloads first published through Forgejo. Do not
+use it as precedent for private home, lab, firmware, or unrelated repositories.
+Confirm the invariant with:
 
 ```bash
 git remote -v

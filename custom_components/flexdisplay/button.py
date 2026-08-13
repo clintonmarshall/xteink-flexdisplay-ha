@@ -52,6 +52,33 @@ DESCRIPTIONS = (
     ),
 )
 
+ANDROID_DESCRIPTIONS = (
+    FlexDisplayButtonDescription(
+        key="restart_app", translation_key="restart_app", command="restart-app"
+    ),
+    FlexDisplayButtonDescription(
+        key="test_chime", translation_key="test_chime", command="test-chime"
+    ),
+    FlexDisplayButtonDescription(
+        key="volume_up", translation_key="volume_up", command="volume-up"
+    ),
+    FlexDisplayButtonDescription(
+        key="volume_down", translation_key="volume_down", command="volume-down"
+    ),
+    FlexDisplayButtonDescription(key="mute", translation_key="mute", command="mute"),
+    FlexDisplayButtonDescription(
+        key="unmute", translation_key="unmute", command="unmute"
+    ),
+    FlexDisplayButtonDescription(
+        key="brightness_up", translation_key="brightness_up", command="brightness-up"
+    ),
+    FlexDisplayButtonDescription(
+        key="brightness_down",
+        translation_key="brightness_down",
+        command="brightness-down",
+    ),
+)
+
 
 class FlexDisplayCommandButton(FlexDisplayEntity, ButtonEntity):
     """Queue a command for the next device check-in."""
@@ -181,6 +208,32 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
             str(self.record.get("dispatched_command_id") or ""),
         )
         await self.coordinator.async_request_refresh()
+
+
+def _is_android_receiver(record: dict) -> bool:
+    model = str(record.get("model") or "").upper()
+    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
+
+
+def _device_buttons(
+    coordinator: FlexDisplayCoordinator, device_id: str
+) -> tuple[ButtonEntity, ...]:
+    record = next(
+        (item for item in coordinator.data if item.get("device_id") == device_id), {}
+    )
+    descriptions = list(DESCRIPTIONS)
+    if _is_android_receiver(record):
+        descriptions.extend(ANDROID_DESCRIPTIONS)
+    return (
+        *(
+            FlexDisplayCommandButton(coordinator, device_id, description)
+            for description in descriptions
+        ),
+        FlexDisplayCancelCommandsButton(coordinator, device_id),
+        FlexDisplayRetryFirmwareButton(coordinator, device_id),
+        FlexDisplayResetRolloutButton(coordinator, device_id),
+        FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
+    )
 
 
 @dataclass(frozen=True, kw_only=True)

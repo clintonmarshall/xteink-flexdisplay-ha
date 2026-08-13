@@ -28,7 +28,16 @@ XTEINK_ACTIONS = (
     "restart",
     "install",
 )
-ANDROID_ACTIONS = tuple(action for action in XTEINK_ACTIONS if action != "install")
+ANDROID_ACTIONS = tuple(action for action in XTEINK_ACTIONS if action != "install") + (
+    "restart-app",
+    "test-chime",
+    "volume-up",
+    "volume-down",
+    "mute",
+    "unmute",
+    "brightness-up",
+    "brightness-down",
+)
 GENERIC_ACTIONS = ("refresh",)
 
 XTEINK_MODES = (

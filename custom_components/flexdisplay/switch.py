@@ -103,7 +103,7 @@ class FlexDisplayPolicySwitch(FlexDisplayEntity, SwitchEntity):
 
 
 class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
-    """Mute the Note4 speaker without losing its selected volume."""
+    """Mute receiver speaker without losing its selected volume."""
 
     _attr_translation_key = "voice_mute"
     _attr_entity_category = EntityCategory.CONFIG
@@ -134,6 +134,15 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         await self._set(False)
 
 
+def _is_note4(record: dict) -> bool:
+    return str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+
+
+def _is_android_receiver(record: dict) -> bool:
+    model = str(record.get("model") or "").upper()
+    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
+
+
 def _entities_for_device(
     coordinator: FlexDisplayCoordinator, device_id: str
 ) -> tuple[SwitchEntity, ...]:
@@ -157,7 +166,7 @@ def _entities_for_device(
             and reports_usb_power(record)
         )
     ]
-    if is_note4(record):
+    if is_note4(record) or _is_android_receiver(record):
         entities.append(FlexDisplayVoiceMute(coordinator, device_id))
     return tuple(entities)
 

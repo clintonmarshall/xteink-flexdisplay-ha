@@ -24,9 +24,11 @@ This repository provides:
 ## Source and release authority
 
 The project's internal Forgejo repository is the source of truth for
-development, pull requests, tags, and releases. GitHub is an automatic,
-read-only compatibility mirror used by HACS and public release downloads.
-Contributors must open pull requests and publish tags in Forgejo only. See
+development, pull requests, tags, and releases. For this repository only,
+GitHub is an approved downstream compatibility mirror for HACS, existing Home
+Assistant consumers, and public release downloads that have first been
+published through Forgejo. Contributors must open pull requests and publish
+tags in Forgejo only. See
 `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, and `docs/RELEASE.md` for the
 durable workflow.
 

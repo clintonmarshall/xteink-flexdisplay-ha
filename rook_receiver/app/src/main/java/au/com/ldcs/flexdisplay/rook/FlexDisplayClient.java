@@ -3,6 +3,7 @@ package au.com.ldcs.flexdisplay.rook;
 import android.content.Context;
 import android.content.Intent;
 import android.content.IntentFilter;
+import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.net.wifi.WifiInfo;
@@ -33,7 +34,7 @@ import java.util.List;
 import java.util.Map;
 
 final class FlexDisplayClient {
-    static final String FIRMWARE_VERSION = "android-0.3.0";
+    static final String FIRMWARE_VERSION = "android-0.5.0";
 
     static final class Interaction {
         final String id;
@@ -187,7 +188,19 @@ final class FlexDisplayClient {
         connection.setRequestProperty("X-FlexDisplay-Height", Integer.toString(profile.height));
         connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
         connection.setRequestProperty("X-FlexDisplay-Firmware", FIRMWARE_VERSION);
-        connection.setRequestProperty("X-FlexDisplay-Capabilities", profile.capabilities());
+        boolean cameraAvailable = hasFeature(PackageManager.FEATURE_CAMERA_ANY);
+        boolean microphoneAvailable = hasFeature(PackageManager.FEATURE_MICROPHONE);
+        connection.setRequestProperty("X-FlexDisplay-Capabilities", capabilities(cameraAvailable, microphoneAvailable));
+        connection.setRequestProperty("X-FlexDisplay-Camera-Available", Boolean.toString(cameraAvailable));
+        connection.setRequestProperty("X-FlexDisplay-Microphone-Available", Boolean.toString(microphoneAvailable));
+        connection.setRequestProperty("X-FlexDisplay-Audio-Available", "true");
+        connection.setRequestProperty("X-FlexDisplay-Touch-Available", "true");
+        connection.setRequestProperty("X-FlexDisplay-Always-On", "true");
+        connection.setRequestProperty("X-FlexDisplay-Device-Class", profile.deviceClass);
+        AudioState audioState = audioState();
+        connection.setRequestProperty("X-FlexDisplay-Volume", Integer.toString(audioState.volume));
+        connection.setRequestProperty("X-FlexDisplay-Muted", Boolean.toString(audioState.muted));
+        connection.setRequestProperty("X-FlexDisplay-Brightness", Integer.toString(screenBrightness()));
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
                 Long.toString(SystemClock.elapsedRealtime() / 1000));
@@ -216,6 +229,17 @@ final class FlexDisplayClient {
         Bitmap bitmap = body.length == 0 ? null : BitmapFactory.decodeByteArray(body, 0, body.length);
         if (body.length > 0 && bitmap == null) throw new IOException("Bridge response was not a supported image");
         return new Result(bitmap, Collections.unmodifiableMap(headers), fetchInteractions(config));
+    }
+
+    private String capabilities(boolean cameraAvailable, boolean microphoneAvailable) {
+        String caps = profile.capabilities();
+        if (cameraAvailable) caps += ",camera,camera-snapshot";
+        if (microphoneAvailable) caps += ",microphone";
+        return caps;
+    }
+
+    private boolean hasFeature(String feature) {
+        return context.getPackageManager().hasSystemFeature(feature);
     }
 
     List<Interaction> fetchInteractions(ReceiverConfig config) throws IOException {
@@ -405,6 +429,36 @@ final class FlexDisplayClient {
         WifiManager manager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
         WifiInfo info = manager == null ? null : manager.getConnectionInfo();
         return info == null ? Integer.MIN_VALUE : info.getRssi();
+    }
+
+    private AudioState audioState() {
+        android.media.AudioManager manager =
+                (android.media.AudioManager) context.getSystemService(Context.AUDIO_SERVICE);
+        if (manager == null) return new AudioState(0, false);
+        int max = Math.max(1, manager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
+        int current = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
+        return new AudioState(Math.max(0, Math.min(100, current * 100 / max)), current == 0);
+    }
+
+    private int screenBrightness() {
+        try {
+            int raw = android.provider.Settings.System.getInt(
+                    context.getContentResolver(),
+                    android.provider.Settings.System.SCREEN_BRIGHTNESS);
+            return Math.max(0, Math.min(100, raw * 100 / 255));
+        } catch (android.provider.Settings.SettingNotFoundException error) {
+            return 100;
+        }
+    }
+
+    private static final class AudioState {
+        final int volume;
+        final boolean muted;
+
+        AudioState(int volume, boolean muted) {
+            this.volume = volume;
+            this.muted = muted;
+        }
     }
 
     private static byte[] readBytes(InputStream input) throws IOException {

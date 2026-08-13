@@ -272,6 +272,7 @@ public final class MainActivity extends Activity {
         String digest = result.header("X-FlexDisplay-Image-SHA256");
         if (!digest.isEmpty()) imageSha256 = digest;
         interactions = result.interactions;
+        applyDesiredAudio(result);
         showStatus("", false);
         startNotificationLoop();
 
@@ -460,6 +461,66 @@ public final class MainActivity extends Activity {
         handler.postDelayed(tone::release, 1_200L);
     }
 
+    private void applyDesiredAudio(FlexDisplayClient.Result result) {
+        String volume = result.header("X-FlexDisplay-Desired-Volume");
+        if (!volume.isEmpty()) {
+            setMusicVolume(parseInt(volume, 45));
+        }
+        String muted = result.header("X-FlexDisplay-Desired-Muted").toLowerCase(Locale.ROOT);
+        if ("true".equals(muted)) {
+            setMusicVolume(0);
+        } else if ("false".equals(muted) && currentMusicVolumePercent() == 0) {
+            setMusicVolume(volume.isEmpty() ? 45 : parseInt(volume, 45));
+        }
+        String brightness = result.header("X-FlexDisplay-Desired-Brightness");
+        if (!brightness.isEmpty()) {
+            setWindowBrightness(parseInt(brightness, currentWindowBrightnessPercent()));
+        }
+    }
+
+    private void setMusicVolume(int percent) {
+        AudioManager manager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (manager == null) return;
+        int max = Math.max(1, manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        int selected = Math.max(0, Math.min(100, percent));
+        manager.setStreamVolume(AudioManager.STREAM_MUSIC, Math.max(0, Math.min(max, selected * max / 100)), 0);
+    }
+
+    private int currentMusicVolumePercent() {
+        AudioManager manager = (AudioManager) getSystemService(AUDIO_SERVICE);
+        if (manager == null) return 0;
+        int max = Math.max(1, manager.getStreamMaxVolume(AudioManager.STREAM_MUSIC));
+        return Math.max(0, Math.min(100, manager.getStreamVolume(AudioManager.STREAM_MUSIC) * 100 / max));
+    }
+
+    private void adjustMusicVolume(int delta) {
+        setMusicVolume(currentMusicVolumePercent() + delta);
+    }
+
+    private void setWindowBrightness(int percent) {
+        WindowManager.LayoutParams params = getWindow().getAttributes();
+        params.screenBrightness = Math.max(0.05f, Math.min(1.0f, percent / 100f));
+        getWindow().setAttributes(params);
+    }
+
+    private int currentWindowBrightnessPercent() {
+        float selected = getWindow().getAttributes().screenBrightness;
+        if (selected < 0f) return 100;
+        return Math.max(5, Math.min(100, Math.round(selected * 100f)));
+    }
+
+    private void adjustBrightness(int delta) {
+        setWindowBrightness(currentWindowBrightnessPercent() + delta);
+    }
+
+    private void restartApp() {
+        handler.postDelayed(() -> {
+            android.content.Intent intent = getIntent();
+            finish();
+            startActivity(intent);
+        }, 650L);
+    }
+
     private void startVoiceCapture() {
         if (!config.isReady()) {
             showSettings();
@@ -612,6 +673,31 @@ public final class MainActivity extends Activity {
                 case "restart":
                     imageSha256 = "";
                     break;
+                case "restart-app":
+                    imageSha256 = "";
+                    restartApp();
+                    break;
+                case "test-chime":
+                    playChime("doorbell");
+                    break;
+                case "volume-up":
+                    adjustMusicVolume(10);
+                    break;
+                case "volume-down":
+                    adjustMusicVolume(-10);
+                    break;
+                case "mute":
+                    setMusicVolume(0);
+                    break;
+                case "unmute":
+                    setMusicVolume(45);
+                    break;
+                case "brightness-up":
+                    adjustBrightness(15);
+                    break;
+                case "brightness-down":
+                    adjustBrightness(-15);
+                    break;
                 case "refresh":
                 case "full-refresh":
                 case "next":
@@ -717,6 +803,14 @@ public final class MainActivity extends Activity {
     private static long parseLong(String value, long fallback) {
         try {
             return Long.parseLong(value);
+        } catch (NumberFormatException error) {
+            return fallback;
+        }
+    }
+
+    private static int parseInt(String value, int fallback) {
+        try {
+            return Integer.parseInt(value);
         } catch (NumberFormatException error) {
             return fallback;
         }

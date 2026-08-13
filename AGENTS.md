@@ -3,9 +3,13 @@
 ## Repository authority
 
 - Forgejo is the source of truth and the canonical remote is `origin`.
-- GitHub is a downstream compatibility mirror for HACS, public downloads, and
-  GitHub Actions. Developer checkouts must not push feature branches, `main`,
-  tags, releases, or assets to GitHub. Only the Forgejo push mirror and the
+- For this repository only, GitHub is an approved downstream compatibility
+  exception for HACS, existing Home Assistant consumers, and public release
+  assets that have first been published through Forgejo. Forgejo remains
+  authoritative. Do not use this repository's GitHub mirror as precedent for
+  private home, lab, firmware, or unrelated repositories.
+- GitHub is read-only from developer checkouts. Do not push feature branches,
+  `main`, tags, releases, or assets to GitHub. Only the Forgejo push mirror and
   trusted downstream compatibility-release workflow may write there.
 - Start every change from an up-to-date `origin/main` in a dedicated Codex
   worktree. Use branches named `codex/<component>-<outcome>`.
@@ -16,7 +20,10 @@
 - `flexdisplay_bridge/`: Home Assistant app, Bridge API, Dashboard Studio, and
   packaged device firmware.
 - `custom_components/flexdisplay/`: HACS/Home Assistant integration.
-- `rook_receiver/`: Android receiver for the original 2017 Echo Spot.
+- `rook_receiver/`: Android receiver for Amazon LineageOS devices, currently
+  the original 2017 Echo Spot (`rook`, 480 × 480 round) and Echo Show 5 1st gen
+  (`checkers`, 960 × 480 landscape). Android receivers must fail closed from
+  ESP firmware install, SD-card diagnostics, and embedded-device OTA workflows.
 - FlexHub and X3/X4 firmware are external products. Interact with them through
   documented Bridge APIs; do not copy their source into this repository.
 
@@ -43,6 +50,15 @@ If the Android receiver changes, also run from `rook_receiver/`:
 ./gradlew clean assembleDebug lintDebug
 ```
 
+If the local machine lacks an Android SDK, report the Android validation as
+blocked and rely only on a Forgejo Runner Android job after verifying that job
+actually builds the receiver.
+
+When Android receiver headers, capabilities, screen profile, interaction
+behavior, or `versionName` change, update `docs/COMPATIBILITY.md` and
+`rook_receiver/README.md` in the same feature branch. Document fallback behavior
+for older receiver versions.
+
 ## Versions and releases
 
 - Bridge app, Python package, integration, and repository release versions
@@ -67,6 +83,10 @@ If the Android receiver changes, also run from `rook_receiver/`:
   release firmware-bearing and activates the firmware gates below.
 - Never publish an OTA firmware change without the USB-powered canary and
   checksum gates documented in `docs/RELEASE.md`.
+- Do not add or update workflow actions unless each external action is pinned
+  to a reviewed full commit SHA with a comment naming the upstream
+  release/version. Existing mutable action refs are legacy debt and must be
+  remediated in a dedicated CI-hardening pull request before the next release.
 
 ## Deployment and device safety
 
