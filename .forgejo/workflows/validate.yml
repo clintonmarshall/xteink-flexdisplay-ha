@@ -2,34 +2,766 @@ name: Validate
 
 on:
   push:
-  pull_request:
-  workflow_dispatch:
+    branches:
+      - main
+  pull_request_target:
+    types:
+      - opened
+      - synchronize
+      - reopened
 
 jobs:
+  candidate-policy:
+    runs-on: linux-amd64
+    outputs:
+      candidate_sha: ${{ steps.policy.outputs.candidate_sha }}
+      base_sha: ${{ steps.policy.outputs.base_sha }}
+    steps:
+      - name: Accept only the owner repository and branch policy
+        id: policy
+        env:
+          EVENT_NAME: ${{ forgejo.event_name }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          REPOSITORY: ${{ forgejo.repository }}
+          REPOSITORY_ID: ${{ forgejo.event.repository.id }}
+          ACTOR: ${{ forgejo.actor }}
+          SENDER_ID: ${{ forgejo.event.sender.id }}
+          EVENT_REF: ${{ forgejo.ref }}
+          EVENT_SHA: ${{ forgejo.sha }}
+          EVENT_BEFORE: ${{ forgejo.event.before }}
+          BASE_REF: ${{ forgejo.event.pull_request.base.ref }}
+          BASE_SHA: ${{ forgejo.event.pull_request.base.sha }}
+          HEAD_REF: ${{ forgejo.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ forgejo.event.pull_request.head.sha }}
+          HEAD_REPOSITORY: ${{ forgejo.event.pull_request.head.repo.full_name }}
+          HEAD_REPOSITORY_ID: ${{ forgejo.event.pull_request.head.repo.id }}
+          HEAD_OWNER_ID: ${{ forgejo.event.pull_request.head.repo.owner.id }}
+          PR_AUTHOR: ${{ forgejo.event.pull_request.user.login }}
+          PR_AUTHOR_ID: ${{ forgejo.event.pull_request.user.id }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          case "$FORGEJO_SERVER_URL" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          test "$REPOSITORY" = "clintonmarshall/xteink-flexdisplay-ha"
+          test "$REPOSITORY_ID" = "2"
+          test "$ACTOR" = "clintonmarshall"
+          test "$SENDER_ID" = "1"
+
+          case "$EVENT_NAME" in
+            pull_request_target)
+              test "$BASE_REF" = "main"
+              test "$HEAD_REPOSITORY" = "$REPOSITORY"
+              test "$HEAD_REPOSITORY_ID" = "$REPOSITORY_ID"
+              test "$HEAD_OWNER_ID" = "1"
+              test "$PR_AUTHOR" = "$ACTOR"
+              test "$PR_AUTHOR_ID" = "$SENDER_ID"
+              case "$HEAD_REF" in
+                codex/*) ;;
+                *) echo "Refusing non-Codex pull-request branch $HEAD_REF" >&2; exit 1 ;;
+              esac
+              candidate_sha="$HEAD_SHA"
+              base_sha="$BASE_SHA"
+              ;;
+            push)
+              test "$EVENT_REF" = "refs/heads/main"
+              candidate_sha="$EVENT_SHA"
+              base_sha="$EVENT_BEFORE"
+              ;;
+            *)
+              echo "Unsupported validation event: $EVENT_NAME" >&2
+              exit 1
+              ;;
+          esac
+
+          printf '%s\n' "$candidate_sha" | grep -Eq '^[0-9a-f]{40}$'
+          printf '%s\n' "$base_sha" | grep -Eq '^[0-9a-f]{40}$'
+          test "$candidate_sha" != "$base_sha"
+          {
+            echo "candidate_sha=$candidate_sha"
+            echo "base_sha=$base_sha"
+          } >> "$FORGEJO_OUTPUT"
+
+  changes:
+    needs: candidate-policy
+    runs-on: linux-amd64
+    outputs:
+      app: ${{ steps.paths.outputs.app }}
+      integration: ${{ steps.paths.outputs.integration }}
+      integration_source: ${{ steps.paths.outputs.integration_source }}
+      android: ${{ steps.paths.outputs.android }}
+    steps:
+      - name: Check out exact candidate and base without credentials
+        env:
+          BASE_SHA: ${{ needs.candidate-policy.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --no-tags origin \
+            "$CANDIDATE_SHA" "$BASE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Classify affected components
+        id: paths
+        env:
+          BASE_SHA: ${{ needs.candidate-policy.outputs.base_sha }}
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git cat-file -e "$BASE_SHA^{commit}"
+          git diff --name-only "$BASE_SHA" "$CANDIDATE_SHA" > /tmp/flexdisplay-changed-files
+          changed() {
+            grep -Eq "$1" /tmp/flexdisplay-changed-files
+          }
+          if changed '^(flexdisplay_bridge/|repository\.yaml$)'; then
+            app=true
+          else
+            app=false
+          fi
+          if changed '^(custom_components/flexdisplay/|hacs\.json$)'; then
+            integration_source=true
+          else
+            integration_source=false
+          fi
+          if [ "$integration_source" = "true" ] || \
+             changed '^scripts/check_hacs_local\.py$'; then
+            integration=true
+          else
+            integration=false
+          fi
+          if changed '^rook_receiver/'; then
+            android=true
+          else
+            android=false
+          fi
+          {
+            echo "app=$app"
+            echo "integration=$integration"
+            echo "integration_source=$integration_source"
+            echo "android=$android"
+          } >> "$FORGEJO_OUTPUT"
+
   bridge:
+    needs: candidate-policy
     runs-on: linux-amd64
     steps:
-      # actions/checkout v6
-      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-      - name: Validate release metadata
-        run: python3 scripts/check_release_metadata.py
+      - name: Check out exact candidate without credentials
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --force --tags origin \
+            "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+      - name: Verify candidate commit
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+          git cat-file -e "$CANDIDATE_SHA^{commit}"
       - name: Install Python toolchain
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: >-
           apt-get update &&
           DEBIAN_FRONTEND=noninteractive apt-get install -y
-          --no-install-recommends python3-venv &&
+          --no-install-recommends python3 python3-venv &&
           rm -rf /var/lib/apt/lists/*
+      - name: Validate platform metadata
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: python3 scripts/check_release_metadata.py
+      - name: Test metadata validator
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: python3 -m unittest discover -s scripts/tests -v
       - name: Install bridge
         working-directory: flexdisplay_bridge
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: >-
           python3 -m venv /tmp/flexdisplay-venv &&
           /tmp/flexdisplay-venv/bin/python -m pip install -e '.[test]'
       - name: Test bridge
         working-directory: flexdisplay_bridge
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: /tmp/flexdisplay-venv/bin/python -m pytest tests
       - name: Compile Python sources
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
         run: >-
           python3 -m compileall -q
           flexdisplay_bridge/flexdisplay_bridge
           flexdisplay_bridge/app_runner.py
           custom_components/flexdisplay
+
+  app:
+    needs:
+      - candidate-policy
+      - changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - name: Check out exact candidate without credentials
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --no-tags --depth=1 origin \
+            "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+      - name: Verify candidate commit
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Install container client
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: >-
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y
+          --no-install-recommends docker.io python3 &&
+          rm -rf /var/lib/apt/lists/*
+      - name: Build Home Assistant App image
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          build_tool="$(command -v docker || command -v podman || true)"
+          test -n "$build_tool"
+          build_version="$(python3 scripts/check_release_metadata.py --print-version)"
+          git archive --format=tar HEAD:flexdisplay_bridge | \
+            "$build_tool" build \
+            --build-arg BUILD_VERSION="$build_version" \
+            --build-arg BUILD_ARCH=amd64 \
+            -
+
+  integration:
+    needs:
+      - candidate-policy
+      - changes
+    if: ${{ needs.changes.outputs.integration == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - name: Check out exact candidate without credentials
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --no-tags --depth=1 origin \
+            "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+      - name: Verify candidate commit
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Install container client
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: >-
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y
+          --no-install-recommends docker.io &&
+          rm -rf /var/lib/apt/lists/*
+      - name: Run partial local-checkout HACS schemas
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          runtime="$(command -v docker || command -v podman || true)"
+          test -n "$runtime"
+          image='ghcr.io/hacs/action@sha256:41f6310585d9fb72c7a0e183cce0594355715bc24112b62bc4279b83412edccb'
+          workspace_volume="$("$runtime" volume create)"
+          seed_container=""
+          run_container="flexdisplay-hacs-$(printf '%s' "$workspace_volume" | cut -c1-12)"
+          cleanup() {
+            if [ -n "${run_container:-}" ]; then
+              "$runtime" rm -f "$run_container" >/dev/null 2>&1 || true
+            fi
+            if [ -n "${seed_container:-}" ]; then
+              "$runtime" rm -f "$seed_container" >/dev/null 2>&1 || true
+            fi
+            "$runtime" volume rm -f "$workspace_volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT INT TERM HUP
+          seed_container="$("$runtime" create \
+            --mount "type=volume,src=$workspace_volume,dst=/workspace,volume-nocopy" \
+            "$image")"
+          git archive --format=tar HEAD | \
+            "$runtime" cp - "$seed_container:/workspace"
+          "$runtime" rm "$seed_container" >/dev/null
+          seed_container=""
+          "$runtime" run --name "$run_container" --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=16m \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            -e PYTHONPATH=/hacs \
+            --mount "type=volume,src=$workspace_volume,dst=/workspace,readonly,volume-nocopy" \
+            -w /workspace \
+            --entrypoint python3 \
+            "$image" \
+            scripts/check_hacs_local.py
+          run_container=""
+          cleanup
+          trap - EXIT INT TERM HUP
+      - name: Run hassfest
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          runtime="$(command -v docker || command -v podman || true)"
+          test -n "$runtime"
+          image='ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d'
+          workspace_volume="$("$runtime" volume create)"
+          seed_container=""
+          run_container="flexdisplay-hassfest-$(printf '%s' "$workspace_volume" | cut -c1-12)"
+          cleanup() {
+            if [ -n "${run_container:-}" ]; then
+              "$runtime" rm -f "$run_container" >/dev/null 2>&1 || true
+            fi
+            if [ -n "${seed_container:-}" ]; then
+              "$runtime" rm -f "$seed_container" >/dev/null 2>&1 || true
+            fi
+            "$runtime" volume rm -f "$workspace_volume" >/dev/null 2>&1 || true
+          }
+          trap cleanup EXIT INT TERM HUP
+          seed_container="$("$runtime" create \
+            --mount "type=volume,src=$workspace_volume,dst=/github/workspace,volume-nocopy" \
+            "$image")"
+          git archive --format=tar HEAD | \
+            "$runtime" cp - "$seed_container:/github/workspace"
+          "$runtime" rm "$seed_container" >/dev/null
+          seed_container=""
+          "$runtime" run --name "$run_container" --rm \
+            --network none \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            -e PYTHONDONTWRITEBYTECODE=1 \
+            --mount "type=volume,src=$workspace_volume,dst=/github/workspace,readonly,volume-nocopy" \
+            "$image"
+          run_container=""
+          cleanup
+          trap - EXIT INT TERM HUP
+      - name: Keep integration-source validation fail-closed
+        if: ${{ needs.changes.outputs.integration_source == 'true' }}
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          echo "Full HACS repository validation is not yet available locally." >&2
+          echo "Integration-source changes remain blocked on the Forgejo Runner." >&2
+          exit 1
+
+  android:
+    needs:
+      - candidate-policy
+      - changes
+    if: ${{ needs.changes.outputs.android == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - name: Check out exact candidate without credentials
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --no-tags --depth=1 origin \
+            "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
+      - name: Verify candidate commit
+        env:
+          CANDIDATE_SHA: ${{ needs.candidate-policy.outputs.candidate_sha }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: test "$(git rev-parse HEAD)" = "$CANDIDATE_SHA"
+      - name: Install pinned Android toolchain and build receiver
+        working-directory: rook_receiver
+        env:
+          ANDROID_HOME: /tmp/flexdisplay-android-sdk
+          ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends ca-certificates curl openjdk-17-jdk-headless unzip
+          rm -rf /var/lib/apt/lists/*
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+
+          # Android SDK Command-line Tools 12266719.
+          tools_zip=/tmp/commandlinetools-linux-12266719_latest.zip
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --noproxy '*' --output "$tools_zip" \
+            https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip
+          printf '%s  %s\n' \
+            '3fab261d5219d582321db0c5670b3bbafd563096bce3f6277eb358807fc15f6e' \
+            "$tools_zip" | sha256sum -c -
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          unzip -q "$tools_zip" -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" \
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          set +o pipefail
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1
+          set -o pipefail
+          "$sdkmanager" --install \
+            'platforms;android-33' 'build-tools;30.0.3'
+
+          printf '%s  %s\n' \
+            '14dfa961b6704bb3decdea06502781edaa796a82e6da41cd2e1962b14fbe21a3' \
+            'gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
+          ./gradlew clean assembleDebug lintDebug
+
+  required:
+    if: ${{ always() }}
+    needs:
+      - candidate-policy
+      - changes
+      - bridge
+      - app
+      - integration
+      - android
+    runs-on: linux-amd64
+    steps:
+      - name: Require every applicable validation job
+        env:
+          POLICY_RESULT: ${{ needs.candidate-policy.result }}
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          BRIDGE_RESULT: ${{ needs.bridge.result }}
+          APP_REQUIRED: ${{ needs.changes.outputs.app }}
+          APP_RESULT: ${{ needs.app.result }}
+          INTEGRATION_REQUIRED: ${{ needs.changes.outputs.integration }}
+          INTEGRATION_RESULT: ${{ needs.integration.result }}
+          ANDROID_REQUIRED: ${{ needs.changes.outputs.android }}
+          ANDROID_RESULT: ${{ needs.android.result }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$POLICY_RESULT" = "success"
+          test "$CHANGES_RESULT" = "success"
+          test "$BRIDGE_RESULT" = "success"
+          require_optional() {
+            name="$1"
+            required="$2"
+            result="$3"
+            if [ "$required" = "true" ]; then
+              test "$result" = "success"
+            else
+              test "$result" = "skipped"
+            fi
+            echo "$name required=$required result=$result"
+          }
+          require_optional app "$APP_REQUIRED" "$APP_RESULT"
+          require_optional integration "$INTEGRATION_REQUIRED" "$INTEGRATION_RESULT"
+          require_optional android "$ANDROID_REQUIRED" "$ANDROID_RESULT"
