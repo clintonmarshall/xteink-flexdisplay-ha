@@ -1,8 +1,10 @@
 # FlexDisplay architecture
 
-Forgejo is the authoritative forge. GitHub exists as a generated compatibility
-surface because HACS only consumes public GitHub repositories and existing
-device firmware URLs use GitHub release assets.
+Forgejo is the authoritative forge. For this repository only, GitHub is an
+approved downstream compatibility surface because HACS only consumes public
+GitHub repositories, existing Home Assistant consumers may already use the
+GitHub app-source URL, and some public release assets may be replicated there
+after Forgejo publication.
 
 ```mermaid
 flowchart LR

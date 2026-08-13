@@ -18,7 +18,12 @@ deployment that remains.
 ## Git remotes
 
 `origin` is Forgejo and is the only push target. `github` is fetch-only for
-diagnostics; its push URL is deliberately disabled. Confirm the invariant with:
+diagnostics; its push URL is deliberately disabled. For this repository only,
+the GitHub downstream mirror is an approved compatibility exception for HACS,
+existing Home Assistant consumers, and public release downloads that have first
+been published through Forgejo. Do not use this exception as precedent for
+private home, lab, firmware, or unrelated repositories. Confirm the invariant
+with:
 
 ```bash
 git remote -v

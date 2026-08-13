@@ -5,8 +5,8 @@ Update this table in every release that changes a protocol or minimum version.
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
 | FlexDisplay platform | 0.46.0 | Bridge, Studio and HA integration are version-locked |
-| Echo Spot receiver | 0.4.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist and Android fleet controls |
-| Echo Show 5 receiver | 0.4.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist and Android fleet controls |
+| Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
+| Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |
@@ -27,6 +27,13 @@ discards URL query parameters cannot fetch managed packs and reports a content
 error; normal dashboard delivery remains available. Pack downloads use local
 HTTP, so sensitive Quick Cards belong only on a trusted display LAN unless a
 TLS proxy or private tunnel protects that traffic.
+
+Android receiver `0.5.0` adds explicit capability headers for camera,
+microphone, audio, touch, always-on display class, device class, and screen
+resolution. Older receivers remain compatible: the Bridge falls back to
+inferring touch, colour, audio, microphone, and always-on state from the
+existing comma-separated `X-FlexDisplay-Capabilities` header where possible,
+and reports unsupported or unknown capability fields as false/unknown.
 
 Home Assistant OpenDisplay uploads use BLE. Assign OpenDisplay as the device's
 persistent mode for on-demand uploads; temporary Quick Menu sessions retain a
