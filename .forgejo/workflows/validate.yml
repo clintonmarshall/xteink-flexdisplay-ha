@@ -5,9 +5,6 @@ on:
   pull_request:
   workflow_dispatch:
 
-permissions:
-  contents: read
-
 jobs:
   changes:
     if: >-
@@ -105,6 +102,12 @@ jobs:
     runs-on: linux-amd64
     steps:
       - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install container client
+        run: >-
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y
+          --no-install-recommends docker.io &&
+          rm -rf /var/lib/apt/lists/*
       - name: Build Home Assistant App image
         run: |
           set -eu
@@ -122,6 +125,12 @@ jobs:
     runs-on: linux-amd64
     steps:
       - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Install container client
+        run: >-
+          apt-get update &&
+          DEBIAN_FRONTEND=noninteractive apt-get install -y
+          --no-install-recommends docker.io &&
+          rm -rf /var/lib/apt/lists/*
       - name: Run local HACS repository checks
         run: python3 scripts/check_hacs_repository.py
       - name: Run pinned hassfest
