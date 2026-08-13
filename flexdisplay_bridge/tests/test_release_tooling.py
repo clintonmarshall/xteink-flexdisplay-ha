@@ -6,6 +6,7 @@ import urllib.error
 from pathlib import Path
 
 import pytest
+import yaml
 
 ROOT = Path(__file__).resolve().parents[2]
 
@@ -115,6 +116,28 @@ def test_forgejo_remote_verification_requires_current_protected_main() -> None:
 
     with pytest.raises(ValueError, match="current Forgejo main"):
         publisher.verify_remote(StaleMainClient(), commit_sha, "v1.2.3")
+
+
+def test_publish_workflow_verify_only_cannot_promote_or_publish() -> None:
+    workflow_path = ROOT / ".forgejo" / "workflows" / "publish.yml"
+    workflow_text = workflow_path.read_text()
+    workflow = yaml.safe_load(workflow_text)
+
+    assert "default: verify-only" in workflow_text
+    assert "- verify-only" in workflow_text
+    assert "- publish" in workflow_text
+
+    promote_steps = workflow["jobs"]["promote"]["steps"]
+    promotion = next(
+        step
+        for step in promote_steps
+        if step.get("name") == "Promote protected immutable tag"
+    )
+    publish = workflow["jobs"]["publish"]
+    publish_gate = "${{ inputs.operation == 'publish' }}"
+
+    assert promotion["if"] == publish_gate
+    assert publish["if"] == publish_gate
 
 
 def test_github_annotated_tag_is_peeled_to_commit(

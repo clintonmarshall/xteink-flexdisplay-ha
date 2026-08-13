@@ -3,6 +3,14 @@ name: Publish protected software-only release
 on:
   workflow_dispatch:
     inputs:
+      operation:
+        description: Verify release controls only, or publish after verification
+        required: true
+        default: verify-only
+        type: choice
+        options:
+          - verify-only
+          - publish
       version:
         description: Exact X.Y.Z platform version
         required: true
@@ -19,11 +27,11 @@ on:
           - software-only
       promotion_confirmation:
         description: "Exact phrase: promote vX.Y.Z at FULL_SHA"
-        required: true
+        required: false
         type: string
       publication_confirmation:
         description: "Exact phrase: publish vX.Y.Z at FULL_SHA"
-        required: true
+        required: false
         type: string
 
 concurrency:
@@ -73,6 +81,7 @@ jobs:
           --commit-sha "$RELEASE_SHA"
           --classification "${{ inputs.classification }}"
       - name: Promote protected immutable tag
+        if: ${{ inputs.operation == 'publish' }}
         run: >-
           python3 scripts/publish_release.py
           --mode tag-only
@@ -82,6 +91,7 @@ jobs:
           --confirmation "${{ inputs.promotion_confirmation }}"
 
   publish:
+    if: ${{ inputs.operation == 'publish' }}
     needs: promote
     runs-on: trusted-release
     env:

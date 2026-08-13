@@ -81,14 +81,17 @@ release locally, use a raw API, or publish directly to GitHub.
    confirmation, then merge through Forgejo.
 2. Resolve the merge commit and require all authoritative checks to pass on
    that exact commit.
-3. Obtain fresh publication confirmation naming `vX.Y.Z`, the exact commit,
+3. Dispatch the Forgejo workflow with `operation: verify-only`, `vX.Y.Z`, and
+   the exact commit. Require the validation and control checks to pass, then
+   confirm that neither the tag nor a release was created.
+4. Obtain fresh publication confirmation naming `vX.Y.Z`, the exact commit,
    classification, destinations, and rollback constraints.
-4. Dispatch the Forgejo workflow with those exact values and its confirmation
-   phrase. The promotion job revalidates the commit and creates the immutable
-   tag. The publication job checks out that tag, revalidates it, creates the
-   Forgejo release from the canonical changelog section, then requests the
-   downstream GitHub compatibility release.
-5. Verify the Forgejo tag, release, release body, and commit identity. Then
+5. Dispatch the Forgejo workflow with `operation: publish`, those exact values,
+   and its confirmation phrases. The promotion job revalidates the commit and
+   creates the immutable tag. The publication job checks out that tag,
+   revalidates it, creates the Forgejo release from the canonical changelog
+   section, then requests the downstream GitHub compatibility release.
+6. Verify the Forgejo tag, release, release body, and commit identity. Then
    verify the mirror and GitHub Release use the identical tag and commit. HACS
    does not treat a bare GitHub tag as a release.
 
