@@ -17,8 +17,10 @@ deployment that remains.
 
 ## Git remotes
 
-`origin` is Forgejo and is the only push target. `github` is fetch-only for
-diagnostics; its push URL is deliberately disabled. Confirm the invariant with:
+`origin` is Forgejo and is the only developer push target. `github` is
+fetch-only for diagnostics; its push URL is deliberately disabled. Only the
+Forgejo-controlled mirror and downstream compatibility-release automation may
+write GitHub. Confirm the invariant with:
 
 ```bash
 git remote -v
@@ -40,14 +42,27 @@ mirror is the only writer to GitHub.
 6. Delete the merged branch and remove its worktree.
 
 `main` is protected against direct pushes. Status-check enforcement must only
-be enabled after a Forgejo runner with the `linux-amd64` label is continuously
-online and has completed the validation workflow successfully.
+be enabled after the required Forgejo Runner labels are continuously online and
+have completed every configured required workflow successfully. Publication
+credentials must never be exposed to pull-request jobs.
+
+## Device-family admission
+
+Do not treat new hardware as supported merely because it can call a Bridge
+endpoint. First define its owning repository and firmware channel, stable
+identity and capability evidence, minimum versions and fallback behavior,
+transport/security boundary, hardware validation, and recovery path. Until
+that architecture work is complete, unknown devices remain external and
+fail-closed for firmware, provisioning, policy, reset, and commands.
 
 ## Releases
 
-Follow `docs/RELEASE.md`. Tags and release notes originate in Forgejo. Confirm
-the push mirror copied the tag and that GitHub Actions created a full GitHub
-Release; a bare GitHub tag is insufficient for HACS.
+Follow `docs/RELEASE.md`. Publishing runs only through the reviewed workflow on
+a dedicated trusted Runner from a protected immutable tag at the exact tested
+commit. If that route is absent or unverified, the release is blocked; there is
+no local or raw-API fallback. After the Forgejo release succeeds, verify the
+mirror copied the same tag and commit and that downstream automation created a
+full GitHub Release; a bare GitHub tag is insufficient for HACS.
 
 ## Home Assistant sources
 
@@ -61,9 +76,11 @@ Forgejo remains authoritative in both supported deployment arrangements:
 - HACS installations must use the public GitHub mirror because HACS does not
   consume arbitrary Forgejo repositories.
 
-After every Bridge release, refresh the Home Assistant app store, confirm the
-expected version, create a backup, update, and verify `/healthz`, MQTT, FlexHub,
-Studio ingress, and one device from each affected family.
+The authoritative Home Assistant deployment and rollback checklist is in
+`docs/RELEASE.md`; do not duplicate a shorter checklist here. In particular,
+publication is not deployment authorization, automatic App updates can make an
+App-version merge deployment-capable, and software-only releases must not queue
+device firmware.
 
 ## Archiving
 

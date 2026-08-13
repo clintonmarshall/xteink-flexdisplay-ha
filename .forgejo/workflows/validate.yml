@@ -5,30 +5,145 @@ on:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
-  bridge:
+  changes:
+    if: >-
+      ${{ forgejo.event_name != 'pull_request' ||
+      (forgejo.event.pull_request.head.repo.full_name == forgejo.repository &&
+      forgejo.actor == forgejo.repository_owner) }}
+    runs-on: linux-amd64
+    outputs:
+      app: ${{ steps.paths.outputs.app }}
+      integration: ${{ steps.paths.outputs.integration }}
+      android: ${{ steps.paths.outputs.android }}
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - name: Classify affected components
+        id: paths
+        env:
+          EVENT_BASE: ${{ forgejo.event.pull_request.base.sha || forgejo.event.before }}
+          TARGET_SHA: ${{ forgejo.sha }}
+        run: |
+          set -eu
+          base="$EVENT_BASE"
+          if [ -z "$base" ] || [ "$base" = "0000000000000000000000000000000000000000" ]; then
+            base="$(git rev-parse "$TARGET_SHA^")"
+          fi
+          git cat-file -e "$base^{commit}"
+          git diff --name-only "$base" "$TARGET_SHA" > /tmp/flexdisplay-changed-files
+          classify() {
+            if grep -Eq "$1" /tmp/flexdisplay-changed-files; then echo true; else echo false; fi
+          }
+          {
+            echo "app=$(classify '^(flexdisplay_bridge/|repository\.yaml$|scripts/)')"
+            echo "integration=$(classify '^(custom_components/flexdisplay/|hacs\.json$|scripts/check_(hacs|release))')"
+            echo "android=$(classify '^(rook_receiver/|docs/COMPATIBILITY\.md$|scripts/check_release_metadata\.py$)')"
+          } >> "$FORGEJO_OUTPUT"
+
+  untrusted-pull-request:
+    if: >-
+      ${{ forgejo.event_name == 'pull_request' &&
+      (forgejo.event.pull_request.head.repo.full_name != forgejo.repository ||
+      forgejo.actor != forgejo.repository_owner) }}
     runs-on: linux-amd64
     steps:
-      - uses: https://data.forgejo.org/actions/checkout@v6
-      - name: Validate release metadata
-        run: python3 scripts/check_release_metadata.py
-      - name: Install Python toolchain
+      - name: Refuse execution on the shared private-LAN Runner
+        run: |
+          echo "Untrusted pull-request code requires an isolated Runner without private-LAN access." >&2
+          exit 1
+
+  bridge:
+    if: >-
+      ${{ forgejo.event_name != 'pull_request' ||
+      (forgejo.event.pull_request.head.repo.full_name == forgejo.repository &&
+      forgejo.actor == forgejo.repository_owner) }}
+    runs-on: linux-amd64
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+      - name: Install validation toolchain
         run: >-
           apt-get update &&
           DEBIAN_FRONTEND=noninteractive apt-get install -y
-          --no-install-recommends python3-venv &&
+          --no-install-recommends nodejs python3-venv &&
           rm -rf /var/lib/apt/lists/*
-      - name: Install bridge
+      - name: Validate repository metadata and browser JavaScript
+        run: |
+          python3 scripts/check_release_metadata.py
+          python3 scripts/check_studio_javascript.py
+          python3 scripts/check_hacs_repository.py
+      - name: Install bridge test environment
         working-directory: flexdisplay_bridge
-        run: >-
-          python3 -m venv /tmp/flexdisplay-venv &&
+        run: |
+          python3 -m venv /tmp/flexdisplay-venv
+          /tmp/flexdisplay-venv/bin/python -m pip install --upgrade pip build
           /tmp/flexdisplay-venv/bin/python -m pip install -e '.[test]'
-      - name: Test bridge
-        working-directory: flexdisplay_bridge
-        run: /tmp/flexdisplay-venv/bin/python -m pytest tests
-      - name: Compile Python sources
-        run: >-
-          python3 -m compileall -q
-          flexdisplay_bridge/flexdisplay_bridge
-          flexdisplay_bridge/app_runner.py
-          custom_components/flexdisplay
+      - name: Test and compile Python
+        run: |
+          (cd flexdisplay_bridge && /tmp/flexdisplay-venv/bin/python -m pytest tests)
+          /tmp/flexdisplay-venv/bin/python -m compileall -q \
+            flexdisplay_bridge/flexdisplay_bridge \
+            flexdisplay_bridge/app_runner.py custom_components/flexdisplay scripts
+      - name: Build and install-smoke Python wheel
+        run: |
+          /tmp/flexdisplay-venv/bin/python -m build --wheel flexdisplay_bridge
+          python3 -m venv /tmp/flexdisplay-wheel-venv
+          /tmp/flexdisplay-wheel-venv/bin/python -m pip install flexdisplay_bridge/dist/*.whl
+          /tmp/flexdisplay-wheel-venv/bin/python -c 'import flexdisplay_bridge'
+      - name: Reject whitespace errors
+        run: git diff --check
+
+  app:
+    needs: changes
+    if: ${{ needs.changes.outputs.app == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Build Home Assistant App image
+        run: |
+          set -eu
+          runtime="$(command -v docker || command -v podman || true)"
+          test -n "$runtime"
+          version="$(python3 scripts/check_release_metadata.py --print-version)"
+          "$runtime" build \
+            --build-arg BUILD_VERSION="$version" \
+            --build-arg BUILD_ARCH=amd64 \
+            flexdisplay_bridge
+
+  integration:
+    needs: changes
+    if: ${{ needs.changes.outputs.integration == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - name: Run local HACS repository checks
+        run: python3 scripts/check_hacs_repository.py
+      - name: Run pinned hassfest
+        run: |
+          set -eu
+          runtime="$(command -v docker || command -v podman || true)"
+          test -n "$runtime"
+          "$runtime" run --rm \
+            -v "$PWD:/github/workspace" \
+            ghcr.io/home-assistant/hassfest@sha256:8cd7bdb8f82430c2c13703290b1fc38dcc99957dd76ad3f230035ecee70b672d
+
+  android:
+    needs: changes
+    if: ${{ needs.changes.outputs.android == 'true' }}
+    runs-on: linux-amd64
+    steps:
+      - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: https://data.forgejo.org/actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: "17"
+      - uses: https://github.com/android-actions/setup-android@4d90f943634881869c98b16d759177c8ee849798
+      - name: Build and lint Android receiver
+        working-directory: rook_receiver
+        run: ./gradlew clean assembleDebug lintDebug

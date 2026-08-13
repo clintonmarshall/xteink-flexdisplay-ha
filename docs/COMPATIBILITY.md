@@ -9,7 +9,7 @@ Update this table in every release that changes a protocol or minimum version.
 | Echo Show 5 receiver | 0.3.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
-| Home Assistant | Home / Dumb at `10.200.40.4` | Bridge API on port 8099; no credentials belong here |
+| Home Assistant | Release evidence | Record the exact tested Core version with each release; hostnames and credentials do not belong here |
 
 Protocol changes must document both the minimum compatible device version and
 the fallback behavior for older devices.
