@@ -1,7 +1,9 @@
 # Security
 
 Please report vulnerabilities privately through GitHub Security Advisories
-when available.
+when available. Private advisory intake is a narrow approved exception to the
+downstream-only GitHub policy; it does not authorize GitHub branches, pull
+requests, tags, direct release publication, or public vulnerability issues.
 
 Do not include:
 

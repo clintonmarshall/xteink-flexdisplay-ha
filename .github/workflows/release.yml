@@ -1,36 +1,55 @@
-name: Publish compatibility release
+name: Publish downstream compatibility release
 
 on:
-  push:
-    tags:
-      - "v*"
-  workflow_dispatch:
-    inputs:
-      tag:
-        description: Existing vX.Y.Z tag to publish
-        required: true
-        type: string
+  repository_dispatch:
+    types:
+      - forgejo-release-published
 
 permissions:
-  contents: write
+  contents: read
+
+concurrency:
+  group: downstream-release-${{ github.event.client_payload.tag || github.run_id }}
+  cancel-in-progress: false
 
 jobs:
   release:
     runs-on: ubuntu-latest
     env:
-      RELEASE_TAG: ${{ inputs.tag || github.ref_name }}
-      GH_TOKEN: ${{ github.token }}
+      FORGEJO_RELEASE_URL: ${{ github.event.client_payload.forgejo_release_url }}
+      RELEASE_COMMIT: ${{ github.event.client_payload.commit }}
+      RELEASE_MANIFEST_SHA256: ${{ github.event.client_payload.release_manifest_sha256 }}
+      RELEASE_TAG: ${{ github.event.client_payload.tag }}
     steps:
-      # actions/checkout v4
+      - name: Validate authoritative release handoff envelope
+        run: |
+          set -eu
+          case "$RELEASE_TAG" in
+            v[0-9]*.[0-9]*.[0-9]*) ;;
+            *) echo "Invalid release tag handoff" >&2; exit 1 ;;
+          esac
+          printf '%s\n' "$RELEASE_COMMIT" | grep -Eq '^[0-9a-f]{40}$'
+          printf '%s\n' "$RELEASE_MANIFEST_SHA256" | grep -Eq '^[0-9a-f]{64}$'
+          test -n "$FORGEJO_RELEASE_URL"
+      # actions/checkout v4.4.0
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           fetch-depth: 0
-      - name: Verify version metadata
-        run: python3 scripts/check_release_metadata.py "${RELEASE_TAG#v}"
-      - name: Publish GitHub release if missing
-        run: >-
-          gh release view "$RELEASE_TAG" >/dev/null 2>&1 ||
-          gh release create "$RELEASE_TAG"
-          --verify-tag
-          --generate-notes
-          --title "FlexDisplay $RELEASE_TAG"
+          persist-credentials: false
+          ref: ${{ github.event.client_payload.tag }}
+      - name: Verify mirrored Forgejo release provenance
+        run: |
+          set -eu
+          tagged_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
+          test "$RELEASE_COMMIT" = "$tagged_commit"
+          test "$RELEASE_COMMIT" = "$(git rev-parse HEAD)"
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = "tag"
+          python3 scripts/check_release_metadata.py --release "${RELEASE_TAG#v}"
+      - name: Require authenticated Forgejo release proof
+        run: |
+          echo "Downstream publication is intentionally disabled in this scaffold." >&2
+          echo "A repository dispatch payload and mirrored tag do not by themselves" >&2
+          echo "prove the authoritative Forgejo Release and assets exist. Add a" >&2
+          echo "reviewed, authenticated proof verifier before enabling" >&2
+          echo "GitHub Release creation; direct/manual publication is not permitted." >&2
+          exit 1

@@ -1,0 +1,98 @@
+name: Promote protected release tag
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without the v prefix
+        required: true
+        type: string
+      commit:
+        description: Exact fully validated origin/main commit SHA
+        required: true
+        type: string
+
+jobs:
+  verify-promotion:
+    if: ${{ forgejo.actor == forgejo.repository_owner }}
+    runs-on: trusted-release
+    steps:
+      - name: Check out authoritative main without credentials
+        env:
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          GIT_TERMINAL_PROMPT: "0"
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          forgejo_origin="${FORGEJO_SERVER_URL%/}"
+          case "$forgejo_origin" in
+            http://*|https://*) ;;
+            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
+          esac
+          git init .
+          git remote add origin \
+            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
+          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
+            fetch --force --tags origin \
+            '+refs/heads/main:refs/remotes/origin/main'
+          git checkout --detach "$RELEASE_COMMIT"
+      - name: Verify exact release candidate
+        env:
+          RELEASE_VERSION: ${{ inputs.version }}
+          RELEASE_COMMIT: ${{ inputs.commit }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$RELEASE_COMMIT"
+          python3 scripts/check_release_metadata.py --release "$RELEASE_VERSION"
+          if git show-ref --verify --quiet "refs/tags/v$RELEASE_VERSION"; then
+            echo "Refusing to move or replace existing tag v$RELEASE_VERSION" >&2
+            exit 1
+          fi
+      - name: Require reviewed promotion controls
+        env:
+          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_RELEASE_AUTOMATION_ENABLED }}
+          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_RELEASE_RUNNER_ISOLATED }}
+          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_RELEASE_CREDENTIAL_PATH_APPROVED }}
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -eu
+          test "$AUTOMATION_ENABLED" = "true"
+          test "$RUNNER_ISOLATED" = "true"
+          test "$CREDENTIAL_PATH_APPROVED" = "true"
+          echo "Release candidate checks passed, but tag mutation is intentionally" >&2
+          echo "disabled in this scaffold. Add a reviewed, fixed-purpose promotion" >&2
+          echo "action in a separate change; do not use a shell/API fallback." >&2
+          exit 1
