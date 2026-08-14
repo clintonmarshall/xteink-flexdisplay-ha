@@ -49,8 +49,11 @@ Forgejo required checks are authoritative. The Forgejo Runner must execute the
 baseline commands above and, when affected:
 
 - build the Home Assistant App image;
-- run the available local HACS schemas and hassfest for the integration; and
-- run `./gradlew clean assembleDebug lintDebug` in `rook_receiver/`.
+- run the exact-checkout HACS source validator, public-repository metadata
+  validator, and hassfest for the integration; and
+- run `./gradlew clean testKioskDebugUnitTest testCompanionDebugUnitTest
+  assembleKioskDebug assembleCompanionDebug lintKioskDebug
+  lintCompanionDebug` in `rook_receiver/`.
 
 Build the Home Assistant app image and the Android receiver when affected. The
 Android gate is:
@@ -160,10 +163,13 @@ Record the successful required checks and their exact tested commit. GitHub
 checks are downstream evidence only. A missing, skipped, zero-coverage, or
 unavailable affected-component check blocks the release.
 
-Full HACS repository validation is not yet available on the Forgejo Runner.
-Until an equivalent local validator is reviewed and implemented, any change to
-`custom_components/flexdisplay/` or `hacs.json` is blocked from review and
-release even when the local schemas and hassfest pass.
+The Forgejo exact-head suite validates the candidate's HACS and integration
+manifests, repository layout, brand asset, license presence, and hassfest
+results without exposing a GitHub token. It separately validates the stable
+public GitHub repository properties through the anonymous API. After merge,
+the downstream GitHub workflow runs the content-addressed upstream HACS action
+against the exact mirrored commit. A missing or failed affected-component gate
+at either boundary blocks release.
 
 Record the exact Home Assistant Core version used for release verification in
 the release evidence; do not put the live Home Assistant hostname or address in

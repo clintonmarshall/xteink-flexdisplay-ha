@@ -58,7 +58,7 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
           persist-credentials: false
-      - name: Run partial content-addressed HACS schemas
+      - name: Run exact-checkout content-addressed HACS source validation
         run: |
           set -eu
           docker run --rm \
@@ -72,6 +72,24 @@ jobs:
             --entrypoint python3 \
             ghcr.io/hacs/action@sha256:41f6310585d9fb72c7a0e183cce0594355715bc24112b62bc4279b83412edccb \
             scripts/check_hacs_local.py
+      - name: Run full HACS repository validation on the mirrored commit
+        env:
+          INPUT_CATEGORY: integration
+          INPUT_COMMENT: "false"
+          INPUT_GITHUB_TOKEN: ${{ github.token }}
+          INPUT_REPOSITORY: clintonmarshall/xteink-flexdisplay-ha
+          REPOSITORY_REF: ${{ github.sha }}
+        run: |
+          set -eu
+          docker run --rm \
+            --read-only \
+            --tmpfs /tmp:rw,noexec,nosuid,size=32m \
+            --env INPUT_CATEGORY \
+            --env INPUT_COMMENT \
+            --env INPUT_GITHUB_TOKEN \
+            --env INPUT_REPOSITORY \
+            --env REPOSITORY_REF \
+            ghcr.io/hacs/action@sha256:41f6310585d9fb72c7a0e183cce0594355715bc24112b62bc4279b83412edccb
 
   hassfest:
     runs-on: ubuntu-latest

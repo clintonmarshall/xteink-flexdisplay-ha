@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
-"""Validate the checked-out FlexDisplay integration with HACS schemas.
+"""Validate the checked-out FlexDisplay integration with HACS source rules.
 
 This script is run inside the content-addressed HACS Action container. It reads
 only the local checkout, so Forgejo pull-request jobs do not need a GitHub token
-or access to a mirrored ref.
+or access to a mirrored ref. Repository-level GitHub metadata is checked by the
+separate secretless ``check_hacs_repository.py`` gate.
 """
 
 from __future__ import annotations
 
 import json
+import struct
 import sys
 from pathlib import Path
 
@@ -24,6 +26,8 @@ HACS_MANIFEST = ROOT / "hacs.json"
 COMPONENTS = ROOT / "custom_components"
 INTEGRATION = COMPONENTS / "flexdisplay"
 INTEGRATION_MANIFEST = INTEGRATION / "manifest.json"
+BRAND_ICON = INTEGRATION / "brand" / "icon.png"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 
 def load_json(path: Path) -> dict[str, object]:
@@ -73,6 +77,17 @@ def main() -> int:
 
     if not (INTEGRATION / "__init__.py").is_file():
         errors.append("custom_components/flexdisplay/__init__.py is missing")
+    try:
+        icon = BRAND_ICON.read_bytes()
+        if not icon.startswith(PNG_SIGNATURE) or len(icon) < 24:
+            raise ValueError("not a valid PNG file")
+        width, height = struct.unpack(">II", icon[16:24])
+        if width != height or width < 256:
+            raise ValueError(
+                f"must be a square PNG of at least 256 px; found {width} x {height}"
+            )
+    except (OSError, ValueError, struct.error) as error:
+        errors.append(f"custom_components/flexdisplay/brand/icon.png: {error}")
     if not (ROOT / "README.md").is_file():
         errors.append("README.md is missing")
     if not any((ROOT / name).is_file() for name in ("LICENSE", "LICENSE.md")):
@@ -83,7 +98,7 @@ def main() -> int:
         print("\n".join(f"- {error}" for error in errors), file=sys.stderr)
         return 1
 
-    print("Partial local HACS manifest and integration schema validation passed.")
+    print("Exact-checkout HACS source validation passed.")
     return 0
 
 

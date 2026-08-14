@@ -59,8 +59,9 @@ untracked.
 If the Android receiver changes, also run from `rook_receiver/`:
 
 ```bash
-./gradlew clean assembleDebug lintDebug
-./gradlew testKioskDebugUnitTest testCompanionDebugUnitTest
+./gradlew clean testKioskDebugUnitTest testCompanionDebugUnitTest \
+  assembleKioskDebug assembleCompanionDebug \
+  lintKioskDebug lintCompanionDebug
 ```
 
 When the Companion release packaging or publication contract changes, also run
