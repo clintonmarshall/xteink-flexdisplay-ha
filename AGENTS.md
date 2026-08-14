@@ -57,7 +57,9 @@ untracked.
 If the Android receiver changes, also run from `rook_receiver/`:
 
 ```bash
-./gradlew clean assembleDebug lintDebug
+./gradlew clean testKioskDebugUnitTest testCompanionDebugUnitTest \
+  assembleKioskDebug assembleCompanionDebug \
+  lintKioskDebug lintCompanionDebug
 ```
 
 If the local machine lacks an Android SDK, report the Android validation as
@@ -74,10 +76,11 @@ same-repository pull request must run the protected-base
 `pull_request_target` validation on its exact head SHA. Rejected fork,
 collaborator, AGit, and other non-owner candidates run only the metadata policy
 gate and remain blocked. When affected, Forgejo must also build the Home
-Assistant App image, run the available local HACS schemas and hassfest for the
-integration, and run the Android build and lint checks. Integration-source
-changes remain blocked until full HACS repository validation is available on
-the Forgejo Runner. GitHub checks are downstream evidence only. If an affected
+Assistant App image, run the exact-checkout HACS source validator, public
+repository metadata validator, and hassfest for the integration, and run the
+explicit Android flavor build, unit-test, and lint checks. The downstream
+GitHub workflow may add full HACS repository validation after an exact commit
+is mirrored, but GitHub checks remain downstream evidence only. If an affected
 check is absent, skipped, or unavailable on the trusted Forgejo Runner, review
 and release are blocked.
 
