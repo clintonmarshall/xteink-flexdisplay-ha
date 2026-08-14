@@ -205,7 +205,8 @@ def test_x4_pro_s3_controls_require_exact_identity_and_never_join_x4_ota(
         "X-FlexDisplay-Firmware": "1.0.0",
         "X-FlexDisplay-Capabilities": (
             "touch,capacitive-home,side-buttons,frontlight,"
-            "frontlight-brightness,frontlight-warmth,sdmmc"
+            "frontlight-brightness,frontlight-warmth,frontlight-home-hold,"
+            "frontlight-timeout,sdmmc"
         ),
         "X-FlexDisplay-Frontlight-On": "true",
         "X-FlexDisplay-Frontlight-Brightness": "60",
@@ -221,6 +222,8 @@ def test_x4_pro_s3_controls_require_exact_identity_and_never_join_x4_ota(
                 "frontlight_on": True,
                 "frontlight_brightness": 72,
                 "frontlight_warmth": 41,
+                "frontlight_home_hold": True,
+                "frontlight_timeout_seconds": 600,
             },
         )
         assert control.status_code == 200
@@ -257,6 +260,8 @@ def test_x4_pro_s3_controls_require_exact_identity_and_never_join_x4_ota(
         "capacitive-home",
         "frontlight",
         "frontlight-brightness",
+        "frontlight-home-hold",
+        "frontlight-timeout",
         "frontlight-warmth",
         "sdmmc",
         "side-buttons",
@@ -265,6 +270,8 @@ def test_x4_pro_s3_controls_require_exact_identity_and_never_join_x4_ota(
     assert second.headers["x-flexdisplay-desired-frontlight-on"] == "true"
     assert second.headers["x-flexdisplay-desired-frontlight-brightness"] == "72"
     assert second.headers["x-flexdisplay-desired-frontlight-warmth"] == "41"
+    assert second.headers["x-flexdisplay-desired-frontlight-home-hold"] == "true"
+    assert second.headers["x-flexdisplay-desired-frontlight-timeout"] == "600"
     assert "x-flexdisplay-latest-firmware" not in second.headers
     assert install.status_code == 409
     assert "not managed" in install.json()["detail"]
@@ -1394,6 +1401,13 @@ def test_studio_keeps_x4_pro_distinct_from_legacy_x4_controls(
     assert 'data-model="X4_PRO"' in html
     assert 'if (model === "X4PRO") return "X4_PRO";' in html
     assert "if (deviceIsX4Pro(device)) return false;" in html
+    assert "X4 Pro device profile" in html
+    assert "Save device profile" in html
+    assert "frontlight_on" in html
+    assert "frontlight_brightness" in html
+    assert "frontlight_warmth" in html
+    assert "frontlight_home_hold" in html
+    assert "frontlight_timeout_seconds" in html
     assert (
         'id === "buttonActionDevice" && !deviceSupportsButtonActions(device)'
         in html

@@ -123,7 +123,8 @@ inference:
 
 An admitted S3 runtime may report only the explicit tokens `touch`,
 `capacitive-home`, `side-buttons`, `frontlight`,
-`frontlight-brightness`, `frontlight-warmth`, and `sdmmc`. Physical events are
+`frontlight-brightness`, `frontlight-warmth`, `frontlight-home-hold`,
+`frontlight-timeout`, and `sdmmc`. Physical events are
 `home`, `side_previous`, `side_next`, and `power`. Frontlight power, brightness,
 and warmth are independent controls. Every X4 Pro check-in must freshly report
 all identity, memory, artifact, and capability headers. An omitted field is
@@ -145,6 +146,7 @@ byte size and SHA-256, durable known-good recovery artifact, exact partition and
 pin evidence, and stable device identity. Bind one USB-powered S3 canary to that
 identity, verify recovery before writing, then verify boot/check-in, rendering,
 touch, capacitive Home, side and Power events, frontlight brightness and warmth,
+the long-Home frontlight shortcut, and its bounded idle timeout,
 SDMMC, and rollback after reboot. Any future non-S3 revision requires its own
 separate evidence and canary admission; S3 results cannot authorize it.
 

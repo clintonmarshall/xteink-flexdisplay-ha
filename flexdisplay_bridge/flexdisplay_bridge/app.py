@@ -3003,6 +3003,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Desired-Frontlight-Warmth"] = str(
                     max(frontlight.minimum, min(frontlight.maximum, int(warmth)))
                 )
+        reported = set(descriptor.reported_capabilities)
+        if "frontlight-home-hold" in reported:
+            enabled = record.get(
+                "desired_frontlight_home_hold",
+                record.get("frontlight_home_hold") is not False,
+            )
+            response.headers["X-FlexDisplay-Desired-Frontlight-Home-Hold"] = (
+                "true" if enabled else "false"
+            )
+        if "frontlight-timeout" in reported:
+            timeout = record.get(
+                "desired_frontlight_timeout_seconds",
+                record.get("frontlight_timeout_seconds", 300),
+            )
+            response.headers["X-FlexDisplay-Desired-Frontlight-Timeout"] = str(
+                max(15, min(3600, int(timeout)))
+            )
 
     def apply_loading_screen_headers(
         response: Response,
@@ -3636,6 +3653,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     5, min(100, int(payload["brightness"]))
                 )
         elif descriptor.frontlight.available is True:
+            reported = set(descriptor.reported_capabilities)
             if "frontlight_on" in payload and descriptor.frontlight.supports_on:
                 changes["desired_frontlight_on"] = bool(payload["frontlight_on"])
             if (
@@ -3659,6 +3677,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         descriptor.frontlight.maximum,
                         int(payload["frontlight_warmth"]),
                     ),
+                )
+            if (
+                "frontlight_home_hold" in payload
+                and "frontlight-home-hold" in reported
+            ):
+                changes["desired_frontlight_home_hold"] = bool(
+                    payload["frontlight_home_hold"]
+                )
+            if (
+                "frontlight_timeout_seconds" in payload
+                and "frontlight-timeout" in reported
+            ):
+                changes["desired_frontlight_timeout_seconds"] = max(
+                    15, min(3600, int(payload["frontlight_timeout_seconds"]))
                 )
         else:
             raise HTTPException(
@@ -6153,6 +6185,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_frontlight_on: str | None = Header(default=None),
         x_flexdisplay_frontlight_brightness: str | None = Header(default=None),
         x_flexdisplay_frontlight_warmth: str | None = Header(default=None),
+        x_flexdisplay_frontlight_home_hold: str | None = Header(default=None),
+        x_flexdisplay_frontlight_timeout: str | None = Header(default=None),
         x_flexdisplay_battery_percent: str | None = Header(default=None),
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
@@ -6322,6 +6356,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             ),
             "frontlight_warmth": _optional_integer(
                 x_flexdisplay_frontlight_warmth, 0, 100
+            ),
+            "frontlight_home_hold": _boolean(x_flexdisplay_frontlight_home_hold),
+            "frontlight_timeout_seconds": _optional_integer(
+                x_flexdisplay_frontlight_timeout, 15, 3600
             ),
             "battery_percent": _number(x_flexdisplay_battery_percent),
             "battery_voltage": _number(x_flexdisplay_battery_voltage),

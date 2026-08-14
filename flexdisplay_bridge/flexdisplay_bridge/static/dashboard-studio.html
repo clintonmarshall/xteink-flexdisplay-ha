@@ -2671,6 +2671,30 @@
           ].filter(([command]) => deviceSupportsAction(device, command, true))
             .map(([command, label]) => `<button data-fleet-command="${command}" data-fleet-device="${id}">${label}</button>`)
             .join("");
+          const descriptor = deviceCapabilityDescriptor(device);
+          const frontlight = descriptor?.frontlight || {};
+          const reportedCapabilities = new Set(descriptor?.reported_capabilities || []);
+          const supportsFrontlight = frontlight.available === true;
+          const supportsFrontlightOn = supportsFrontlight && frontlight.supports_on === true;
+          const supportsFrontlightBrightness = supportsFrontlight && frontlight.supports_brightness === true;
+          const supportsFrontlightWarmth = supportsFrontlight && frontlight.supports_warmth === true;
+          const supportsFrontlightHomeHold = supportsFrontlight && reportedCapabilities.has("frontlight-home-hold");
+          const supportsFrontlightTimeout = supportsFrontlight && reportedCapabilities.has("frontlight-timeout");
+          const supportsDeviceProfile = supportsFrontlightOn || supportsFrontlightBrightness ||
+            supportsFrontlightWarmth || supportsFrontlightHomeHold || supportsFrontlightTimeout;
+          const deviceProfile = supportsDeviceProfile ? `
+            <div class="helper-callout" style="margin-top:10px">
+              <strong>X4 Pro device profile</strong>
+              <div class="field-grid" style="margin-top:8px">
+                ${supportsFrontlightOn ? `<label><span>Frontlight enabled</span><input type="checkbox" data-profile-frontlight-on="${id}" ${(device.desired_frontlight_on ?? device.frontlight_on ?? false) ? "checked" : ""}></label>` : ""}
+                ${supportsFrontlightBrightness ? `<label><span>Brightness (%)</span><input type="number" min="0" max="100" step="1" value="${escapeHtml(device.desired_frontlight_brightness ?? device.frontlight_brightness ?? 50)}" data-profile-frontlight-brightness="${id}"></label>` : ""}
+                ${supportsFrontlightWarmth ? `<label><span>Warmth (%)</span><input type="number" min="0" max="100" step="1" value="${escapeHtml(device.desired_frontlight_warmth ?? device.frontlight_warmth ?? 50)}" data-profile-frontlight-warmth="${id}"></label>` : ""}
+                ${supportsFrontlightHomeHold ? `<label><span>Hold Home to toggle</span><input type="checkbox" data-profile-frontlight-home-hold="${id}" ${(device.desired_frontlight_home_hold ?? device.frontlight_home_hold ?? true) ? "checked" : ""}></label>` : ""}
+                ${supportsFrontlightTimeout ? `<label><span>Turn off after (seconds)</span><input type="number" min="15" max="3600" step="15" value="${escapeHtml(device.desired_frontlight_timeout_seconds ?? device.frontlight_timeout_seconds ?? 300)}" data-profile-frontlight-timeout="${id}"></label>` : ""}
+              </div>
+              <div class="button-row" style="margin-top:8px"><button data-save-device-profile="${id}">Save device profile</button></div>
+              <span class="small muted">Settings are delivered on the next device check-in. USB keep-on remains unavailable until power detection is hardware-verified.</span>
+            </div>` : "";
           const softwareLabel = deviceFirmwareProvider(device) === "android_app" ? "Receiver app" : "Firmware";
           return `
             <article class="fleet-card">
@@ -2698,6 +2722,7 @@
                     <div class="fleet-trend"><span class="small muted">Wi-Fi history</span>${sparkline(device.checkin_history, "rssi")}</div>
                   </div>
                   <div class="button-row" style="margin-top:10px">${commands || '<span class="small muted">No compatible remote actions advertised.</span>'}</div>
+                  ${deviceProfile}
                 </div>
               </div>
               <div class="screen-strip">${screens || `<span class="small muted">${supportsScreenHistory ? "Screen history will appear after the next refresh." : "Screen history is not supported by this family."}</span>`}</div>
@@ -3988,6 +4013,32 @@
       try {
         await api(`devices/${encodeURIComponent(deviceId)}/commands/${encodeURIComponent(command)}`, {method: "POST"});
         toast(`${command} queued for ${deviceId}.`);
+        await loadFleetHealth();
+      } catch (error) {
+        toast(error.message, true);
+      }
+    }
+
+    async function saveDeviceProfile(deviceId) {
+      const controls = {
+        frontlight_on: document.querySelector(`[data-profile-frontlight-on="${CSS.escape(deviceId)}"]`),
+        frontlight_brightness: document.querySelector(`[data-profile-frontlight-brightness="${CSS.escape(deviceId)}"]`),
+        frontlight_warmth: document.querySelector(`[data-profile-frontlight-warmth="${CSS.escape(deviceId)}"]`),
+        frontlight_home_hold: document.querySelector(`[data-profile-frontlight-home-hold="${CSS.escape(deviceId)}"]`),
+        frontlight_timeout_seconds: document.querySelector(`[data-profile-frontlight-timeout="${CSS.escape(deviceId)}"]`),
+      };
+      const body = {};
+      if (controls.frontlight_on) body.frontlight_on = controls.frontlight_on.checked;
+      if (controls.frontlight_brightness) body.frontlight_brightness = Number(controls.frontlight_brightness.value);
+      if (controls.frontlight_warmth) body.frontlight_warmth = Number(controls.frontlight_warmth.value);
+      if (controls.frontlight_home_hold) body.frontlight_home_hold = controls.frontlight_home_hold.checked;
+      if (controls.frontlight_timeout_seconds) body.frontlight_timeout_seconds = Number(controls.frontlight_timeout_seconds.value);
+      try {
+        await api(`devices/${encodeURIComponent(deviceId)}/display`, {
+          method: "PUT",
+          body,
+        });
+        toast(`Device profile saved for ${deviceId}.`);
         await loadFleetHealth();
       } catch (error) {
         toast(error.message, true);
@@ -6227,6 +6278,8 @@
     $("#fleetHealthGrid").addEventListener("click", (event) => {
       const command = event.target.closest("[data-fleet-command]");
       if (command) return fleetCommand(command.dataset.fleetDevice, command.dataset.fleetCommand);
+      const deviceProfile = event.target.closest("[data-save-device-profile]");
+      if (deviceProfile) return saveDeviceProfile(deviceProfile.dataset.saveDeviceProfile);
       const screen = event.target.closest("[data-resend-screen]");
       if (screen) resendFleetScreen(screen.dataset.resendDevice, screen.dataset.resendScreen);
     });
