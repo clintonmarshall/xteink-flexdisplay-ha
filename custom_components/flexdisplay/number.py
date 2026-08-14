@@ -11,7 +11,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import is_note4, management_supports
+from .device_capabilities import (
+    is_android_receiver,
+    management_supports,
+    supports_audio,
+    supports_frontlight,
+)
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -155,7 +160,7 @@ class FlexDisplayVoiceVolume(FlexDisplayEntity, NumberEntity):
         self._attr_unique_id = f"{device_id}_voice_volume"
 
     def _record_supported(self, record: dict) -> bool:
-        return is_note4(record)
+        return supports_audio(record)
 
     @property
     def native_value(self) -> float | None:
@@ -198,13 +203,44 @@ class FlexDisplayScreenBrightness(FlexDisplayEntity, NumberEntity):
         await self.coordinator.async_request_refresh()
 
 
-def _is_note4(record: dict) -> bool:
-    return str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+class FlexDisplayFrontlightNumber(FlexDisplayEntity, NumberEntity):
+    """Control one admitted X4 Pro frontlight channel."""
 
+    _attr_entity_category = EntityCategory.CONFIG
+    _attr_mode = NumberMode.SLIDER
+    _attr_native_min_value = 0
+    _attr_native_max_value = 100
+    _attr_native_step = 1
+    _attr_native_unit_of_measurement = "%"
 
-def _is_android_receiver(record: dict) -> bool:
-    model = str(record.get("model") or "").upper()
-    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
+    def __init__(
+        self,
+        coordinator: FlexDisplayCoordinator,
+        device_id: str,
+        control: str,
+    ) -> None:
+        super().__init__(coordinator, device_id)
+        self.control = control
+        self._attr_translation_key = f"frontlight_{control}"
+        self._attr_unique_id = f"{device_id}_frontlight_{control}"
+
+    def _record_supported(self, record: dict) -> bool:
+        return supports_frontlight(record, self.control)
+
+    @property
+    def native_value(self) -> float | None:
+        value = self.record.get(
+            f"desired_frontlight_{self.control}",
+            self.record.get(f"frontlight_{self.control}"),
+        )
+        return float(value) if value is not None else None
+
+    async def async_set_native_value(self, value: float) -> None:
+        await self.coordinator.client.display_settings(
+            self.device_id,
+            {f"frontlight_{self.control}": round(value)},
+        )
+        await self.coordinator.async_request_refresh()
 
 
 def _entities_for_device(
@@ -234,10 +270,19 @@ def _entities_for_device(
             and management_supports(record, "rendering_profile")
         )
     ]
-    if is_note4(record) or _is_android_receiver(record):
+    if supports_audio(record):
         entities.append(FlexDisplayVoiceVolume(coordinator, device_id))
-    if _is_android_receiver(record):
+    if is_android_receiver(record):
         entities.append(FlexDisplayScreenBrightness(coordinator, device_id))
+    for control in ("brightness", "warmth"):
+        if supports_frontlight(record, control):
+            entities.append(
+                FlexDisplayFrontlightNumber(
+                    coordinator,
+                    device_id,
+                    control,
+                )
+            )
     return tuple(entities)
 
 

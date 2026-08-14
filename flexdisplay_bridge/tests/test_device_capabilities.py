@@ -17,6 +17,7 @@ from flexdisplay_bridge.device_capabilities import (
         ("X3", "x3", "xteink", (528, 792)),
         ("XTEINK_X3", "x3", "xteink", (528, 792)),
         ("xteink-x4", "x4", "xteink", (480, 800)),
+        ("X4_PRO", "x4_pro", "xteink", (480, 800)),
         ("N4", "note4", "note4", (400, 300)),
         ("ZECTRIX_NOTE4", "note4", "note4", (400, 300)),
         ("Echo Spot", "rook", "android_app", (480, 480)),
@@ -52,6 +53,114 @@ def test_only_x3_and_x4_are_eligible_for_xteink_ota() -> None:
         assert descriptor.firmware.provider == "xteink"
         assert descriptor.firmware.manageable is True
         assert "install" in descriptor.actions
+
+
+def test_x4_pro_identity_does_not_fall_back_to_legacy_x4_firmware() -> None:
+    descriptor = resolve_device_capabilities("X4_PRO")
+
+    assert descriptor.family == "xteink_x4_pro"
+    assert descriptor.model_key == "x4_pro"
+    assert descriptor.firmware.provider == "xteink"
+    assert descriptor.firmware.artifact_family == "none"
+    assert descriptor.firmware.manageable is False
+    assert descriptor.supports_xteink_ota is False
+    assert descriptor.management.actions == ()
+    assert descriptor.hardware.management_profile == "read_only"
+    assert descriptor.inputs.touch is None
+    assert descriptor.frontlight.available is None
+
+    # Hardware variants belong in dedicated identity headers. A suffixed model
+    # must not be normalized back to either X4 or X4 Pro.
+    suffixed = resolve_device_capabilities("X4_PRO_P4")
+    assert suffixed.model_key == "unknown"
+    assert suffixed.firmware.provider == "none"
+
+
+def test_unverified_x4_pro_p4_report_stays_read_only_with_s3_claims() -> None:
+    descriptor = resolve_device_capabilities(
+        "X4_PRO",
+        board_id="xteink_x4_pro",
+        hardware_revision="p4",
+        mcu_family="esp32-p4",
+        flash_size_bytes=16 * 1024 * 1024,
+        capabilities=(
+            "touch,capacitive-home,side-buttons,frontlight,"
+            "frontlight-brightness,frontlight-warmth"
+        ),
+    )
+
+    assert descriptor.hardware.reported_identity_complete is False
+    assert descriptor.hardware.management_profile == "read_only"
+    assert descriptor.management.actions == ()
+    assert descriptor.inputs.event_types == ()
+    assert descriptor.frontlight.available is None
+    assert descriptor.supports_xteink_ota is False
+
+
+def test_x4_pro_s3_surfaces_reported_inputs_and_frontlight_without_ota() -> None:
+    descriptor = resolve_device_capabilities(
+        "X4_PRO",
+        board_id="xteink_x4_pro",
+        hardware_revision="s3",
+        mcu_family="esp32-s3",
+        flash_size_bytes=16 * 1024 * 1024,
+        psram_size_bytes=8 * 1024 * 1024,
+        capabilities=(
+            "touch,capacitive-home,side-buttons,frontlight,"
+            "frontlight-brightness,frontlight-warmth,sdmmc"
+        ),
+    )
+
+    assert descriptor.hardware.management_profile == "s3"
+    assert descriptor.inputs.touch is True
+    assert descriptor.inputs.capacitive_buttons == ("home",)
+    assert descriptor.inputs.physical_buttons == (
+        "side_previous",
+        "side_next",
+        "power",
+    )
+    assert descriptor.inputs.event_types == (
+        "home",
+        "side_previous",
+        "side_next",
+        "power",
+    )
+    assert descriptor.management.supports_button_actions is False
+    assert descriptor.frontlight.available is True
+    assert descriptor.frontlight.supports_brightness is True
+    assert descriptor.frontlight.supports_warmth is True
+    assert descriptor.firmware.artifact_family == "x4pro_s3"
+    assert descriptor.firmware.manageable is False
+    assert descriptor.supports_xteink_ota is False
+    assert "install" not in descriptor.management.actions
+
+
+@pytest.mark.parametrize(
+    "psram_size_bytes",
+    [None, 0, 4 * 1024 * 1024, 16 * 1024 * 1024],
+)
+def test_x4_pro_s3_requires_exact_eight_mib_psram_for_capability_admission(
+    psram_size_bytes: int | None,
+) -> None:
+    descriptor = resolve_device_capabilities(
+        "X4_PRO",
+        board_id="xteink_x4_pro",
+        hardware_revision="s3",
+        mcu_family="esp32-s3",
+        flash_size_bytes=16 * 1024 * 1024,
+        psram_size_bytes=psram_size_bytes,
+        capabilities=(
+            "touch,capacitive-home,side-buttons,frontlight,"
+            "frontlight-brightness,frontlight-warmth,sdmmc"
+        ),
+    )
+
+    assert descriptor.hardware.management_profile == "read_only"
+    assert descriptor.management.actions == ()
+    assert descriptor.inputs.event_types == ()
+    assert descriptor.frontlight.available is None
+    assert descriptor.firmware.artifact_family == "none"
+    assert descriptor.supports_xteink_ota is False
 
 
 def test_note4_uses_its_own_firmware_provider() -> None:
@@ -217,6 +326,7 @@ def test_descriptor_serializes_to_json_compatible_management_contract() -> None:
     assert "install" not in payload["management"]["actions"]
     assert payload["firmware"] == {
         "provider": "android_app",
+        "artifact_family": "android_app",
         "manageable": False,
         "supports_xteink_ota": False,
     }

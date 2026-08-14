@@ -1020,6 +1020,7 @@
           <div class="segment" aria-label="Device model">
             <button data-model="X3">X3</button>
             <button data-model="X4" class="active">X4</button>
+            <button data-model="X4_PRO">X4 Pro</button>
             <button data-model="N4">N4</button>
             <button data-model="ROOK">Spot</button>
             <button data-model="CHECKERS">Show 5</button>
@@ -1550,7 +1551,7 @@
           <div class="task-card-title"><h3>Send album</h3><span>Choose one display</span></div>
           <label><span class="field-title">Photo Frame device<button type="button" class="help-tip" data-tooltip="Assigns this album as the device's Photo Frame source and queues a refresh. If the display is asleep, it will update after its next wake.">Help</button></span><select id="photoDevice"></select></label>
           <button id="assignPhotoAlbum">Assign album and refresh</button>
-          <label><span class="field-title">Preview model<button type="button" class="help-tip" data-tooltip="Changes only the Studio previews so you can check cropping and proportions for each display.">Help</button></span><select id="photoModel"><option value="X3">X3 · 528 × 792</option><option value="X4">X4 · 480 × 800</option><option value="ROOK">Spot · 480 × 480</option><option value="CHECKERS">Show 5 · 960 × 480</option></select></label>
+          <label><span class="field-title">Preview model<button type="button" class="help-tip" data-tooltip="Changes only the Studio previews so you can check cropping and proportions for each display.">Help</button></span><select id="photoModel"><option value="X3">X3 · 528 × 792</option><option value="X4">X4 · 480 × 800</option><option value="X4_PRO">X4 Pro · 480 × 800</option><option value="ROOK">Spot · 480 × 480</option><option value="CHECKERS">Show 5 · 960 × 480</option></select></label>
         </section>
       </div>
       <div id="photoGallery" class="library-gallery"></div>
@@ -1861,6 +1862,7 @@
             <select id="loadingModel">
               <option value="X3">X3 · 528 × 792</option>
               <option value="X4">X4 · 480 × 800</option>
+              <option value="X4_PRO">X4 Pro · 480 × 800</option>
               <option value="ROOK">Spot · 480 × 480</option>
               <option value="CHECKERS">Show 5 · 960 × 480</option>
             </select>
@@ -2510,6 +2512,7 @@
       const family = deviceFamily(device);
       return ({
         xteink_eink: "XTEINK e-ink",
+        xteink_x4_pro: "XTEINK X4 Pro",
         note4_eink: "Note4 e-ink",
         android_receiver: "Android receiver",
         generic_embedded: "Generic embedded",
@@ -2521,7 +2524,27 @@
       return String(device?.firmware_provider || deviceCapabilityDescriptor(device)?.firmware?.provider || "");
     }
 
+    function normalizedDeviceModel(device) {
+      return String(deviceCapabilityDescriptor(device)?.model_key || device?.model || "")
+        .toUpperCase().replace(/[^A-Z0-9]+/g, "");
+    }
+
+    function deviceIsX4Pro(device) {
+      return normalizedDeviceModel(device) === "X4PRO";
+    }
+
+    function studioModelForDevice(device) {
+      const model = normalizedDeviceModel(device);
+      if (model === "X4PRO") return "X4_PRO";
+      if (model.includes("CHECKERS") || model.includes("ECHOSHOW5")) return "CHECKERS";
+      if (model.includes("ROOK") || model.includes("ECHOSPOT")) return "ROOK";
+      if (model.includes("NOTE4") || model === "N4") return "N4";
+      if (model.includes("X4")) return "X4";
+      return "X3";
+    }
+
     function deviceSupportsXteinkOta(device) {
+      if (deviceIsX4Pro(device)) return false;
       const descriptor = deviceCapabilityDescriptor(device);
       const provider = deviceFirmwareProvider(device);
       const supports = descriptor?.firmware?.supports_xteink_ota;
@@ -2532,6 +2555,11 @@
 
     function deviceSupportsManagement(device, name, legacyFallback = true) {
       return deviceCapabilityFlag(device, "management", name, legacyFallback);
+    }
+
+    function deviceSupportsButtonActions(device) {
+      if (deviceIsX4Pro(device)) return false;
+      return deviceSupportsManagement(device, "supports_button_actions", true);
     }
 
     function deviceSupportsAction(device, action, legacyFallback = true) {
@@ -2567,6 +2595,7 @@
     }
 
     function deviceFirmwareOwnership(device) {
+      if (deviceIsX4Pro(device)) return "X4 Pro external firmware · install blocked";
       const provider = deviceFirmwareProvider(device);
       if (!provider) return "Legacy X3/X4 firmware";
       return ({
@@ -4610,7 +4639,7 @@
           ? "This device currently inherits the fleet default."
           : "This device has its own fetch-screen design.";
       const device = state.devices.find((item) => item.device_id === target);
-      if (device) $("#loadingModel").value = String(device.model || "").toUpperCase().includes("X4") ? "X4" : "X3";
+      if (device) $("#loadingModel").value = studioModelForDevice(device);
       scheduleLoadingPreview();
     }
 
@@ -4703,6 +4732,7 @@
         const previous = select.value;
         select.innerHTML = id === "deviceSelect" ? '<option value="">Sample device</option>' : "";
         state.devices.forEach((device) => {
+          if (id === "buttonActionDevice" && !deviceSupportsButtonActions(device)) return;
           const option = document.createElement("option");
           option.value = device.device_id;
           option.textContent = `${device.name || device.device_id} · ${device.model || "X3"}`;
@@ -6216,8 +6246,7 @@
       const selected = state.devices.find((device) => device.device_id === event.target.value);
       renderHeaderStatus();
       if (selected?.model) {
-        const model = selected.model.toUpperCase();
-        setModel(model.includes("CHECKERS") || model.includes("ECHO_SHOW_5") || model.includes("ECHOSHOW5") ? "CHECKERS" : model.includes("ROOK") || model.includes("ECHO_SPOT") ? "ROOK" : model.includes("NOTE4") || model === "N4" ? "N4" : model.includes("X4") ? "X4" : "X3");
+        setModel(studioModelForDevice(selected));
       }
       else schedulePreview();
     });

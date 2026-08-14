@@ -11,7 +11,12 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import is_note4, management_supports, reports_usb_power
+from .device_capabilities import (
+    management_supports,
+    reports_usb_power,
+    supports_audio,
+    supports_frontlight,
+)
 from .entity import FlexDisplayEntity, setup_dynamic_entities
 
 
@@ -113,7 +118,7 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         self._attr_unique_id = f"{device_id}_voice_mute"
 
     def _record_supported(self, record: dict) -> bool:
-        return is_note4(record)
+        return supports_audio(record)
 
     @property
     def is_on(self) -> bool:
@@ -134,13 +139,42 @@ class FlexDisplayVoiceMute(FlexDisplayEntity, SwitchEntity):
         await self._set(False)
 
 
-def _is_note4(record: dict) -> bool:
-    return str(record.get("model") or "").upper() in {"N4", "NOTE4", "ZECTRIX_NOTE4"}
+class FlexDisplayFrontlightSwitch(FlexDisplayEntity, SwitchEntity):
+    """Control the admitted X4 Pro frontlight power state."""
 
+    _attr_translation_key = "frontlight"
+    _attr_entity_category = EntityCategory.CONFIG
 
-def _is_android_receiver(record: dict) -> bool:
-    model = str(record.get("model") or "").upper()
-    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_frontlight"
+
+    def _record_supported(self, record: dict) -> bool:
+        return supports_frontlight(record, "on")
+
+    @property
+    def is_on(self) -> bool:
+        return bool(
+            self.record.get(
+                "desired_frontlight_on",
+                self.record.get("frontlight_on"),
+            )
+        )
+
+    async def _set(self, enabled: bool) -> None:
+        await self.coordinator.client.display_settings(
+            self.device_id,
+            {"frontlight_on": enabled},
+        )
+        await self.coordinator.async_request_refresh()
+
+    async def async_turn_on(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(True)
+
+    async def async_turn_off(self, **kwargs: object) -> None:
+        del kwargs
+        await self._set(False)
 
 
 def _entities_for_device(
@@ -166,8 +200,10 @@ def _entities_for_device(
             and reports_usb_power(record)
         )
     ]
-    if is_note4(record) or _is_android_receiver(record):
+    if supports_audio(record):
         entities.append(FlexDisplayVoiceMute(coordinator, device_id))
+    if supports_frontlight(record, "on"):
+        entities.append(FlexDisplayFrontlightSwitch(coordinator, device_id))
     return tuple(entities)
 
 

@@ -28,6 +28,14 @@ XTEINK_ACTIONS = (
     "restart",
     "install",
 )
+X4_PRO_ACTIONS = (
+    "refresh",
+    "full-refresh",
+    "next",
+    "previous",
+    "overview",
+    "clear",
+)
 ANDROID_ACTIONS = tuple(action for action in XTEINK_ACTIONS if action != "install") + (
     "restart-app",
     "test-chime",
@@ -51,6 +59,7 @@ RENDERED_MODES = ("home_assistant", "trmnl", "photo_frame")
 
 _X3_ALIASES = frozenset({"X3", "XTEINKX3"})
 _X4_ALIASES = frozenset({"X4", "XTEINKX4"})
+_X4_PRO_ALIASES = frozenset({"X4PRO", "XTEINKX4PRO"})
 _NOTE4_ALIASES = frozenset({"N4", "NOTE4", "ZECTRIXNOTE4"})
 _ROOK_ALIASES = frozenset(
     {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"}
@@ -89,7 +98,43 @@ class DisplayCapabilities:
     color: bool
     shape: str
     image_format: str
-    touch: bool = False
+    touch: bool | None = False
+
+
+@dataclass(frozen=True, slots=True)
+class HardwareCapabilities:
+    """Reported hardware identity kept separate from the product model."""
+
+    board_id: str = ""
+    hardware_revision: str = ""
+    mcu_family: str = ""
+    flash_size_bytes: int | None = None
+    psram_size_bytes: int | None = None
+    reported_identity_complete: bool = False
+    management_profile: str = "read_only"
+
+
+@dataclass(frozen=True, slots=True)
+class InputCapabilities:
+    """Input topology advertised by an admitted device revision."""
+
+    touch: bool | None = False
+    touch_controller: str = ""
+    physical_buttons: tuple[str, ...] = ()
+    capacitive_buttons: tuple[str, ...] = ()
+    event_types: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class FrontlightCapabilities:
+    """Independent frontlight controls; availability must be explicit."""
+
+    available: bool | None = False
+    supports_on: bool = False
+    supports_brightness: bool = False
+    supports_warmth: bool = False
+    minimum: int = 0
+    maximum: int = 100
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,6 +164,7 @@ class FirmwareCapabilities:
     """Firmware ownership; XTEINK OTA must be explicitly trusted here."""
 
     provider: str
+    artifact_family: str
     manageable: bool
     supports_xteink_ota: bool
 
@@ -141,6 +187,7 @@ class ManagementCapabilities:
     supports_interactions: bool
     supports_notifications: bool
     supports_audio: bool
+    supports_button_actions: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,6 +199,9 @@ class DeviceCapabilityDescriptor:
     label: str
     known_model: bool
     display: DisplayCapabilities
+    hardware: HardwareCapabilities
+    inputs: InputCapabilities
+    frontlight: FrontlightCapabilities
     power: PowerCapabilities
     delivery: DeliveryCapabilities
     firmware: FirmwareCapabilities
@@ -200,6 +250,7 @@ def _management(
     interactions: bool = False,
     notifications: bool = False,
     audio: bool = False,
+    button_actions: bool = True,
 ) -> ManagementCapabilities:
     return ManagementCapabilities(
         actions=actions,
@@ -216,7 +267,18 @@ def _management(
         supports_interactions=interactions,
         supports_notifications=notifications,
         supports_audio=audio,
+        supports_button_actions=button_actions,
     )
+
+
+_NO_HARDWARE = HardwareCapabilities()
+_NO_INPUTS = InputCapabilities()
+_NO_FRONTLIGHT = FrontlightCapabilities()
+_LEGACY_X_INPUTS = InputCapabilities(
+    touch=False,
+    physical_buttons=("back", "confirm", "left", "right", "up", "down", "power"),
+    event_types=("back", "confirm", "left", "right", "up", "down", "power"),
+)
 
 
 _X3 = DeviceCapabilityDescriptor(
@@ -225,9 +287,12 @@ _X3 = DeviceCapabilityDescriptor(
     label="XTEINK X3",
     known_model=True,
     display=DisplayCapabilities(528, 792, "eink", False, "rectangular", "bmp"),
+    hardware=replace(_NO_HARDWARE, board_id="xteink_x3", management_profile="legacy"),
+    inputs=_LEGACY_X_INPUTS,
+    frontlight=_NO_FRONTLIGHT,
     power=PowerCapabilities("battery_managed", True, True, True, True),
     delivery=DeliveryCapabilities("poll", False, False, False, True),
-    firmware=FirmwareCapabilities("xteink", True, True),
+    firmware=FirmwareCapabilities("xteink", "x_series", True, True),
     management=_management(
         actions=XTEINK_ACTIONS,
         modes=XTEINK_MODES,
@@ -245,6 +310,42 @@ _X4 = replace(
     model_key="x4",
     label="XTEINK X4",
     display=DisplayCapabilities(480, 800, "eink", False, "rectangular", "png"),
+    hardware=replace(_NO_HARDWARE, board_id="xteink_x4", management_profile="legacy"),
+)
+
+_X4_PRO_READ_ONLY_MANAGEMENT = ManagementCapabilities(
+    actions=(),
+    modes=(),
+    supports_provisioning=False,
+    supports_dashboard_profiles=False,
+    supports_fleet_policy=False,
+    supports_battery_policy=False,
+    supports_sleep_policy=False,
+    supports_rendering_profile=False,
+    supports_opendisplay_policy=False,
+    supports_screen_history=True,
+    supports_page_selection=False,
+    supports_interactions=False,
+    supports_notifications=False,
+    supports_audio=False,
+    supports_button_actions=False,
+)
+
+_X4_PRO = DeviceCapabilityDescriptor(
+    family="xteink_x4_pro",
+    model_key="x4_pro",
+    label="XTEINK X4 Pro",
+    known_model=True,
+    # This is a presentation profile only. Device ingestion and firmware
+    # compatibility remain revision-gated below.
+    display=DisplayCapabilities(480, 800, "eink", False, "rectangular", "png", None),
+    hardware=replace(_NO_HARDWARE, board_id="xteink_x4_pro"),
+    inputs=replace(_NO_INPUTS, touch=None),
+    frontlight=replace(_NO_FRONTLIGHT, available=None),
+    power=PowerCapabilities("unknown", False, False, False, False),
+    delivery=DeliveryCapabilities("poll", False, False, False, False),
+    firmware=FirmwareCapabilities("xteink", "none", False, False),
+    management=_X4_PRO_READ_ONLY_MANAGEMENT,
 )
 
 _NOTE4 = DeviceCapabilityDescriptor(
@@ -253,9 +354,12 @@ _NOTE4 = DeviceCapabilityDescriptor(
     label="Zectrix Note 4",
     known_model=True,
     display=DisplayCapabilities(400, 300, "eink", False, "rectangular", "bmp"),
+    hardware=replace(_NO_HARDWARE, board_id="zectrix_note4", management_profile="legacy"),
+    inputs=_LEGACY_X_INPUTS,
+    frontlight=_NO_FRONTLIGHT,
     power=PowerCapabilities("battery_managed", True, True, True, True),
     delivery=DeliveryCapabilities("poll", False, False, False, False),
-    firmware=FirmwareCapabilities("note4", True, False),
+    firmware=FirmwareCapabilities("note4", "note4", True, False),
     management=_management(
         actions=XTEINK_ACTIONS,
         modes=RENDERED_MODES,
@@ -281,6 +385,7 @@ _ANDROID_MANAGEMENT = _management(
     interactions=True,
     notifications=True,
     audio=True,
+    button_actions=False,
 )
 
 _ROOK = DeviceCapabilityDescriptor(
@@ -289,9 +394,12 @@ _ROOK = DeviceCapabilityDescriptor(
     label="Echo Spot (2017)",
     known_model=True,
     display=DisplayCapabilities(480, 480, "lcd", True, "round", "png", True),
+    hardware=replace(_NO_HARDWARE, management_profile="android"),
+    inputs=replace(_NO_INPUTS, touch=True),
+    frontlight=_NO_FRONTLIGHT,
     power=PowerCapabilities("always_on_color", False, False, False, False),
     delivery=DeliveryCapabilities("long_poll", True, True, False, False),
-    firmware=FirmwareCapabilities("android_app", False, False),
+    firmware=FirmwareCapabilities("android_app", "android_app", False, False),
     management=_ANDROID_MANAGEMENT,
 )
 
@@ -308,9 +416,12 @@ _GENERIC = DeviceCapabilityDescriptor(
     label="Generic embedded display",
     known_model=False,
     display=DisplayCapabilities(None, None, "unknown", False, "rectangular", "png"),
+    hardware=_NO_HARDWARE,
+    inputs=_NO_INPUTS,
+    frontlight=_NO_FRONTLIGHT,
     power=PowerCapabilities("battery_managed", True, False, False, True),
     delivery=DeliveryCapabilities("poll", False, False, False, False),
-    firmware=FirmwareCapabilities("none", False, False),
+    firmware=FirmwareCapabilities("none", "none", False, False),
     management=_management(
         actions=GENERIC_ACTIONS,
         modes=("home_assistant",),
@@ -320,6 +431,7 @@ _GENERIC = DeviceCapabilityDescriptor(
         rendering_profile=True,
         opendisplay_policy=False,
         page_selection=False,
+        button_actions=False,
     ),
 )
 
@@ -329,9 +441,12 @@ _UNKNOWN = DeviceCapabilityDescriptor(
     label="Unknown display",
     known_model=False,
     display=DisplayCapabilities(None, None, "unknown", False, "unknown", "png"),
+    hardware=_NO_HARDWARE,
+    inputs=replace(_NO_INPUTS, touch=None),
+    frontlight=replace(_NO_FRONTLIGHT, available=None),
     power=PowerCapabilities("unknown", False, False, False, False),
     delivery=DeliveryCapabilities("poll", False, False, False, False),
-    firmware=FirmwareCapabilities("none", False, False),
+    firmware=FirmwareCapabilities("none", "none", False, False),
     management=ManagementCapabilities(
         actions=(),
         modes=(),
@@ -347,6 +462,7 @@ _UNKNOWN = DeviceCapabilityDescriptor(
         supports_interactions=False,
         supports_notifications=False,
         supports_audio=False,
+        supports_button_actions=False,
     ),
 )
 
@@ -354,7 +470,16 @@ _UNKNOWN = DeviceCapabilityDescriptor(
 DEVICE_CAPABILITY_REGISTRY: Mapping[str, DeviceCapabilityDescriptor] = MappingProxyType(
     {
         descriptor.model_key: descriptor
-        for descriptor in (_X3, _X4, _NOTE4, _ROOK, _CHECKERS, _GENERIC, _UNKNOWN)
+        for descriptor in (
+            _X3,
+            _X4,
+            _X4_PRO,
+            _NOTE4,
+            _ROOK,
+            _CHECKERS,
+            _GENERIC,
+            _UNKNOWN,
+        )
     }
 )
 
@@ -362,6 +487,7 @@ _MODEL_ALIASES: Mapping[str, str] = MappingProxyType(
     {
         **{alias: "x3" for alias in _X3_ALIASES},
         **{alias: "x4" for alias in _X4_ALIASES},
+        **{alias: "x4_pro" for alias in _X4_PRO_ALIASES},
         **{alias: "note4" for alias in _NOTE4_ALIASES},
         **{alias: "rook" for alias in _ROOK_ALIASES},
         **{alias: "checkers" for alias in _CHECKERS_ALIASES},
@@ -381,6 +507,11 @@ def resolve_device_capabilities(
     capabilities: Iterable[str] | str = (),
     width: int | None = None,
     height: int | None = None,
+    board_id: str = "",
+    hardware_revision: str = "",
+    mcu_family: str = "",
+    flash_size_bytes: int | None = None,
+    psram_size_bytes: int | None = None,
 ) -> DeviceCapabilityDescriptor:
     """Resolve trusted model identity plus safe reported display refinements.
 
@@ -398,6 +529,17 @@ def resolve_device_capabilities(
         descriptor = _generic_descriptor(normalized_model, reported)
     else:
         descriptor = _UNKNOWN
+
+    if descriptor.model_key == "x4_pro":
+        descriptor = _x4_pro_descriptor(
+            descriptor,
+            reported,
+            board_id=board_id,
+            hardware_revision=hardware_revision,
+            mcu_family=mcu_family,
+            flash_size_bytes=flash_size_bytes,
+            psram_size_bytes=psram_size_bytes,
+        )
 
     selected_width = _dimension(width, descriptor.display.width, "width")
     selected_height = _dimension(height, descriptor.display.height, "height")
@@ -464,6 +606,7 @@ def _generic_descriptor(
             color=color,
             touch=touch,
         ),
+        inputs=replace(_GENERIC.inputs, touch=touch),
         power=PowerCapabilities(
             "always_on_color" if always_on else "battery_managed",
             not always_on,
@@ -480,6 +623,105 @@ def _generic_descriptor(
         ),
         management=management,
     )
+
+
+def _x4_pro_descriptor(
+    descriptor: DeviceCapabilityDescriptor,
+    capabilities: frozenset[str],
+    *,
+    board_id: str,
+    hardware_revision: str,
+    mcu_family: str,
+    flash_size_bytes: int | None,
+    psram_size_bytes: int | None,
+) -> DeviceCapabilityDescriptor:
+    """Admit only the exact revision-scoped X4 Pro management profile.
+
+    The confirmed hardware is S3. The upstream management contract is scoped
+    to an S3 build that reports all of its identity and capabilities explicitly;
+    neither product naming nor panel dimensions can promote another revision
+    into that profile.
+    """
+
+    selected_board = _identity_value(board_id)
+    selected_revision = _identity_value(hardware_revision)
+    selected_mcu = _identity_value(mcu_family)
+    identity_complete = bool(
+        selected_board
+        and selected_revision
+        and selected_mcu
+        and flash_size_bytes is not None
+        and psram_size_bytes is not None
+    )
+    s3_profile = bool(
+        selected_board == "xteink-x4-pro"
+        and selected_revision == "s3"
+        and selected_mcu == "esp32-s3"
+        and flash_size_bytes == 16 * 1024 * 1024
+        and psram_size_bytes == 8 * 1024 * 1024
+    )
+    touch = s3_profile and "touch" in capabilities
+    capacitive_home = s3_profile and "capacitive-home" in capabilities
+    side_buttons = s3_profile and "side-buttons" in capabilities
+    frontlight = s3_profile and "frontlight" in capabilities
+    physical_buttons = (
+        ("side_previous", "side_next", "power") if side_buttons else ()
+    )
+    capacitive_buttons = ("home",) if capacitive_home else ()
+    event_types = (*capacitive_buttons, *physical_buttons)
+    management = (
+        replace(
+            _X4_PRO_READ_ONLY_MANAGEMENT,
+            actions=X4_PRO_ACTIONS,
+            modes=RENDERED_MODES,
+            supports_provisioning=True,
+            supports_dashboard_profiles=True,
+            supports_fleet_policy=True,
+            supports_rendering_profile=True,
+            supports_page_selection=True,
+            supports_interactions=touch,
+        )
+        if s3_profile
+        else _X4_PRO_READ_ONLY_MANAGEMENT
+    )
+    return replace(
+        descriptor,
+        display=replace(descriptor.display, touch=touch if s3_profile else None),
+        hardware=HardwareCapabilities(
+            board_id=board_id.strip(),
+            hardware_revision=hardware_revision.strip(),
+            mcu_family=mcu_family.strip(),
+            flash_size_bytes=flash_size_bytes,
+            psram_size_bytes=psram_size_bytes,
+            reported_identity_complete=identity_complete,
+            management_profile="s3" if s3_profile else "read_only",
+        ),
+        inputs=InputCapabilities(
+            touch=touch if s3_profile else None,
+            touch_controller="gt911" if touch else "",
+            physical_buttons=physical_buttons,
+            capacitive_buttons=capacitive_buttons,
+            event_types=event_types,
+        ),
+        frontlight=FrontlightCapabilities(
+            available=frontlight if s3_profile else None,
+            supports_on=frontlight,
+            supports_brightness=(
+                frontlight and "frontlight-brightness" in capabilities
+            ),
+            supports_warmth=frontlight and "frontlight-warmth" in capabilities,
+        ),
+        firmware=(
+            replace(descriptor.firmware, artifact_family="x4pro_s3")
+            if s3_profile
+            else descriptor.firmware
+        ),
+        management=management,
+    )
+
+
+def _identity_value(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", str(value or "").strip().lower()).strip("-")
 
 
 def _normalize_capabilities(capabilities: Iterable[str] | str) -> frozenset[str]:
@@ -515,6 +757,9 @@ __all__ = [
     "DeviceCapabilityDescriptor",
     "DisplayCapabilities",
     "FirmwareCapabilities",
+    "FrontlightCapabilities",
+    "HardwareCapabilities",
+    "InputCapabilities",
     "ManagementCapabilities",
     "PowerCapabilities",
     "normalize_model",

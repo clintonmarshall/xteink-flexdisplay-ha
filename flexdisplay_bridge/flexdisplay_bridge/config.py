@@ -20,6 +20,23 @@ def _choice(value: Any, allowed: set[str], default: str) -> str:
     return selected if selected in allowed else default
 
 
+def _string_tuple(value: Any) -> tuple[str, ...]:
+    selected = value.split(",") if isinstance(value, str) else value or ()
+    return tuple(str(item).strip() for item in selected if str(item).strip())
+
+
+def _integer_tuple(value: Any) -> tuple[int, ...]:
+    result: list[int] = []
+    for item in _string_tuple(value):
+        try:
+            selected = int(item)
+        except ValueError:
+            continue
+        if selected > 0:
+            result.append(selected)
+    return tuple(result)
+
+
 @dataclass(frozen=True)
 class EntityConfig:
     entity_id: str
@@ -172,6 +189,14 @@ class FirmwareConfig:
     maintenance_end: str = "05:00"
     maintenance_timezone: str = "Australia/Melbourne"
     maintenance_usb_override: bool = True
+    artifact_family: str = ""
+    compatible_models: tuple[str, ...] = ()
+    compatible_board_ids: tuple[str, ...] = ()
+    compatible_hardware_revisions: tuple[str, ...] = ()
+    compatible_mcu_families: tuple[str, ...] = ()
+    compatible_flash_sizes: tuple[int, ...] = ()
+    compatible_psram_sizes: tuple[int, ...] = ()
+    requires_exact_hardware: bool = False
 
 
 @dataclass(frozen=True)
@@ -184,6 +209,14 @@ class BridgeConfig:
     flexhub: FlexHubConfig = FlexHubConfig()
     screen_history: ScreenHistoryConfig = ScreenHistoryConfig()
     firmware: FirmwareConfig = FirmwareConfig()
+    x4_pro_firmware: FirmwareConfig = FirmwareConfig(
+        artifact_family="x4pro_s3",
+        compatible_models=("x4_pro",),
+        canary_required=True,
+        require_usb_for_canary=True,
+        mirror_enabled=False,
+        requires_exact_hardware=True,
+    )
     note4_firmware: FirmwareConfig = FirmwareConfig(
         minimum_battery_percent=40,
         canary_required=False,
@@ -582,6 +615,83 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         ),
     )
 
+    x4_pro_firmware_raw = raw.get("x4_pro_firmware") or {}
+    x4_pro_firmware = FirmwareConfig(
+        version=os.getenv(
+            "FLEXDISPLAY_X4_PRO_FIRMWARE_VERSION",
+            str(x4_pro_firmware_raw.get("version") or ""),
+        ),
+        url=os.getenv(
+            "FLEXDISPLAY_X4_PRO_FIRMWARE_URL",
+            str(x4_pro_firmware_raw.get("url") or ""),
+        ),
+        sha256=os.getenv(
+            "FLEXDISPLAY_X4_PRO_FIRMWARE_SHA256",
+            str(x4_pro_firmware_raw.get("sha256") or ""),
+        ).lower(),
+        size=max(
+            0,
+            int(
+                os.getenv(
+                    "FLEXDISPLAY_X4_PRO_FIRMWARE_SIZE",
+                    x4_pro_firmware_raw.get("size", 0),
+                )
+            ),
+        ),
+        minimum_battery_percent=max(
+            20,
+            min(
+                100,
+                int(x4_pro_firmware_raw.get("minimum_battery_percent", 40)),
+            ),
+        ),
+        canary_required=True,
+        require_usb_for_canary=True,
+        max_parallel=1,
+        retry_limit=0,
+        retry_backoff_seconds=300,
+        mirror_enabled=False,
+        maintenance_window_enabled=False,
+        artifact_family="x4pro_s3",
+        compatible_models=_string_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_MODELS",
+                x4_pro_firmware_raw.get("compatible_models", ("x4_pro",)),
+            )
+        ),
+        compatible_board_ids=_string_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_BOARD_IDS",
+                x4_pro_firmware_raw.get("compatible_board_ids", ()),
+            )
+        ),
+        compatible_hardware_revisions=_string_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_HARDWARE_REVISIONS",
+                x4_pro_firmware_raw.get("compatible_hardware_revisions", ()),
+            )
+        ),
+        compatible_mcu_families=_string_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_MCU_FAMILIES",
+                x4_pro_firmware_raw.get("compatible_mcu_families", ()),
+            )
+        ),
+        compatible_flash_sizes=_integer_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_FLASH_SIZES",
+                x4_pro_firmware_raw.get("compatible_flash_sizes", ()),
+            )
+        ),
+        compatible_psram_sizes=_integer_tuple(
+            os.getenv(
+                "FLEXDISPLAY_X4_PRO_COMPATIBLE_PSRAM_SIZES",
+                x4_pro_firmware_raw.get("compatible_psram_sizes", ()),
+            )
+        ),
+        requires_exact_hardware=True,
+    )
+
     note4_firmware_raw = raw.get("note4_firmware") or {}
     note4_firmware = FirmwareConfig(
         version=os.getenv(
@@ -706,6 +816,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         flexhub=flexhub,
         screen_history=screen_history,
         firmware=firmware,
+        x4_pro_firmware=x4_pro_firmware,
         note4_firmware=note4_firmware,
         provisioning=provisioning,
         default_entities=defaults,

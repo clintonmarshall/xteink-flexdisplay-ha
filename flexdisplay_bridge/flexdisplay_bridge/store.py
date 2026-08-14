@@ -158,7 +158,13 @@ class DeviceStore:
         temporary.write_text(json.dumps(self._state, indent=2, sort_keys=True), encoding="utf-8")
         temporary.replace(self.path)
 
-    def touch(self, device_id: str, telemetry: dict[str, Any]) -> dict[str, Any]:
+    def touch(
+        self,
+        device_id: str,
+        telemetry: dict[str, Any],
+        *,
+        clear_fields: set[str] | None = None,
+    ) -> dict[str, Any]:
         with self._lock:
             devices = self._state["devices"]
             record = devices.setdefault(
@@ -176,6 +182,8 @@ class DeviceStore:
             previous_model = str(record.get("model") or "")
             previous_model_reported = record.get("model_reported") is True
             now = utc_now()
+            for field in clear_fields or ():
+                record.pop(field, None)
             record.update({key: value for key, value in telemetry.items() if value is not None})
             record["last_seen"] = now
             if is_checkin:
@@ -1325,6 +1333,7 @@ class DeviceStore:
         target_version: str,
         *,
         firmware_provider: str,
+        artifact_family: str = "",
     ) -> dict[str, Any]:
         """Queue a model-specific OTA without changing the X3/X4 fleet rollout."""
         with self._lock:
@@ -1341,6 +1350,9 @@ class DeviceStore:
             record = self._state["devices"][device_id]
             record["firmware_update_role"] = "device"
             record["firmware_update_provider"] = str(firmware_provider or "")[:32]
+            record["firmware_update_artifact_family"] = str(
+                artifact_family or firmware_provider or ""
+            )[:64]
             record["firmware_update_target"] = target_version
             record["firmware_update_status"] = "queued"
             record["firmware_update_stage"] = "queued"

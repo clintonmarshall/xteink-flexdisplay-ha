@@ -22,8 +22,11 @@ from homeassistant.util.dt import parse_datetime
 from .coordinator import FlexDisplayCoordinator
 from .device_capabilities import (
     firmware_manageable,
-    is_note4,
+    input_event_types,
+    is_android_receiver,
     reports_battery,
+    supports_audio,
+    supports_frontlight,
     supports_xteink_ota,
 )
 from .entity import (
@@ -84,6 +87,28 @@ DESCRIPTIONS = (
         key="firmware",
         translation_key="firmware",
         value_fn=lambda record: record.get("firmware"),
+    ),
+    FlexDisplaySensorDescription(
+        key="board_id",
+        translation_key="board_id",
+        value_fn=lambda record: record.get("board_id"),
+    ),
+    FlexDisplaySensorDescription(
+        key="hardware_revision",
+        translation_key="hardware_revision",
+        value_fn=lambda record: record.get("hardware_revision"),
+    ),
+    FlexDisplaySensorDescription(
+        key="mcu_family",
+        translation_key="mcu_family",
+        value_fn=lambda record: record.get("mcu_family"),
+    ),
+    FlexDisplaySensorDescription(
+        key="flash_size_bytes",
+        translation_key="flash_size",
+        device_class=SensorDeviceClass.DATA_SIZE,
+        native_unit_of_measurement="B",
+        value_fn=lambda record: record.get("flash_size_bytes"),
     ),
     FlexDisplaySensorDescription(
         key="mode",
@@ -378,6 +403,24 @@ DESCRIPTIONS = (
             "desired_screen_brightness", record.get("screen_brightness")
         ),
     ),
+    FlexDisplaySensorDescription(
+        key="frontlight_brightness",
+        translation_key="frontlight_brightness",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda record: record.get(
+            "desired_frontlight_brightness",
+            record.get("frontlight_brightness"),
+        ),
+    ),
+    FlexDisplaySensorDescription(
+        key="frontlight_warmth",
+        translation_key="frontlight_warmth",
+        native_unit_of_measurement=PERCENTAGE,
+        value_fn=lambda record: record.get(
+            "desired_frontlight_warmth",
+            record.get("frontlight_warmth"),
+        ),
+    ),
 )
 
 VOICE_DESCRIPTIONS = (
@@ -416,6 +459,19 @@ def _device_sensors(
         "firmware_update_error_at",
         "firmware_install_blockers",
     }
+    hardware_keys = {
+        "board_id",
+        "hardware_revision",
+        "mcu_family",
+        "flash_size_bytes",
+    }
+    input_keys = {
+        "last_button",
+        "last_button_gesture",
+        "last_button_action_result",
+        "last_button_at",
+        "button_press_count",
+    }
     descriptions = [
         description
         for description in descriptions
@@ -429,10 +485,26 @@ def _device_sensors(
                 description.key == "firmware_rollout_status"
                 and not supports_xteink_ota(record)
             )
+            or (
+                description.key in hardware_keys
+                and record.get(description.key) in (None, "")
+            )
+            or (description.key in input_keys and not input_event_types(record))
+            or (
+                description.key == "screen_brightness"
+                and not is_android_receiver(record)
+            )
+            or (
+                description.key == "frontlight_brightness"
+                and not supports_frontlight(record, "brightness")
+            )
+            or (
+                description.key == "frontlight_warmth"
+                and not supports_frontlight(record, "warmth")
+            )
         )
     ]
-    model = str(record.get("model") or "").upper()
-    if is_note4(record) or model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}:
+    if supports_audio(record):
         descriptions.extend(VOICE_DESCRIPTIONS)
     return tuple(
         FlexDisplaySensor(coordinator, device_id, description)
@@ -470,13 +542,34 @@ class FlexDisplaySensor(FlexDisplayEntity, SensorEntity):
             return firmware_manageable(record)
         if key == "firmware_rollout_status":
             return supports_xteink_ota(record)
+        if key in {
+            "board_id",
+            "hardware_revision",
+            "mcu_family",
+            "flash_size_bytes",
+        }:
+            return record.get(key) not in (None, "")
+        if key in {
+            "last_button",
+            "last_button_gesture",
+            "last_button_action_result",
+            "last_button_at",
+            "button_press_count",
+        }:
+            return bool(input_event_types(record))
+        if key == "screen_brightness":
+            return is_android_receiver(record)
+        if key == "frontlight_brightness":
+            return supports_frontlight(record, "brightness")
+        if key == "frontlight_warmth":
+            return supports_frontlight(record, "warmth")
         if key.startswith("voice_") or key in {
             "last_voice_request",
             "last_voice_response",
             "last_voice_error",
             "last_voice_at",
         }:
-            return is_note4(record)
+            return supports_audio(record)
         return True
 
     @property

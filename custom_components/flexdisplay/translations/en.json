@@ -31,6 +31,18 @@
       "firmware": {
         "name": "Firmware"
       },
+      "board_id": {
+        "name": "Board ID"
+      },
+      "hardware_revision": {
+        "name": "Hardware revision"
+      },
+      "mcu_family": {
+        "name": "MCU family"
+      },
+      "flash_size": {
+        "name": "Flash size"
+      },
       "mode": {
         "name": "Mode"
       },
@@ -183,6 +195,12 @@
       },
       "screen_brightness": {
         "name": "Screen brightness"
+      },
+      "frontlight_brightness": {
+        "name": "Frontlight brightness"
+      },
+      "frontlight_warmth": {
+        "name": "Frontlight warmth"
       },
       "policy_sync_state": {
         "name": "Fleet policy status"
@@ -390,6 +408,12 @@
       },
       "screen_brightness": {
         "name": "Screen brightness"
+      },
+      "frontlight_brightness": {
+        "name": "Frontlight brightness"
+      },
+      "frontlight_warmth": {
+        "name": "Frontlight warmth"
       }
     },
     "switch": {
@@ -407,6 +431,9 @@
       },
       "voice_mute": {
         "name": "Mute speaker"
+      },
+      "frontlight": {
+        "name": "Frontlight"
       }
     },
     "time": {

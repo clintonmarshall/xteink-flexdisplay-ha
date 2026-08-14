@@ -8,7 +8,18 @@ MESHTASTIC_EVENT_TYPE = f"{DOMAIN}_meshtastic_message"
 SERVICE_CLEAR_MESHTASTIC_UNREAD = "clear_meshtastic_unread"
 SERVICE_SEND_MESHTASTIC_MESSAGE = "send_meshtastic_message"
 SERVICE_NOTIFY = "notify"
-BUTTON_EVENT_TYPES = ("back", "confirm", "left", "right", "up", "down", "power")
+BUTTON_EVENT_TYPES = (
+    "back",
+    "confirm",
+    "left",
+    "right",
+    "up",
+    "down",
+    "home",
+    "side_previous",
+    "side_next",
+    "power",
+)
 MESHTASTIC_EVENT_TYPES = ("message_received", "message_sent", "message_failed")
 PLATFORMS = [
     "sensor",

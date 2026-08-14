@@ -123,7 +123,18 @@ SUPPORTED_COMMANDS = {
     "brightness-down",
     "install",
 }
-SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
+SUPPORTED_BUTTONS = {
+    "back",
+    "confirm",
+    "left",
+    "right",
+    "up",
+    "down",
+    "home",
+    "side_previous",
+    "side_next",
+    "power",
+}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
 FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
     "battery_saver": {
@@ -402,6 +413,13 @@ def _device_capabilities(record: dict[str, Any] | str):
     if isinstance(record, str):
         return resolve_device_capabilities(record)
     model = str(record.get("model") or "")
+    def reported_size(name: str) -> int | None:
+        value = record.get(name)
+        try:
+            return int(value) if value is not None else None
+        except (TypeError, ValueError):
+            return None
+
     descriptor = resolve_device_capabilities(
         model,
         capabilities=record.get("transfer_capabilities") or (),
@@ -415,6 +433,11 @@ def _device_capabilities(record: dict[str, Any] | str):
             if record.get("height") is not None
             else None
         ),
+        board_id=str(record.get("board_id") or ""),
+        hardware_revision=str(record.get("hardware_revision") or ""),
+        mcu_family=str(record.get("mcu_family") or ""),
+        flash_size_bytes=reported_size("flash_size_bytes"),
+        psram_size_bytes=reported_size("psram_size_bytes"),
     )
     model_reported = record.get("model_reported")
     if descriptor.supports_xteink_ota and model_reported is not True:
@@ -476,6 +499,21 @@ def _device_identity(record: dict[str, Any]) -> dict[str, Any]:
         "family": descriptor.family,
         "label": descriptor.label,
         "firmware_owner": descriptor.firmware.provider,
+        "firmware_artifact_family": descriptor.firmware.artifact_family,
+        "reported_firmware_artifact": str(
+            record.get("reported_firmware_artifact") or ""
+        ),
+        "hardware": {
+            "board_id": descriptor.hardware.board_id,
+            "hardware_revision": descriptor.hardware.hardware_revision,
+            "mcu_family": descriptor.hardware.mcu_family,
+            "flash_size_bytes": descriptor.hardware.flash_size_bytes,
+            "psram_size_bytes": descriptor.hardware.psram_size_bytes,
+            "reported_identity_complete": (
+                descriptor.hardware.reported_identity_complete
+            ),
+            "management_profile": descriptor.hardware.management_profile,
+        },
         "id_prefix_model": prefix_model,
         "conflict": conflict,
         "conflict_detail": (
@@ -659,7 +697,12 @@ def _display_runtime(record: dict[str, Any]) -> dict[str, str]:
 
 
 def _device_firmware(settings: BridgeConfig, record: dict[str, Any] | str) -> FirmwareConfig:
-    provider = _device_capabilities(record).firmware.provider
+    firmware_capabilities = _device_capabilities(record).firmware
+    if _device_capabilities(record).model_key == "x4_pro":
+        # X4 Pro never inherits the legacy X3/X4 image. The dedicated channel
+        # is deliberately empty until an exact board/revision manifest lands.
+        return getattr(settings, "x4_pro_firmware", FirmwareConfig())
+    provider = firmware_capabilities.provider
     if provider == "xteink":
         return settings.firmware
     if provider == "note4":
@@ -689,6 +732,99 @@ def _firmware_metadata_error(
     if firmware.size < MINIMUM_FIRMWARE_SIZE or firmware.size > OTA_PARTITION_SIZE:
         return "Firmware size is outside the OTA application partition safety limits"
     return ""
+
+
+def _firmware_artifact_blockers(
+    record: dict[str, Any] | str,
+    firmware: FirmwareConfig,
+) -> list[str]:
+    """Require a complete exact manifest before admitting X4 Pro firmware."""
+
+    descriptor = _device_capabilities(record)
+    if descriptor.model_key != "x4_pro":
+        return []
+    blockers: list[str] = []
+    if firmware.artifact_family != "x4pro_s3":
+        blockers.append("X4 Pro requires its dedicated firmware artifact family")
+        return blockers
+    if descriptor.firmware.artifact_family != firmware.artifact_family:
+        blockers.append("This X4 Pro hardware revision has no admitted firmware artifact")
+        return blockers
+    if not firmware.version or not firmware.url or not firmware.sha256 or not firmware.size:
+        blockers.append("No X4 Pro firmware artifact is configured")
+
+    if isinstance(record, str):
+        hardware: dict[str, Any] = {}
+    else:
+        hardware = record
+
+    checks: tuple[tuple[str, Any, tuple[Any, ...], str], ...] = (
+        ("model", descriptor.model_key, firmware.compatible_models, "model"),
+        (
+            "board_id",
+            hardware.get("board_id"),
+            firmware.compatible_board_ids,
+            "board ID",
+        ),
+        (
+            "hardware_revision",
+            hardware.get("hardware_revision"),
+            firmware.compatible_hardware_revisions,
+            "hardware revision",
+        ),
+        (
+            "mcu_family",
+            hardware.get("mcu_family"),
+            firmware.compatible_mcu_families,
+            "MCU family",
+        ),
+        (
+            "flash_size_bytes",
+            hardware.get("flash_size_bytes"),
+            firmware.compatible_flash_sizes,
+            "flash size",
+        ),
+        (
+            "psram_size_bytes",
+            hardware.get("psram_size_bytes"),
+            firmware.compatible_psram_sizes,
+            "PSRAM size",
+        ),
+        (
+            "reported_firmware_artifact",
+            hardware.get("reported_firmware_artifact"),
+            (firmware.artifact_family,),
+            "reported firmware artifact",
+        ),
+    )
+    for field, reported, allowed, label in checks:
+        if not allowed:
+            blockers.append(f"X4 Pro artifact manifest has no admitted {label}")
+            continue
+        if reported in (None, ""):
+            blockers.append(f"Device did not report its {label}")
+            continue
+        if field in {"flash_size_bytes", "psram_size_bytes"}:
+            try:
+                matches = int(reported) in {int(value) for value in allowed}
+            except (TypeError, ValueError):
+                matches = False
+        elif field == "reported_firmware_artifact":
+            matches = str(reported).strip() in {
+                str(value).strip() for value in allowed
+            }
+        else:
+            normalized_reported = re.sub(
+                r"[^a-z0-9]+", "-", str(reported).strip().lower()
+            ).strip("-")
+            normalized_allowed = {
+                re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+                for value in allowed
+            }
+            matches = normalized_reported in normalized_allowed
+        if not matches:
+            blockers.append(f"Device {label} is not admitted by the X4 Pro artifact")
+    return blockers
 
 
 def _firmware_maintenance_status(
@@ -747,6 +883,9 @@ def _firmware_install_blockers(
     store: DeviceStore,
 ) -> list[str]:
     firmware = _device_firmware(settings, record)
+    compatibility_blockers = _firmware_artifact_blockers(record, firmware)
+    if compatibility_blockers:
+        return compatibility_blockers
     error = _firmware_metadata_error(settings, firmware)
     blockers = [error] if error else []
     if error:
@@ -1124,6 +1263,14 @@ def _decorate_device(
     result["online"] = online
     result["power_state"] = power_state
     device_firmware = _device_firmware(settings, result)
+    artifact_blockers = _firmware_artifact_blockers(result, device_firmware)
+    result["firmware_artifact_family"] = descriptor.firmware.artifact_family
+    result["firmware_artifact_compatible"] = bool(
+        descriptor.firmware.manageable
+        and not artifact_blockers
+        and not _firmware_metadata_error(settings, device_firmware)
+    )
+    result["firmware_compatibility_blockers"] = artifact_blockers
     result["latest_firmware"] = device_firmware.version or result.get("firmware", "")
     profile = _effective_device(
         _capability_normalized_config(
@@ -2211,6 +2358,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 device_id,
                 firmware.version,
                 firmware_provider=descriptor.firmware.provider,
+                artifact_family=descriptor.firmware.artifact_family,
+            )
+        if descriptor.firmware.artifact_family == "x4pro_s3":
+            return store.queue_device_firmware_install(
+                device_id,
+                firmware.version,
+                firmware_provider=descriptor.firmware.provider,
+                artifact_family=descriptor.firmware.artifact_family,
             )
         if descriptor.supports_xteink_ota:
             return store.queue_firmware_install(
@@ -2276,6 +2431,49 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     store.queue_command(device_id, command)
             elif command == "cancel":
                 store.clear_commands(device_id, include_dispatched=True)
+            elif command == "set-frontlight-on":
+                if not descriptor.frontlight.supports_on:
+                    raise ValueError(
+                        "Frontlight power is not supported by this hardware revision"
+                    )
+                store.touch(
+                    device_id,
+                    {
+                        "desired_frontlight_on": payload.strip().lower()
+                        in {"1", "true", "yes", "on"}
+                    },
+                )
+                store.queue_command(device_id, "refresh")
+            elif command in {
+                "set-frontlight-brightness",
+                "set-frontlight-warmth",
+            }:
+                supported = (
+                    descriptor.frontlight.supports_brightness
+                    if command == "set-frontlight-brightness"
+                    else descriptor.frontlight.supports_warmth
+                )
+                if not supported:
+                    raise ValueError(
+                        "Frontlight control is not supported by this hardware revision"
+                    )
+                try:
+                    value = int(float(payload))
+                except ValueError as err:
+                    raise ValueError("A numeric value is required") from err
+                if not descriptor.frontlight.minimum <= value <= descriptor.frontlight.maximum:
+                    raise ValueError(
+                        "Value must be between "
+                        f"{descriptor.frontlight.minimum} and "
+                        f"{descriptor.frontlight.maximum}"
+                    )
+                field = (
+                    "desired_frontlight_brightness"
+                    if command == "set-frontlight-brightness"
+                    else "desired_frontlight_warmth"
+                )
+                store.touch(device_id, {field: value})
+                store.queue_command(device_id, "refresh")
             elif command == "firmware-retry":
                 if not descriptor.supports_xteink_ota:
                     raise ValueError(
@@ -2755,14 +2953,56 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.rook = rook
     app.state.voice_assistant = voice_assistant
 
-    def firmware_delivery_url(request: Request, model: str = "") -> str:
-        if _is_note4(model):
-            if settings.note4_firmware.url == "packaged":
+    def firmware_delivery_url(
+        request: Request, selected: dict[str, Any] | str = ""
+    ) -> str:
+        firmware = _device_firmware(settings, selected)
+        descriptor = _device_capabilities(selected)
+        if descriptor.model_key == "x4_pro":
+            if firmware.url == "packaged":
+                return str(request.url_for("x4_pro_firmware_binary"))
+            return firmware.url
+        if descriptor.firmware.provider == "note4":
+            if firmware.url == "packaged":
                 return str(request.url_for("note4_firmware_binary"))
-            return settings.note4_firmware.url
-        if settings.firmware.mirror_enabled:
+            return firmware.url
+        if firmware.mirror_enabled:
             return str(request.url_for("firmware_binary"))
-        return settings.firmware.url
+        return firmware.url
+
+    def apply_frontlight_headers(
+        response: Response,
+        record: dict[str, Any],
+    ) -> None:
+        descriptor = _device_capabilities(record)
+        frontlight = descriptor.frontlight
+        if frontlight.available is not True:
+            return
+        if frontlight.supports_on:
+            desired_on = record.get(
+                "desired_frontlight_on", record.get("frontlight_on") is True
+            )
+            response.headers["X-FlexDisplay-Desired-Frontlight-On"] = (
+                "true" if desired_on is True else "false"
+            )
+        if frontlight.supports_brightness:
+            brightness = record.get(
+                "desired_frontlight_brightness",
+                record.get("frontlight_brightness"),
+            )
+            if brightness is not None:
+                response.headers["X-FlexDisplay-Desired-Frontlight-Brightness"] = str(
+                    max(frontlight.minimum, min(frontlight.maximum, int(brightness)))
+                )
+        if frontlight.supports_warmth:
+            warmth = record.get(
+                "desired_frontlight_warmth",
+                record.get("frontlight_warmth"),
+            )
+            if warmth is not None:
+                response.headers["X-FlexDisplay-Desired-Frontlight-Warmth"] = str(
+                    max(frontlight.minimum, min(frontlight.maximum, int(warmth)))
+                )
 
     def apply_loading_screen_headers(
         response: Response,
@@ -2920,6 +3160,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             else "Bridge configuration"
         )
         x_metadata_error = _firmware_metadata_error(settings, settings.firmware)
+        x4_pro_metadata_error = _firmware_metadata_error(
+            settings, settings.x4_pro_firmware
+        )
         note4_metadata_error = _firmware_metadata_error(
             settings, settings.note4_firmware
         )
@@ -3163,6 +3406,27 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                         or "The local firmware mirror is not ready."
                     ),
                 },
+                "x4_pro": {
+                    "label": "XTEINK X4 Pro",
+                    "status": (
+                        "configured"
+                        if not x4_pro_metadata_error
+                        else "blocked"
+                    ),
+                    "version": settings.x4_pro_firmware.version,
+                    "family": "X4 Pro exact hardware variants only",
+                    "track": "x4pro_s3",
+                    "owner": "External X4 Pro firmware repository",
+                    "source": "bridge_configuration",
+                    "detail": (
+                        "Exact model, board, hardware revision, MCU family, and flash size are required."
+                        if not x4_pro_metadata_error
+                        else (
+                            "No compatible X4 Pro manifest/artifact is configured; "
+                            "X4 Pro devices remain read-only and cannot inherit X3/X4 OTA."
+                        )
+                    ),
+                },
                 "note4": {
                     "label": "Zectrix Note4",
                     "status": "configured" if not note4_metadata_error else "not_configured",
@@ -3364,18 +3628,48 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         current = store.get(selected)
         if not current:
             raise HTTPException(status_code=404, detail="Device has not checked in")
-        if not _is_android_display(current):
+        descriptor = _device_capabilities(current)
+        changes: dict[str, Any] = {}
+        if _is_android_display(current):
+            if "brightness" in payload:
+                changes["desired_screen_brightness"] = max(
+                    5, min(100, int(payload["brightness"]))
+                )
+        elif descriptor.frontlight.available is True:
+            if "frontlight_on" in payload and descriptor.frontlight.supports_on:
+                changes["desired_frontlight_on"] = bool(payload["frontlight_on"])
+            if (
+                "frontlight_brightness" in payload
+                and descriptor.frontlight.supports_brightness
+            ):
+                changes["desired_frontlight_brightness"] = max(
+                    descriptor.frontlight.minimum,
+                    min(
+                        descriptor.frontlight.maximum,
+                        int(payload["frontlight_brightness"]),
+                    ),
+                )
+            if (
+                "frontlight_warmth" in payload
+                and descriptor.frontlight.supports_warmth
+            ):
+                changes["desired_frontlight_warmth"] = max(
+                    descriptor.frontlight.minimum,
+                    min(
+                        descriptor.frontlight.maximum,
+                        int(payload["frontlight_warmth"]),
+                    ),
+                )
+        else:
             raise HTTPException(
                 status_code=409,
-                detail="Display brightness controls require an Android receiver",
-            )
-        changes: dict[str, Any] = {}
-        if "brightness" in payload:
-            changes["desired_screen_brightness"] = max(
-                5, min(100, int(payload["brightness"]))
+                detail="Display controls are not admitted for this hardware revision",
             )
         if not changes:
-            raise HTTPException(status_code=400, detail="Brightness is required")
+            raise HTTPException(
+                status_code=400,
+                detail="A supported display control is required",
+            )
         record = store.touch(selected, changes)
         return {"updated": True, "device": record}
 
@@ -3548,6 +3842,46 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             headers={
                 "X-FlexDisplay-Firmware-Version": firmware.version,
                 "X-FlexDisplay-Firmware-SHA256": firmware.sha256,
+                "Cache-Control": "private, max-age=300",
+            },
+        )
+
+    @app.get(
+        "/api/v1/firmware/x4-pro/current.bin",
+        name="x4_pro_firmware_binary",
+    )
+    def x4_pro_firmware_binary() -> FileResponse:
+        firmware = settings.x4_pro_firmware
+        path = Path(
+            os.getenv(
+                "FLEXDISPLAY_PACKAGED_X4_PRO_FIRMWARE",
+                "/app/firmware/x4-pro.bin",
+            )
+        )
+        error = _firmware_metadata_error(settings, firmware)
+        if error:
+            raise HTTPException(status_code=503, detail=error)
+        if not path.is_file():
+            raise HTTPException(
+                status_code=503,
+                detail="X4 Pro firmware is not packaged",
+            )
+        if path.stat().st_size != firmware.size:
+            raise HTTPException(status_code=503, detail="X4 Pro firmware size mismatch")
+        digest = hashlib.sha256(path.read_bytes()).hexdigest()
+        if digest != firmware.sha256:
+            raise HTTPException(
+                status_code=503,
+                detail="X4 Pro firmware checksum mismatch",
+            )
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            filename=f"x4-pro-{firmware.version}.bin",
+            headers={
+                "X-FlexDisplay-Firmware-Version": firmware.version,
+                "X-FlexDisplay-Firmware-SHA256": firmware.sha256,
+                "X-FlexDisplay-Artifact-Family": firmware.artifact_family,
                 "Cache-Control": "private, max-age=300",
             },
         )
@@ -3738,6 +4072,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.get("/api/v1/devices/{device_id}/screens/current")
     def current_device_screen(device_id: str) -> FileResponse:
         selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device not found")
         try:
             path, item = screen_history.latest(selected)
         except ScreenHistoryError as err:
@@ -3833,6 +4170,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         record = store.get(selected)
         if not record:
             raise HTTPException(status_code=404, detail="Device not found")
+        if not _device_capabilities(record).management.supports_button_actions:
+            raise HTTPException(
+                status_code=409,
+                detail="Configurable physical-button actions are not supported by this device",
+            )
         return {
             "device_id": selected,
             "mode": BUTTON_ACTION_MODE,
@@ -3849,6 +4191,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     ) -> dict[str, Any]:
         authorize(request)
         selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device not found")
+        if not _device_capabilities(current).management.supports_button_actions:
+            raise HTTPException(
+                status_code=409,
+                detail="Configurable physical-button actions are not supported by this device",
+            )
         try:
             mappings = normalize_mappings(payload)
         except ButtonActionValidationError as err:
@@ -4089,6 +4439,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "models": {
                 "X3": {"width": 528, "height": 792},
                 "X4": {"width": 480, "height": 800},
+                "X4_PRO": {"width": 480, "height": 800},
                 "N4": {"width": 400, "height": 300},
                 "ROOK": {"width": 480, "height": 480},
                 "CHECKERS": {"width": 960, "height": 480},
@@ -4436,6 +4787,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "models": {
                 "X3": {"width": 528, "height": 792},
                 "X4": {"width": 480, "height": 800},
+                "X4_PRO": {"width": 480, "height": 800},
                 "ROOK": {"width": 480, "height": 480},
                 "CHECKERS": {"width": 960, "height": 480},
             },
@@ -5789,9 +6141,18 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_height: str | None = Header(default=None),
         x_flexdisplay_model: str | None = Header(default=None),
         x_flexdisplay_firmware: str | None = Header(default=None),
+        x_flexdisplay_firmware_artifact: str | None = Header(default=None),
+        x_flexdisplay_board_id: str | None = Header(default=None),
+        x_flexdisplay_hardware_revision: str | None = Header(default=None),
+        x_flexdisplay_mcu_family: str | None = Header(default=None),
+        x_flexdisplay_flash_size: str | None = Header(default=None),
+        x_flexdisplay_psram_size: str | None = Header(default=None),
         x_flexdisplay_volume: str | None = Header(default=None),
         x_flexdisplay_muted: str | None = Header(default=None),
         x_flexdisplay_brightness: str | None = Header(default=None),
+        x_flexdisplay_frontlight_on: str | None = Header(default=None),
+        x_flexdisplay_frontlight_brightness: str | None = Header(default=None),
+        x_flexdisplay_frontlight_warmth: str | None = Header(default=None),
         x_flexdisplay_battery_percent: str | None = Header(default=None),
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
@@ -5854,8 +6215,43 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # must not inherit an X3 firmware provider from a historical UI
             # default. The device can advertise an explicit model next check-in.
             model = "UNKNOWN"
+        # Preserve an explicitly reported family across transient model-header
+        # omissions, but never preserve the evidence that admits X4 Pro
+        # management. Every check-in must re-report that evidence in full.
+        requires_fresh_x4_pro_evidence = (
+            _device_capabilities({"model": model}).model_key == "x4_pro"
+        )
         device_firmware = _device_firmware(settings, model)
-        capabilities = _capabilities(x_flexdisplay_capabilities)
+        capabilities = (
+            _capabilities(x_flexdisplay_capabilities)
+            if x_flexdisplay_capabilities is not None
+            else set()
+            if requires_fresh_x4_pro_evidence
+            else {
+                str(value)
+                for value in (existing_record.get("transfer_capabilities") or [])
+            }
+        )
+
+        def reported_text(raw: str | None, key: str) -> str:
+            return (
+                _header_value(raw)
+                if raw is not None
+                else ""
+                if requires_fresh_x4_pro_evidence
+                else str(existing_record.get(key) or "")
+            )
+
+        def reported_size(raw: str | None, key: str, maximum: int) -> int | None:
+            if raw is not None:
+                return _optional_integer(raw, 0, maximum)
+            if requires_fresh_x4_pro_evidence:
+                return None
+            value = existing_record.get(key)
+            try:
+                return int(value) if value is not None else None
+            except (TypeError, ValueError):
+                return None
 
         def capability_flag(raw: str | None, *names: str) -> bool:
             parsed = _boolean(raw)
@@ -5898,9 +6294,35 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "width": width,
             "height": height,
             "firmware": x_flexdisplay_firmware or "0.4.0",
+            "reported_firmware_artifact": reported_text(
+                x_flexdisplay_firmware_artifact,
+                "reported_firmware_artifact",
+            ),
+            "board_id": reported_text(x_flexdisplay_board_id, "board_id"),
+            "hardware_revision": reported_text(
+                x_flexdisplay_hardware_revision, "hardware_revision"
+            ),
+            "mcu_family": reported_text(x_flexdisplay_mcu_family, "mcu_family"),
+            "flash_size_bytes": reported_size(
+                x_flexdisplay_flash_size,
+                "flash_size_bytes",
+                128 * 1024 * 1024,
+            ),
+            "psram_size_bytes": reported_size(
+                x_flexdisplay_psram_size,
+                "psram_size_bytes",
+                64 * 1024 * 1024,
+            ),
             "voice_volume": _optional_integer(x_flexdisplay_volume, 0, 100),
             "voice_muted": _boolean(x_flexdisplay_muted),
             "screen_brightness": _optional_integer(x_flexdisplay_brightness, 0, 100),
+            "frontlight_on": _boolean(x_flexdisplay_frontlight_on),
+            "frontlight_brightness": _optional_integer(
+                x_flexdisplay_frontlight_brightness, 0, 100
+            ),
+            "frontlight_warmth": _optional_integer(
+                x_flexdisplay_frontlight_warmth, 0, 100
+            ),
             "battery_percent": _number(x_flexdisplay_battery_percent),
             "battery_voltage": _number(x_flexdisplay_battery_voltage),
             "rssi": _number(x_flexdisplay_rssi),
@@ -5986,7 +6408,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 )
         elif image_cached:
             telemetry["dashboard_fetch_error"] = False
-        record = store.touch(device_id, telemetry)
+        record = store.touch(
+            device_id,
+            telemetry,
+            clear_fields=(
+                {
+                    "board_id",
+                    "hardware_revision",
+                    "mcu_family",
+                    "flash_size_bytes",
+                    "psram_size_bytes",
+                    "reported_firmware_artifact",
+                    "transfer_capabilities",
+                }
+                if requires_fresh_x4_pro_evidence
+                else None
+            ),
+        )
         content_assignment = content_packs.observe(
             device_id,
             x_flexdisplay_content_version or "",
@@ -6097,6 +6535,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 filtered_assignment,
             )
         descriptor = _device_capabilities(record)
+        firmware_admitted = bool(
+            descriptor.firmware.manageable
+            and not _firmware_artifact_blockers(record, device_firmware)
+        )
         install_active = bool(
             "install" in (record.get("pending_commands") or [])
             or "install" in (record.get("dispatched_commands") or [])
@@ -6114,11 +6556,22 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     else ""
                 )
             queued_target = str(record.get("firmware_update_target") or "")
+            queued_artifact_family = str(
+                record.get("firmware_update_artifact_family") or ""
+            )
+            if not queued_artifact_family:
+                queued_artifact_family = (
+                    "x_series"
+                    if queued_provider == "xteink"
+                    else queued_provider
+                )
             install_compatible = bool(
                 descriptor.firmware.manageable
                 and queued_provider == descriptor.firmware.provider
+                and queued_artifact_family == descriptor.firmware.artifact_family
                 and queued_target
                 and queued_target == expected_firmware.version
+                and not _firmware_artifact_blockers(record, expected_firmware)
             )
         else:
             install_compatible = True
@@ -6137,12 +6590,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             x_flexdisplay_button_events,
             x_flexdisplay_mode or BUTTON_ACTION_MODE,
         )
+        allowed_input_events = set(descriptor.inputs.event_types)
+        button_events = [
+            event for event in button_events if event.get("button") in allowed_input_events
+        ]
         new_button_events = _new_button_events(record, button_events)
         record = store.record_button_events(device_id, button_events) or record
         physical_navigation, record = _dispatch_button_actions(
             device_id,
             record,
-            new_button_events,
+            (
+                new_button_events
+                if descriptor.management.supports_button_actions
+                else []
+            ),
             store,
             ha,
         )
@@ -6279,13 +6740,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                         int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
                     )
-                if device_firmware.version:
+                apply_frontlight_headers(response, record)
+                if firmware_admitted and device_firmware.version:
                     response.headers["X-FlexDisplay-Latest-Firmware"] = (
                         device_firmware.version
                     )
-                if "install" in commands:
+                if firmware_admitted and "install" in commands:
                     response.headers["X-FlexDisplay-Firmware-URL"] = (
-                        firmware_delivery_url(request, model)
+                        firmware_delivery_url(request, record)
                     )
                     response.headers["X-FlexDisplay-Firmware-SHA256"] = (
                         device_firmware.sha256
@@ -6491,13 +6953,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                     int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
                 )
-            if device_firmware.version:
+            apply_frontlight_headers(response, record)
+            if firmware_admitted and device_firmware.version:
                 response.headers["X-FlexDisplay-Latest-Firmware"] = (
                     device_firmware.version
                 )
-            if "install" in commands:
+            if firmware_admitted and "install" in commands:
                 response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
-                    request, model
+                    request, record
                 )
                 response.headers["X-FlexDisplay-Firmware-SHA256"] = (
                     device_firmware.sha256
@@ -6826,13 +7289,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                 int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
             )
-        if device_firmware.version:
+        apply_frontlight_headers(response, record)
+        if firmware_admitted and device_firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = (
                 device_firmware.version
             )
-        if "install" in commands:
+        if firmware_admitted and "install" in commands:
             response.headers["X-FlexDisplay-Firmware-URL"] = firmware_delivery_url(
-                request, model
+                request, record
             )
             response.headers["X-FlexDisplay-Firmware-SHA256"] = device_firmware.sha256
             response.headers["X-FlexDisplay-Firmware-Size"] = str(

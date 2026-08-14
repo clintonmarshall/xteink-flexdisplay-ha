@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import struct
 from pathlib import Path
 
 import pytest
@@ -27,6 +28,26 @@ def _firmware(version: str, marker: str) -> FirmwareConfig:
         canary_required=False,
         require_usb_for_canary=False,
         mirror_enabled=False,
+    )
+
+
+def _x4_pro_manifest() -> FirmwareConfig:
+    return FirmwareConfig(
+        version="1.0.1-x4pro-s3",
+        url="https://firmware.example.test/x4pro-s3.bin",
+        sha256="c" * 64,
+        size=5_500_000,
+        canary_required=True,
+        require_usb_for_canary=True,
+        mirror_enabled=False,
+        artifact_family="x4pro_s3",
+        compatible_models=("x4_pro",),
+        compatible_board_ids=("xteink_x4_pro",),
+        compatible_hardware_revisions=("s3",),
+        compatible_mcu_families=("esp32-s3",),
+        compatible_flash_sizes=(16 * 1024 * 1024,),
+        compatible_psram_sizes=(8 * 1024 * 1024,),
+        requires_exact_hardware=True,
     )
 
 
@@ -114,6 +135,264 @@ def test_missing_model_header_never_grants_xteink_firmware_to_unknown_identity(
         )
         assert install.status_code == 409
         assert "not managed" in install.json()["detail"]
+
+
+def test_legacy_x4_install_is_cancelled_for_unverified_x4_pro_p4_report(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        firmware=_firmware("1.5.0-flexdisplay.9.0.0", "9"),
+    )
+    device_id = "X4-PROOF01"
+
+    with TestClient(create_app(config)) as client:
+        _check_in(client, device_id, "XTEINK_X4")
+        queued = client.post(f"/api/v1/devices/{device_id}/commands/install")
+        assert queued.status_code == 200
+
+        corrected = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": device_id,
+                "X-FlexDisplay-Model": "X4_PRO",
+                "X-FlexDisplay-Board-ID": "xteink_x4_pro",
+                "X-FlexDisplay-Hardware-Revision": "p4",
+                "X-FlexDisplay-MCU-Family": "esp32-p4",
+                "X-FlexDisplay-Flash-Size": str(16 * 1024 * 1024),
+                "X-FlexDisplay-Firmware": "1.0.0",
+                "X-FlexDisplay-Capabilities": (
+                    "touch,capacitive-home,side-buttons,frontlight,"
+                    "frontlight-brightness,frontlight-warmth"
+                ),
+            },
+        )
+        record = client.get(f"/api/v1/devices/{device_id}").json()
+
+    assert corrected.status_code == 200
+    assert "install" not in corrected.headers.get("x-flexdisplay-commands", "")
+    assert "x-flexdisplay-firmware-url" not in corrected.headers
+    assert "x-flexdisplay-latest-firmware" not in corrected.headers
+    assert record["device_capabilities"]["model_key"] == "x4_pro"
+    assert record["device_capabilities"]["hardware"]["management_profile"] == (
+        "read_only"
+    )
+    assert record["device_capabilities"]["firmware"]["artifact_family"] == "none"
+    assert record["device_capabilities"]["inputs"]["event_types"] == []
+    assert record["device_capabilities"]["frontlight"]["available"] is None
+    assert "install" not in record["pending_commands"]
+    assert record["firmware_update_error"] == "install:firmware-channel-mismatch"
+
+
+def test_x4_pro_s3_controls_require_exact_identity_and_never_join_x4_ota(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        firmware=_firmware("1.5.0-flexdisplay.9.0.0", "8"),
+        x4_pro_firmware=_x4_pro_manifest(),
+    )
+    device_id = "PRO-S3-01"
+    headers = {
+        "X-FlexDisplay-ID": device_id,
+        "X-FlexDisplay-Model": "X4_PRO",
+        "X-FlexDisplay-Board-ID": "xteink_x4_pro",
+        "X-FlexDisplay-Hardware-Revision": "s3",
+        "X-FlexDisplay-MCU-Family": "esp32-s3",
+        "X-FlexDisplay-Flash-Size": str(16 * 1024 * 1024),
+        "X-FlexDisplay-PSRAM-Size": str(8 * 1024 * 1024),
+        "X-FlexDisplay-Firmware-Artifact": "x4pro_s3",
+        "X-FlexDisplay-Firmware": "1.0.0",
+        "X-FlexDisplay-Capabilities": (
+            "touch,capacitive-home,side-buttons,frontlight,"
+            "frontlight-brightness,frontlight-warmth,sdmmc"
+        ),
+        "X-FlexDisplay-Frontlight-On": "true",
+        "X-FlexDisplay-Frontlight-Brightness": "60",
+        "X-FlexDisplay-Frontlight-Warmth": "35",
+    }
+
+    with TestClient(create_app(config)) as client:
+        first = client.get("/api/v1/screen", headers=headers)
+        assert first.status_code == 200
+        control = client.put(
+            f"/api/v1/devices/{device_id}/display",
+            json={
+                "frontlight_on": True,
+                "frontlight_brightness": 72,
+                "frontlight_warmth": 41,
+            },
+        )
+        assert control.status_code == 200
+        second = client.get("/api/v1/screen", headers=headers)
+        install = client.post(f"/api/v1/devices/{device_id}/commands/install")
+        preview = client.post(
+            "/api/v1/fleet/firmware/preview",
+            json={"scope": "devices", "device_ids": [device_id]},
+        ).json()
+        record = client.get(f"/api/v1/devices/{device_id}").json()
+
+    descriptor = record["device_capabilities"]
+    assert descriptor["hardware"]["management_profile"] == "s3"
+    assert descriptor["hardware"]["board_id"] == "xteink_x4_pro"
+    assert descriptor["hardware"]["hardware_revision"] == "s3"
+    assert descriptor["hardware"]["mcu_family"] == "esp32-s3"
+    assert descriptor["hardware"]["flash_size_bytes"] == 16 * 1024 * 1024
+    assert descriptor["hardware"]["psram_size_bytes"] == 8 * 1024 * 1024
+    assert descriptor["inputs"]["touch_controller"] == "gt911"
+    assert descriptor["inputs"]["event_types"] == [
+        "home",
+        "side_previous",
+        "side_next",
+        "power",
+    ]
+    assert descriptor["frontlight"]["supports_brightness"] is True
+    assert descriptor["frontlight"]["supports_warmth"] is True
+    assert descriptor["firmware"]["artifact_family"] == "x4pro_s3"
+    assert record["reported_firmware_artifact"] == "x4pro_s3"
+    assert record["identity"]["reported_firmware_artifact"] == "x4pro_s3"
+    assert record["firmware_compatibility_blockers"] == []
+    assert record["firmware_artifact_compatible"] is False
+    assert descriptor["reported_capabilities"] == [
+        "capacitive-home",
+        "frontlight",
+        "frontlight-brightness",
+        "frontlight-warmth",
+        "sdmmc",
+        "side-buttons",
+        "touch",
+    ]
+    assert second.headers["x-flexdisplay-desired-frontlight-on"] == "true"
+    assert second.headers["x-flexdisplay-desired-frontlight-brightness"] == "72"
+    assert second.headers["x-flexdisplay-desired-frontlight-warmth"] == "41"
+    assert "x-flexdisplay-latest-firmware" not in second.headers
+    assert install.status_code == 409
+    assert "not managed" in install.json()["detail"]
+    assert preview["eligible"] == []
+    assert preview["excluded"][device_id] == (
+        "Not eligible for the X3/X4 firmware channel"
+    )
+
+
+def test_x4_pro_reported_artifact_is_persisted_and_exactly_manifest_checked(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        x4_pro_firmware=_x4_pro_manifest(),
+    )
+    device_id = "PRO-ARTIFACT-01"
+    headers = {
+        "X-FlexDisplay-ID": device_id,
+        "X-FlexDisplay-Model": "X4_PRO",
+        "X-FlexDisplay-Board-ID": "xteink_x4_pro",
+        "X-FlexDisplay-Hardware-Revision": "s3",
+        "X-FlexDisplay-MCU-Family": "esp32-s3",
+        "X-FlexDisplay-Flash-Size": str(16 * 1024 * 1024),
+        "X-FlexDisplay-PSRAM-Size": str(8 * 1024 * 1024),
+        "X-FlexDisplay-Firmware-Artifact": "x4pro_s3",
+    }
+
+    with TestClient(create_app(config)) as client:
+        assert client.get("/api/v1/screen", headers=headers).status_code == 200
+        observed = client.get(f"/api/v1/devices/{device_id}").json()
+        without_artifact = dict(headers)
+        without_artifact.pop("X-FlexDisplay-Firmware-Artifact")
+        assert (
+            client.get("/api/v1/screen", headers=without_artifact).status_code == 200
+        )
+        cleared = client.get(f"/api/v1/devices/{device_id}").json()
+
+        mismatched_headers = {
+            **headers,
+            "X-FlexDisplay-Firmware-Artifact": "X4PRO_S3",
+        }
+        mismatched_response = client.get(
+            "/api/v1/screen", headers=mismatched_headers
+        )
+        mismatched = client.get(f"/api/v1/devices/{device_id}").json()
+
+    assert observed["reported_firmware_artifact"] == "x4pro_s3"
+    assert observed["firmware_compatibility_blockers"] == []
+    assert observed["firmware_artifact_compatible"] is False
+    assert cleared["reported_firmware_artifact"] == ""
+    assert "Device did not report its reported firmware artifact" in cleared[
+        "firmware_compatibility_blockers"
+    ]
+    assert mismatched["reported_firmware_artifact"] == "X4PRO_S3"
+    assert mismatched["identity"]["reported_firmware_artifact"] == "X4PRO_S3"
+    assert (
+        "Device reported firmware artifact is not admitted by the X4 Pro artifact"
+        in mismatched["firmware_compatibility_blockers"]
+    )
+    assert mismatched["firmware_artifact_compatible"] is False
+    assert "x-flexdisplay-latest-firmware" not in mismatched_response.headers
+
+
+def test_x4_pro_admission_evidence_must_be_fresh_on_every_check_in(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(
+        state_path=tmp_path / "state.json",
+        x4_pro_firmware=_x4_pro_manifest(),
+    )
+    device_id = "PRO-FRESH-01"
+    admitted_headers = {
+        "X-FlexDisplay-ID": device_id,
+        "X-FlexDisplay-Model": "X4_PRO",
+        "X-FlexDisplay-Board-ID": "xteink_x4_pro",
+        "X-FlexDisplay-Hardware-Revision": "s3",
+        "X-FlexDisplay-MCU-Family": "esp32-s3",
+        "X-FlexDisplay-Flash-Size": str(16 * 1024 * 1024),
+        "X-FlexDisplay-PSRAM-Size": str(8 * 1024 * 1024),
+        "X-FlexDisplay-Firmware-Artifact": "x4pro_s3",
+        "X-FlexDisplay-Capabilities": (
+            "touch,capacitive-home,side-buttons,frontlight,"
+            "frontlight-brightness,frontlight-warmth,sdmmc"
+        ),
+        "X-FlexDisplay-Frontlight-On": "true",
+        "X-FlexDisplay-Frontlight-Brightness": "60",
+        "X-FlexDisplay-Frontlight-Warmth": "35",
+    }
+
+    with TestClient(create_app(config)) as client:
+        admitted = client.get("/api/v1/screen", headers=admitted_headers)
+        assert admitted.status_code == 200
+        assert client.put(
+            f"/api/v1/devices/{device_id}/display",
+            json={"frontlight_on": True, "frontlight_brightness": 72},
+        ).status_code == 200
+        assert client.post(
+            f"/api/v1/devices/{device_id}/commands/refresh"
+        ).status_code == 200
+
+        demoted = client.get(
+            "/api/v1/screen",
+            headers={"X-FlexDisplay-ID": device_id},
+        )
+        record = client.get(f"/api/v1/devices/{device_id}").json()
+
+    descriptor = record["device_capabilities"]
+    assert record["model"] == "X4_PRO"
+    assert record["model_reported"] is True
+    assert descriptor["model_key"] == "x4_pro"
+    assert descriptor["hardware"]["management_profile"] == "read_only"
+    assert descriptor["hardware"]["board_id"] == ""
+    assert descriptor["hardware"]["hardware_revision"] == ""
+    assert descriptor["hardware"]["mcu_family"] == ""
+    assert descriptor["hardware"]["flash_size_bytes"] is None
+    assert descriptor["hardware"]["psram_size_bytes"] is None
+    assert descriptor["reported_capabilities"] == []
+    assert descriptor["inputs"]["event_types"] == []
+    assert descriptor["frontlight"]["available"] is None
+    assert record["reported_firmware_artifact"] == ""
+    assert record["pending_commands"] == []
+    assert record.get("dispatched_commands") in (None, [])
+    assert demoted.headers.get("x-flexdisplay-commands", "") == ""
+    assert "x-flexdisplay-latest-firmware" not in demoted.headers
+    assert "x-flexdisplay-firmware-url" not in demoted.headers
+    assert "x-flexdisplay-desired-frontlight-on" not in demoted.headers
+    assert "x-flexdisplay-desired-frontlight-brightness" not in demoted.headers
 
 
 def test_auto_provisioning_filters_defaults_and_reconciles_corrected_identity(
@@ -1089,3 +1368,33 @@ def test_studio_exposes_mixed_fleet_lifecycle_operations(tmp_path: Path) -> None
     assert "fleet/policy/preview" in html
     assert "fleet/firmware/preview" in html
     assert "system/support-bundle" in html
+
+
+def test_studio_keeps_x4_pro_distinct_from_legacy_x4_controls(
+    tmp_path: Path,
+) -> None:
+    config = BridgeConfig(state_path=tmp_path / "state.json")
+    profile = {
+        "name": "x4-pro-preview",
+        "pages": [{"title": "HOME", "entities": []}],
+    }
+
+    with TestClient(create_app(config)) as client:
+        studio = client.get("/api/v1/studio").json()
+        preview = client.post(
+            "/api/v1/studio/preview",
+            json={"model": "X4_PRO", "profile": profile},
+        )
+        html = client.get("/studio/").text
+
+    assert studio["models"]["X4_PRO"] == {"width": 480, "height": 800}
+    assert preview.status_code == 200
+    assert preview.content.startswith(b"\x89PNG\r\n\x1a\n")
+    assert struct.unpack_from(">II", preview.content, 16) == (480, 800)
+    assert 'data-model="X4_PRO"' in html
+    assert 'if (model === "X4PRO") return "X4_PRO";' in html
+    assert "if (deviceIsX4Pro(device)) return false;" in html
+    assert (
+        'id === "buttonActionDevice" && !deviceSupportsButtonActions(device)'
+        in html
+    )

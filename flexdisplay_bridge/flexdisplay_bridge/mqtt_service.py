@@ -15,6 +15,9 @@ from .device_capabilities import (
     DeviceCapabilityDescriptor,
     DisplayCapabilities,
     FirmwareCapabilities,
+    FrontlightCapabilities,
+    HardwareCapabilities,
+    InputCapabilities,
     ManagementCapabilities,
     PowerCapabilities,
     resolve_device_capabilities,
@@ -34,9 +37,14 @@ def _device_descriptor(
             delivery = reported["delivery"]
             firmware = reported["firmware"]
             management = reported["management"]
+            hardware = reported.get("hardware") or {}
+            inputs = reported.get("inputs") or {}
+            frontlight = reported.get("frontlight") or {}
+            firmware_provider = str(firmware.get("provider") or "none")
+            model_key = str(reported.get("model_key") or "unknown")
             return DeviceCapabilityDescriptor(
                 family=str(reported.get("family") or "unknown"),
-                model_key=str(reported.get("model_key") or "unknown"),
+                model_key=model_key,
                 label=str(reported.get("label") or "Unknown display"),
                 known_model=bool(reported.get("known_model")),
                 display=DisplayCapabilities(
@@ -46,16 +54,78 @@ def _device_descriptor(
                     color=bool(display.get("color")),
                     shape=str(display.get("shape") or "rectangular"),
                     image_format=str(display.get("image_format") or "png"),
-                    touch=bool(display.get("touch")),
+                    touch=(
+                        bool(display.get("touch"))
+                        if display.get("touch") is not None
+                        else None
+                    ),
+                ),
+                hardware=HardwareCapabilities(
+                    board_id=str(hardware.get("board_id") or ""),
+                    hardware_revision=str(hardware.get("hardware_revision") or ""),
+                    mcu_family=str(hardware.get("mcu_family") or ""),
+                    flash_size_bytes=hardware.get("flash_size_bytes"),
+                    psram_size_bytes=hardware.get("psram_size_bytes"),
+                    reported_identity_complete=bool(
+                        hardware.get("reported_identity_complete")
+                    ),
+                    management_profile=str(
+                        hardware.get("management_profile") or "read_only"
+                    ),
+                ),
+                inputs=InputCapabilities(
+                    touch=(
+                        bool(inputs.get("touch"))
+                        if inputs.get("touch") is not None
+                        else None
+                    ),
+                    touch_controller=str(inputs.get("touch_controller") or ""),
+                    physical_buttons=tuple(inputs.get("physical_buttons") or ()),
+                    capacitive_buttons=tuple(
+                        inputs.get("capacitive_buttons") or ()
+                    ),
+                    event_types=tuple(inputs.get("event_types") or ()),
+                ),
+                frontlight=FrontlightCapabilities(
+                    available=(
+                        bool(frontlight.get("available"))
+                        if frontlight.get("available") is not None
+                        else None
+                    ),
+                    supports_on=bool(frontlight.get("supports_on")),
+                    supports_brightness=bool(
+                        frontlight.get("supports_brightness")
+                    ),
+                    supports_warmth=bool(frontlight.get("supports_warmth")),
+                    minimum=int(frontlight.get("minimum", 0)),
+                    maximum=int(frontlight.get("maximum", 100)),
                 ),
                 power=PowerCapabilities(**power),
                 delivery=DeliveryCapabilities(**delivery),
-                firmware=FirmwareCapabilities(**firmware),
+                firmware=FirmwareCapabilities(
+                    provider=firmware_provider,
+                    artifact_family=str(
+                        firmware.get("artifact_family")
+                        or (
+                            "x_series"
+                            if firmware_provider == "xteink"
+                            else firmware_provider
+                        )
+                    ),
+                    manageable=bool(firmware.get("manageable")),
+                    supports_xteink_ota=bool(firmware.get("supports_xteink_ota")),
+                ),
                 management=ManagementCapabilities(
                     **{
                         **management,
                         "actions": tuple(management.get("actions") or ()),
                         "modes": tuple(management.get("modes") or ()),
+                        "supports_button_actions": bool(
+                            management.get(
+                                "supports_button_actions",
+                                model_key in {"x3", "x4", "note4"},
+                            )
+                        ),
                     }
                 ),
                 reported_capabilities=tuple(
@@ -81,6 +151,11 @@ def _device_descriptor(
         capabilities=state.get("transfer_capabilities") or (),
         width=dimension("width"),
         height=dimension("height"),
+        board_id=str(state.get("board_id") or ""),
+        hardware_revision=str(state.get("hardware_revision") or ""),
+        mcu_family=str(state.get("mcu_family") or ""),
+        flash_size_bytes=dimension("flash_size_bytes"),
+        psram_size_bytes=dimension("psram_size_bytes"),
     )
 
 
@@ -320,6 +395,40 @@ class MqttService:
                 "value_template": "{{ value_json.firmware }}",
                 "entity_category": "diagnostic",
             },
+            "board_id": {
+                "name": "Board ID",
+                "value_template": "{{ value_json.board_id }}",
+                "entity_category": "diagnostic",
+            },
+            "hardware_revision": {
+                "name": "Hardware revision",
+                "value_template": "{{ value_json.hardware_revision }}",
+                "entity_category": "diagnostic",
+            },
+            "mcu_family": {
+                "name": "MCU family",
+                "value_template": "{{ value_json.mcu_family }}",
+                "entity_category": "diagnostic",
+            },
+            "flash_size": {
+                "name": "Flash size",
+                "device_class": "data_size",
+                "unit_of_measurement": "B",
+                "value_template": "{{ value_json.flash_size_bytes }}",
+                "entity_category": "diagnostic",
+            },
+            "frontlight_brightness": {
+                "name": "Frontlight brightness",
+                "unit_of_measurement": "%",
+                "value_template": "{{ value_json.frontlight_brightness }}",
+                "entity_category": "diagnostic",
+            },
+            "frontlight_warmth": {
+                "name": "Frontlight warmth",
+                "unit_of_measurement": "%",
+                "value_template": "{{ value_json.frontlight_warmth }}",
+                "entity_category": "diagnostic",
+            },
             "mode": {
                 "name": "Current mode",
                 "value_template": "{{ value_json.mode }}",
@@ -534,6 +643,18 @@ class MqttService:
         }
         if descriptor.firmware.provider != "xteink":
             sensors.pop("sd_failure_events", None)
+        if not descriptor.hardware.board_id:
+            sensors.pop("board_id", None)
+        if not descriptor.hardware.hardware_revision:
+            sensors.pop("hardware_revision", None)
+        if not descriptor.hardware.mcu_family:
+            sensors.pop("mcu_family", None)
+        if descriptor.hardware.flash_size_bytes is None:
+            sensors.pop("flash_size", None)
+        if not descriptor.frontlight.supports_brightness:
+            sensors.pop("frontlight_brightness", None)
+        if not descriptor.frontlight.supports_warmth:
+            sensors.pop("frontlight_warmth", None)
         if not descriptor.power.reports_battery:
             for key in ("battery", "battery_voltage", "battery_runtime", "battery_drain"):
                 sensors.pop(key, None)
@@ -618,6 +739,12 @@ class MqttService:
                 "device_class": "problem",
                 "value_template": "{{ 'ON' if value_json.ha_error else 'OFF' }}",
             },
+            "frontlight_on": {
+                "name": "Frontlight on",
+                "value_template": (
+                    "{{ 'ON' if value_json.frontlight_on else 'OFF' }}"
+                ),
+            },
             "image_conversion_error": {
                 "name": "Image conversion error",
                 "device_class": "problem",
@@ -645,6 +772,8 @@ class MqttService:
             binary_sensors.pop("sd_ready", None)
         if not descriptor.power.reports_battery:
             binary_sensors.pop("low_battery", None)
+        if not descriptor.frontlight.supports_on:
+            binary_sensors.pop("frontlight_on", None)
         if not descriptor.firmware.manageable:
             binary_sensors.pop("firmware_update_available", None)
             binary_sensors.pop("firmware_update_problem", None)
@@ -717,6 +846,11 @@ class MqttService:
                 "assigned_stay_awake_on_usb",
                 "set-stay-awake-on-usb",
             ),
+            "frontlight": (
+                "Frontlight",
+                "desired_frontlight_on",
+                "set-frontlight-on",
+            ),
         }
         switches = {
             key: value
@@ -734,6 +868,7 @@ class MqttService:
                 and descriptor.management.supports_sleep_policy
                 and descriptor.power.reports_usb_power
             )
+            or (key == "frontlight" and descriptor.frontlight.supports_on)
         }
         for key, (name, field, command) in switches.items():
             payload = {
@@ -817,6 +952,24 @@ class MqttService:
                 5,
                 "s",
             ),
+            "frontlight_brightness": (
+                "Frontlight brightness",
+                "desired_frontlight_brightness",
+                "set-frontlight-brightness",
+                descriptor.frontlight.minimum,
+                descriptor.frontlight.maximum,
+                1,
+                "%",
+            ),
+            "frontlight_warmth": (
+                "Frontlight warmth",
+                "desired_frontlight_warmth",
+                "set-frontlight-warmth",
+                descriptor.frontlight.minimum,
+                descriptor.frontlight.maximum,
+                1,
+                "%",
+            ),
         }
         numbers = {
             key: value
@@ -838,6 +991,14 @@ class MqttService:
             or (
                 key == "unchanged_multiplier"
                 and descriptor.management.supports_rendering_profile
+            )
+            or (
+                key == "frontlight_brightness"
+                and descriptor.frontlight.supports_brightness
+            )
+            or (
+                key == "frontlight_warmth"
+                and descriptor.frontlight.supports_warmth
             )
         }
         for key, (
@@ -1005,17 +1166,18 @@ class MqttService:
             }
             configs.append((f"update/{slug}/firmware", update))
 
-        event = {
-            **self._base(
-                device=device,
-                unique_id=f"flexdisplay_{slug}_physical_button",
-                state_topic=f"{self.config.topic_prefix}/{device_id}/event",
-            ),
-            "name": "Physical button",
-            "event_types": ["short", "double", "long"],
-            "value_template": "{{ value_json.event_type }}",
-        }
-        configs.append((f"event/{slug}/physical_button", event))
+        if descriptor.inputs.event_types:
+            event = {
+                **self._base(
+                    device=device,
+                    unique_id=f"flexdisplay_{slug}_physical_button",
+                    state_topic=f"{self.config.topic_prefix}/{device_id}/event",
+                ),
+                "name": "Physical button",
+                "event_types": ["short", "double", "long"],
+                "value_template": "{{ value_json.event_type }}",
+            }
+            configs.append((f"event/{slug}/physical_button", event))
         image = {
             **self._base(
                 device=device,
@@ -1099,6 +1261,7 @@ class MqttService:
                 "live_mode",
                 "intelligent_sleep",
                 "stay_awake_on_usb",
+                "frontlight",
             )),
             *(f"number/{slug}/{key}" for key in (
                 "refresh_interval",
@@ -1108,6 +1271,8 @@ class MqttService:
                 "low_battery_multiplier",
                 "unchanged_multiplier",
                 "manual_wake_grace",
+                "frontlight_brightness",
+                "frontlight_warmth",
             )),
             *(f"select/{slug}/{key}" for key in (
                 "mode",
@@ -1122,6 +1287,17 @@ class MqttService:
                 "active_start",
                 "active_end",
             )),
+            *(f"sensor/{slug}/{key}" for key in (
+                "board_id",
+                "hardware_revision",
+                "mcu_family",
+                "flash_size",
+                "frontlight_brightness",
+                "frontlight_warmth",
+            )),
+            f"binary_sensor/{slug}/frontlight_on",
+            f"event/{slug}/physical_button",
+            f"update/{slug}/firmware",
         }
         for topic_suffix in capability_topics - published_topics:
             self.client.publish(
@@ -1142,6 +1318,8 @@ class MqttService:
         events = state.get("recent_button_events") or []
         if events and isinstance(events[-1], dict):
             event = events[-1]
+            if event.get("button") not in descriptor.inputs.event_types:
+                return
             identity = ":".join(
                 str(event.get(key) or "")
                 for key in ("sequence", "button", "gesture", "uptime")

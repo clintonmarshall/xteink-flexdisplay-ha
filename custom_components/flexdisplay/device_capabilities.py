@@ -31,6 +31,7 @@ _ANDROID_ACTIONS = (_X_ACTIONS - {"install"}) | {
 }
 _X3_ALIASES = frozenset({"X3", "XTEINKX3"})
 _X4_ALIASES = frozenset({"X4", "XTEINKX4"})
+_X4_PRO_ALIASES = frozenset({"X4PRO", "XTEINKX4PRO"})
 _NOTE4_ALIASES = frozenset({"N4", "NOTE4", "ZECTRIXNOTE4"})
 _ANDROID_ALIASES = frozenset(
     {
@@ -107,6 +108,61 @@ def is_note4(record: Mapping[str, Any]) -> bool:
     return firmware_provider(record) == "note4"
 
 
+def is_android_receiver(record: Mapping[str, Any]) -> bool:
+    """Return whether audio/display controls belong to an Android receiver."""
+    family = str(_descriptor(record).get("family") or record.get("device_family") or "")
+    return (
+        family == "android_receiver"
+        or firmware_provider(record) == "android_app"
+        or _model_key(record) in _ANDROID_ALIASES
+    )
+
+
+def supports_audio(record: Mapping[str, Any]) -> bool:
+    """Return whether receiver volume/mute controls are available."""
+    reported = _section(record, "management").get("supports_audio")
+    if isinstance(reported, bool):
+        return reported
+    return is_note4(record) or is_android_receiver(record)
+
+
+def input_event_types(record: Mapping[str, Any]) -> tuple[str, ...]:
+    """Return admitted input event names without trusting a generic model."""
+    reported = _section(record, "inputs").get("event_types")
+    if isinstance(reported, (list, tuple)):
+        return tuple(str(item) for item in reported if item)
+    if _model_key(record) in _X3_ALIASES | _X4_ALIASES | _NOTE4_ALIASES:
+        return ("back", "confirm", "left", "right", "up", "down", "power")
+    return ()
+
+
+class DynamicInputEventContract:
+    """Keep an event entity synchronized with the latest device identity."""
+
+    @property
+    def event_types(self) -> list[str]:
+        """Return current admitted event types instead of a construction snapshot."""
+        return list(input_event_types(self.record))
+
+    def _record_supported(self, record: Mapping[str, Any]) -> bool:
+        """Make a stale event entity unavailable after capability removal."""
+        return bool(input_event_types(record))
+
+
+def supports_frontlight(record: Mapping[str, Any], control: str) -> bool:
+    """Return one explicitly admitted frontlight surface."""
+    field = {
+        "on": "supports_on",
+        "brightness": "supports_brightness",
+        "warmth": "supports_warmth",
+    }.get(control)
+    if not field:
+        return False
+    available = _section(record, "frontlight").get("available")
+    supported = _section(record, "frontlight").get(field)
+    return available is True and supported is True
+
+
 def device_manufacturer(record: Mapping[str, Any]) -> str:
     """Return a family-appropriate Home Assistant manufacturer label."""
     family = str(_descriptor(record).get("family") or record.get("device_family") or "")
@@ -137,6 +193,8 @@ def firmware_manageable(record: Mapping[str, Any]) -> bool:
     manageable = _section(record, "firmware").get("manageable")
     if isinstance(manageable, bool):
         return manageable
+    if _model_key(record) in _X4_PRO_ALIASES:
+        return False
     return firmware_provider(record) in {"xteink", "note4"}
 
 
@@ -145,6 +203,8 @@ def supports_xteink_ota(record: Mapping[str, Any]) -> bool:
     supported = _section(record, "firmware").get("supports_xteink_ota")
     if isinstance(supported, bool):
         return supported
+    if _model_key(record) in _X4_PRO_ALIASES:
+        return False
     return firmware_provider(record) == "xteink"
 
 
@@ -153,6 +213,8 @@ def reports_battery(record: Mapping[str, Any]) -> bool:
     reported = _section(record, "power").get("reports_battery")
     if isinstance(reported, bool):
         return reported
+    if _model_key(record) in _X4_PRO_ALIASES:
+        return False
     return firmware_provider(record) in {"xteink", "note4"}
 
 
@@ -161,6 +223,8 @@ def reports_usb_power(record: Mapping[str, Any]) -> bool:
     reported = _section(record, "power").get("reports_usb_power")
     if isinstance(reported, bool):
         return reported
+    if _model_key(record) in _X4_PRO_ALIASES:
+        return False
     return firmware_provider(record) in {"xteink", "note4"}
 
 
@@ -173,6 +237,8 @@ def management_supports(record: Mapping[str, Any], capability: str) -> bool:
 
     provider = firmware_provider(record)
     model = _model_key(record)
+    if model in _X4_PRO_ALIASES:
+        return False
     generic = any(marker in model for marker in _GENERIC_MARKERS)
     if capability in {"provisioning", "dashboard_profiles", "fleet_policy"}:
         return provider in {"xteink", "note4", "android_app"} or generic
@@ -199,6 +265,8 @@ def management_modes(record: Mapping[str, Any]) -> tuple[str, ...]:
         return tuple(str(mode) for mode in reported if mode)
 
     provider = firmware_provider(record)
+    if _model_key(record) in _X4_PRO_ALIASES:
+        return ()
     if provider == "xteink":
         return ("reader", "home_assistant", "trmnl", "opendisplay", "photo_frame")
     if provider in {"note4", "android_app"}:

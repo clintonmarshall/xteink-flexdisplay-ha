@@ -86,6 +86,75 @@ validation and recovery. Until admission is complete, retain unknown devices as
 external, read-only observations and expose no firmware, provisioning, policy,
 reset, or command actions for them.
 
+### X4 Pro admission record
+
+X4 Pro firmware remains owned by the external authoritative Forgejo repository
+`clintonmarshall/xteink-flexdisplay`; this platform owns only the Bridge,
+Studio, MQTT, and Home Assistant capability contract. The external admission
+record is `firmware/docs/flex/X4_PRO_HARDWARE_ADMISSION.md` on branch
+`codex/x4pro-hardware-admission-current`. That branch is pending review and is
+not a published compatibility claim. Its pinned upstream evidence is FreeInk commit
+`61f0b2b5c5bb2cb6f84a26fca77535313658d39d`, documented there at
+`docs/xteink-x4pro-support.md`. Do not copy the firmware source or board
+definitions into this repository.
+
+Admission is an exact conjunction, never a product-name or display-size
+inference:
+
+- Model header `X-FlexDisplay-Model: X4_PRO` maps to platform key `x4_pro`.
+- Board header `X-FlexDisplay-Board-ID: xteink_x4_pro` must be present.
+- `X-FlexDisplay-Hardware-Revision` and `X-FlexDisplay-MCU-Family` must report
+  the confirmed pairing `s3` with `esp32-s3`.
+  `X-FlexDisplay-Flash-Size` and `X-FlexDisplay-PSRAM-Size` carry byte counts;
+  the admitted S3 capability profile requires exactly 16 MiB flash and 8 MiB
+  PSRAM. Both sizes must match any future artifact manifest. A revision, MCU,
+  or memory size must not be inferred from the model.
+- `X-FlexDisplay-Firmware-Artifact: x4pro_s3` reports the running artifact
+  family verbatim for diagnosis. Bridge persists and exposes this value, but
+  the header is evidence only and cannot grant firmware eligibility.
+- The reviewed S3 contract uses artifact family `x4pro_s3`. A manifest must
+  match model, board ID, revision, MCU family, flash size, PSRAM size, and the
+  reported artifact family before any future install surface can be enabled.
+  No such manifest or artifact is packaged by the platform today, so `install`
+  remains absent.
+- No P4 X4 Pro has been verified. Any `p4`/`esp32-p4` or other non-S3 report has
+  no admitted artifact, pin/partition contract, or device capabilities and
+  remains read-only even if it claims S3 capability tokens.
+
+An admitted S3 runtime may report only the explicit tokens `touch`,
+`capacitive-home`, `side-buttons`, `frontlight`,
+`frontlight-brightness`, `frontlight-warmth`, and `sdmmc`. Physical events are
+`home`, `side_previous`, `side_next`, and `power`. Frontlight power, brightness,
+and warmth are independent controls. Every X4 Pro check-in must freshly report
+all identity, memory, artifact, and capability headers. An omitted field is
+cleared rather than inherited from the prior check-in, and missing identity
+fields or capability tokens remove the corresponding surface. Non-S3 claims do
+not promote a device into the S3 profile.
+
+The existing Bridge check-in transport may retain X4 Pro identity and
+telemetry for diagnosis, but an unauthenticated header claim does not authorize
+firmware or management. Studio and the authenticated Bridge API, broker ACLs
+for MQTT, and the Home Assistant integration must all consume the same
+capability descriptor. They must not expose command, reset, provisioning,
+frontlight, input, or firmware controls when that descriptor does not explicitly
+admit them. Firmware delivery must use the external owner's reviewed immutable
+artifact metadata and checksum; it must never reuse the X3/X4 packaged channel.
+
+Before enabling an X4 Pro firmware artifact, record its immutable source commit,
+byte size and SHA-256, durable known-good recovery artifact, exact partition and
+pin evidence, and stable device identity. Bind one USB-powered S3 canary to that
+identity, verify recovery before writing, then verify boot/check-in, rendering,
+touch, capacitive Home, side and Power events, frontlight brightness and warmth,
+SDMMC, and rollback after reboot. Any future non-S3 revision requires its own
+separate evidence and canary admission; S3 results cannot authorize it.
+
+Older consumers and older device firmware have a fail-closed fallback. An
+`X4_PRO` report without the new identity headers remains a known presentation
+profile but read-only; an unknown consumer should classify it as unsupported,
+not substring-match it to X4. Unknown capability tokens are ignored, queued
+legacy X4 install commands are cancelled when corrected X4 Pro identity arrives,
+and the 480 × 800 logical preview does not establish firmware compatibility.
+
 ## Releases
 
 Follow `docs/RELEASE.md`. Publishing and deployment run only through reviewed

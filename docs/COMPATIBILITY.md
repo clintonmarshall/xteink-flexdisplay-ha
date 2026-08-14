@@ -11,6 +11,7 @@ belong in inventory or release evidence, never in this table.
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
+| X4 Pro external firmware | Not released | Family identity/admission contract is branch-pending in external Forgejo repository `clintonmarshall/xteink-flexdisplay`, path `firmware/docs/flex/X4_PRO_HARDWARE_ADMISSION.md` on `codex/x4pro-hardware-admission-current`. The correctly bound hardware is S3 with 16 MiB flash and 8 MiB PSRAM and uses artifact family `x4pro_s3`, but this platform release contains no compatible manifest or artifact and advertises no install action. Any non-S3 or incomplete report remains read-only. |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | No minimum declared | Bridge App and integration; each release must record the exact tested Home Assistant Core version in its release evidence |
 
@@ -30,6 +31,17 @@ Studio, MQTT, and the Home Assistant integration. Legacy X3/X4 check-ins remain
 accepted; devices without trusted family or capability evidence are presented
 read-only and excluded from firmware, provisioning, policy, and command actions.
 Packaged device firmware versions are unchanged.
+
+X4 Pro is an external, not-yet-released target. Its canonical model is
+`X4_PRO` (`x4_pro` in platform APIs); it never falls back to generic X4.
+Platform consumers that do not receive the exact board, hardware revision,
+MCU, 16 MiB flash, 8 MiB PSRAM, and capability evidence must keep it
+read-only. Studio recognizes `X4_PRO` as its own 480 × 800 preview target and
+does not offer legacy X4 firmware or physical-button controls for it. Older
+Bridge, Studio, MQTT, and Home Assistant consumers should treat `X4_PRO` as
+unknown rather than offering X3/X4 firmware or management actions. The logical
+480 × 800 preview alone does not establish device image ingestion, command,
+provisioning, or OTA compatibility.
 
 Platform 0.46.0 content packs are immutable and use the exact opaque-token
 manifest and file URLs advertised by the Bridge. Current packaged X3/X4

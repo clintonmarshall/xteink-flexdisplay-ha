@@ -42,6 +42,7 @@ LIFECYCLE = _load_entity_lifecycle()
 def test_legacy_firmware_fallback_is_an_exact_allowlist() -> None:
     expected = {
         "XTEINK_X4": ("xteink", True, True),
+        "X4_PRO": ("none", False, False),
         "ZECTRIX_NOTE4": ("note4", True, False),
         "ROOK": ("android_app", False, False),
         "CHECKERS": ("android_app", False, False),
@@ -124,6 +125,7 @@ def test_management_control_fallback_matches_each_legacy_family() -> None:
     android = {"model": "CHECKERS"}
     generic = {"model": "ESP32-S3-LCD"}
     unknown = {"model": "mystery"}
+    x4_pro = {"model": "X4_PRO", "firmware_provider": "xteink"}
 
     assert CAPABILITIES.management_supports(x4, "opendisplay_policy") is True
     assert CAPABILITIES.management_supports(note4, "opendisplay_policy") is False
@@ -134,6 +136,149 @@ def test_management_control_fallback_matches_each_legacy_family() -> None:
     assert CAPABILITIES.management_modes(generic) == ("home_assistant",)
     assert CAPABILITIES.management_modes(unknown) == ()
     assert CAPABILITIES.management_supports(unknown, "provisioning") is False
+    assert CAPABILITIES.management_supports(x4_pro, "fleet_policy") is False
+    assert CAPABILITIES.management_modes(x4_pro) == ()
+
+
+def test_x4_pro_surfaces_require_explicit_bridge_capabilities() -> None:
+    p4 = {
+        "model": "X4_PRO",
+        "firmware_provider": "xteink",
+        "device_capabilities": {
+            "firmware": {
+                "provider": "xteink",
+                "manageable": False,
+                "supports_xteink_ota": False,
+            },
+            "management": {"supports_fleet_policy": False},
+            "inputs": {"event_types": []},
+            "frontlight": {
+                "available": None,
+                "supports_on": False,
+                "supports_brightness": False,
+                "supports_warmth": False,
+            },
+        },
+    }
+    s3 = {
+        **p4,
+        "device_capabilities": {
+            **p4["device_capabilities"],
+            "inputs": {
+                "event_types": ["home", "side_previous", "side_next", "power"]
+            },
+            "frontlight": {
+                "available": True,
+                "supports_on": True,
+                "supports_brightness": True,
+                "supports_warmth": True,
+            },
+        },
+    }
+
+    assert CAPABILITIES.supported_actions(p4) == frozenset()
+    assert CAPABILITIES.input_event_types(p4) == ()
+    assert CAPABILITIES.supports_frontlight(p4, "brightness") is False
+    assert CAPABILITIES.input_event_types(s3) == (
+        "home",
+        "side_previous",
+        "side_next",
+        "power",
+    )
+    assert CAPABILITIES.supports_frontlight(s3, "on") is True
+    assert CAPABILITIES.supports_frontlight(s3, "brightness") is True
+    assert CAPABILITIES.supports_frontlight(s3, "warmth") is True
+
+
+def test_button_event_contract_refreshes_types_and_availability_in_place() -> None:
+    p4 = {
+        "device_capabilities": {"inputs": {"event_types": []}},
+    }
+    s3 = {
+        "device_capabilities": {
+            "inputs": {
+                "event_types": ["home", "side_previous", "side_next", "power"]
+            }
+        },
+    }
+    legacy_x4 = {"model": "XTEINK_X4"}
+
+    class EventProbe(CAPABILITIES.DynamicInputEventContract):
+        def __init__(self, record: dict) -> None:
+            self.current_record = record
+
+        @property
+        def record(self) -> dict:
+            return self.current_record
+
+    probe = EventProbe(s3)
+    assert probe.event_types == ["home", "side_previous", "side_next", "power"]
+    assert probe._record_supported(s3) is True
+
+    probe.current_record = p4
+    assert probe.event_types == []
+    assert probe._record_supported(p4) is False
+
+    probe.current_record = legacy_x4
+    assert probe.event_types == [
+        "back",
+        "confirm",
+        "left",
+        "right",
+        "up",
+        "down",
+        "power",
+    ]
+    assert probe._record_supported(legacy_x4) is True
+
+
+def test_read_only_device_acquires_event_entity_once_after_s3_admission() -> None:
+    class FakeEntity:
+        def __init__(self, device_id: str) -> None:
+            self.unique_id = f"{device_id}_physical_button"
+
+    def factory(_coordinator, device_id: str):
+        record = records[0]
+        return (
+            (FakeEntity(device_id),)
+            if CAPABILITIES.input_event_types(record)
+            else ()
+        )
+
+    records = [
+        {
+            "device_id": "PRO-DYNAMIC01",
+            "device_capabilities": {"inputs": {"event_types": []}},
+        }
+    ]
+    known: set[str] = set()
+    assert LIFECYCLE.collect_new_entities(None, records, factory, known) == []
+
+    records[0]["device_capabilities"]["inputs"]["event_types"] = [
+        "home",
+        "side_previous",
+        "side_next",
+        "power",
+    ]
+    additions = LIFECYCLE.collect_new_entities(None, records, factory, known)
+    assert [entity.unique_id for entity in additions] == [
+        "PRO-DYNAMIC01_physical_button"
+    ]
+    assert LIFECYCLE.collect_new_entities(None, records, factory, known) == []
+
+
+def test_android_audio_controls_are_available_from_family_capabilities() -> None:
+    record = {
+        "model": "CHECKERS",
+        "device_capabilities": {
+            "family": "android_receiver",
+            "firmware": {"provider": "android_app"},
+            "management": {"supports_audio": True},
+        },
+    }
+
+    assert CAPABILITIES.is_android_receiver(record) is True
+    assert CAPABILITIES.supports_audio(record) is True
 
 
 def test_home_assistant_device_identity_uses_normalized_family_metadata() -> None:

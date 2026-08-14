@@ -9,13 +9,9 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import (
-    BUTTON_EVENT_TYPES,
-    EVENT_TYPE,
-    MESHTASTIC_EVENT_TYPE,
-    MESHTASTIC_EVENT_TYPES,
-)
+from .const import EVENT_TYPE, MESHTASTIC_EVENT_TYPE, MESHTASTIC_EVENT_TYPES
 from .coordinator import FlexDisplayCoordinator
+from .device_capabilities import DynamicInputEventContract, input_event_types
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -24,12 +20,15 @@ from .entity import (
 )
 
 
-class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
+class FlexDisplayButtonEvent(
+    DynamicInputEventContract,
+    FlexDisplayEntity,
+    EventEntity,
+):
     """Expose physical presses as a native Home Assistant event entity."""
 
     _attr_translation_key = "physical_button"
     _attr_device_class = EventDeviceClass.BUTTON
-    _attr_event_types: ClassVar[list[str]] = list(BUTTON_EVENT_TYPES)
 
     def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
         super().__init__(coordinator, device_id)
@@ -44,7 +43,7 @@ class FlexDisplayButtonEvent(FlexDisplayEntity, EventEntity):
             if event.data.get("flexdisplay_id") != self.device_id:
                 return
             button = event.data.get("button")
-            if button not in BUTTON_EVENT_TYPES:
+            if button not in self.event_types:
                 return
             self._trigger_event(
                 button,
@@ -108,7 +107,18 @@ async def async_setup_entry(
         entry,
         async_add_entities,
         lambda coordinator, device_id: (
-            FlexDisplayButtonEvent(coordinator, device_id),
+            (FlexDisplayButtonEvent(coordinator, device_id),)
+            if input_event_types(
+                next(
+                    (
+                        item
+                        for item in coordinator.data
+                        if item.get("device_id") == device_id
+                    ),
+                    {},
+                )
+            )
+            else ()
         ),
     )
     setup_flexhub_entities(
