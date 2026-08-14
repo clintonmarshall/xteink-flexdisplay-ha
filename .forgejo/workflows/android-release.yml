@@ -125,7 +125,7 @@ jobs:
           test "$(git rev-parse origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
           test -z "$(git status --porcelain --untracked-files=all)"
           test -n "${ANDROID_SDK_ROOT:-}"
-          python3 scripts/check_release_metadata.py "${REQUESTED_TAG#v}"
+          python3 scripts/check_release_metadata.py --release "${REQUESTED_TAG#v}"
           python3 scripts/check_android_release_metadata.py --require-signer
 
       - name: Build and lint unsigned release package
@@ -149,7 +149,7 @@ jobs:
         run: |
           set -euo pipefail
           test -z "$(git status --porcelain --untracked-files=all)"
-          python3 scripts/check_release_metadata.py "${REQUESTED_TAG#v}"
+          python3 scripts/check_release_metadata.py --release "${REQUESTED_TAG#v}"
           python3 scripts/check_android_release_metadata.py --require-signer
 
       - name: Sign and verify immutable companion assets

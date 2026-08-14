@@ -27,10 +27,19 @@ The project's internal Forgejo repository is the source of truth for
 development, pull requests, tags, and releases. For this repository only,
 GitHub is an approved downstream compatibility mirror for HACS, existing Home
 Assistant consumers, and public release downloads that have first been
-published through Forgejo. Contributors must open pull requests and publish
-tags in Forgejo only. See
+published through Forgejo. The Forgejo-controlled mirror replicates Forgejo
+refs; downstream release automation may create a GitHub compatibility release
+only after the corresponding Forgejo release exists at the same commit.
+Contributors must open pull requests in Forgejo and must not push tags or
+publish releases directly from a developer checkout. See
 `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, and `docs/RELEASE.md` for the
 durable workflow.
+
+Release promotion, Forgejo publication, downstream GitHub publication, and
+Home Assistant deployment are currently blocked until their reviewed Runner
+workflows, isolation, and fixed-purpose credential paths are complete and
+verified. The checked-in release workflows intentionally fail closed and are
+not evidence that publication or deployment is available.
 
 This is the Home Assistant component of the wider FlexDisplay Platform:
 

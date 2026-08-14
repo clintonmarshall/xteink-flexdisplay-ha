@@ -13,7 +13,9 @@ flowchart LR
     M --> R[Forgejo release]
     M --> G[One-way GitHub mirror]
     G --> H[HACS integration]
-    G --> D[Public release assets]
+    R --> V[Verified post-publication handoff]
+    V --> D[GitHub compatibility release]
+    G --> D
     M --> A[Home Assistant app repository]
     A --> B[FlexDisplay Bridge and Studio]
     B --> X[X3 and X4]
@@ -26,7 +28,11 @@ flowchart LR
 
 1. Code, issues, pull requests, reviews, CI, tags, and release notes originate
    in Forgejo.
-2. GitHub accepts only the Forgejo push mirror and release automation.
+2. For this repository only, GitHub accepts the Forgejo push mirror, gated
+   compatibility-release automation after the Forgejo release succeeds, and
+   private Security Advisories. This exception supports HACS, existing Home
+   Assistant consumers, and public assets; it is not precedent for another
+   repository. A mirrored tag alone is not release authorization.
 3. Home Assistant may install the Bridge app directly from Forgejo.
 4. HACS continues to install the integration from the GitHub mirror.
 5. Runtime configuration, credentials, device identities, backups, and local
