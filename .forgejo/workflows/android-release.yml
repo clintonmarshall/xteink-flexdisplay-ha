@@ -34,6 +34,8 @@ jobs:
       FORGEJO_API_URL: ${{ forgejo.api_url }}
       FORGEJO_REPOSITORY: ${{ forgejo.repository }}
       FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+      ANDROID_HOME: /tmp/flexdisplay-android-sdk
+      ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk
     steps:
       - name: Verify exact Forgejo validation status
         shell: bash
@@ -107,6 +109,49 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
           ref: ${{ inputs.tag }}
+
+      - name: Install pinned Android release toolchain
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: |
+          set -euo pipefail
+          test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"
+          apt-get update
+          DEBIAN_FRONTEND=noninteractive apt-get install -y \
+            --no-install-recommends ca-certificates curl openjdk-17-jdk-headless unzip
+          rm -rf /var/lib/apt/lists/*
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+
+          # Android SDK Command-line Tools 12266719.
+          tools_zip=/tmp/commandlinetools-linux-12266719_latest.zip
+          curl --fail --silent --show-error --location --proto '=https' \
+            --tlsv1.2 --noproxy '*' --output "$tools_zip" \
+            https://dl.google.com/android/repository/commandlinetools-linux-12266719_latest.zip
+          printf '%s  %s\n' \
+            '3fab261d5219d582321db0c5670b3bbafd563096bce3f6277eb358807fc15f6e' \
+            "$tools_zip" | sha256sum -c -
+          mkdir -p "$ANDROID_SDK_ROOT/cmdline-tools"
+          unzip -q "$tools_zip" -d "$ANDROID_SDK_ROOT/cmdline-tools"
+          mv "$ANDROID_SDK_ROOT/cmdline-tools/cmdline-tools" \
+            "$ANDROID_SDK_ROOT/cmdline-tools/latest"
+          sdkmanager="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
+          set +o pipefail
+          yes | "$sdkmanager" --licenses >/dev/null 2>&1
+          set -o pipefail
+          "$sdkmanager" --install \
+            'platforms;android-33' 'build-tools;30.0.3'
+          java -version
+          test -x "$ANDROID_SDK_ROOT/build-tools/30.0.3/apksigner"
+          test -x "$ANDROID_SDK_ROOT/build-tools/30.0.3/zipalign"
+          test -x "$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/apkanalyzer"
 
       - name: Verify reviewed release source and metadata
         shell: bash

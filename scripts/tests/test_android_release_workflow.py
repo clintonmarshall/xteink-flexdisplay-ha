@@ -91,6 +91,19 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
             self.workflow,
         )
 
+    def test_release_runner_installs_the_pinned_android_toolchain(self) -> None:
+        checkout = self.workflow.index("- name: Check out the exact release tag")
+        install = self.workflow.index("- name: Install pinned Android release toolchain")
+        metadata = self.workflow.index("- name: Verify reviewed release source")
+        self.assertLess(checkout, install)
+        self.assertLess(install, metadata)
+        self.assertIn(
+            "3fab261d5219d582321db0c5670b3bbafd563096bce3f6277eb358807fc15f6e",
+            self.workflow[install:metadata],
+        )
+        self.assertIn("'platforms;android-33' 'build-tools;30.0.3'", self.workflow)
+        self.assertIn("ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk", self.workflow)
+
     def test_status_and_exact_main_checks_are_fail_closed(self) -> None:
         self.assertIn('payload.get("sha") != expected_sha', self.workflow)
         self.assertIn('payload.get("state") != "success"', self.workflow)
