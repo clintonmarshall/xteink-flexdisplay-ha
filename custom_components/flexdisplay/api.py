@@ -77,6 +77,18 @@ class FlexDisplayApiClient:
             f"/api/v1/devices/{device_id}/screens/current.png"
         )
 
+    async def camera_snapshot(self, device_id: str) -> bytes:
+        """Return the latest explicitly captured Android camera JPEG."""
+        return await self._request_bytes(
+            f"/api/v1/devices/{device_id}/camera/snapshot"
+        )
+
+    async def request_camera_snapshot(self, device_id: str) -> None:
+        """Queue one user-initiated camera snapshot request."""
+        await self._request(
+            "POST", f"/api/v1/devices/{device_id}/camera/snapshot/request"
+        )
+
     async def command(self, device_id: str, command: str) -> None:
         """Queue a command for a device."""
         await self._request("POST", f"/api/v1/devices/{device_id}/commands/{command}")
@@ -154,6 +166,12 @@ class FlexDisplayApiClient:
                 "duration": duration,
                 "actions": actions or [],
             },
+        )
+
+    async def clear_notification(self, device_id: str) -> dict[str, Any]:
+        """Clear the active Android receiver alert."""
+        return await self._request(
+            "DELETE", f"/api/v1/devices/{device_id}/notifications/current"
         )
 
     async def apply_policy(

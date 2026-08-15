@@ -11,7 +11,9 @@
       }
     },
     "error": {
-      "cannot_connect": "Unable to connect to the FlexDisplay Bridge."
+      "cannot_connect": "Unable to connect to the FlexDisplay Bridge.",
+      "api_key_required": "A Bridge API key is required for device and notification management.",
+      "invalid_auth": "The Bridge API key is not valid."
     },
     "abort": {
       "already_configured": "This FlexDisplay Bridge is already configured."
@@ -111,6 +113,27 @@
       },
       "battery_voltage": {
         "name": "Battery voltage"
+      },
+      "battery_status": {
+        "name": "Battery status"
+      },
+      "battery_health": {
+        "name": "Battery health"
+      },
+      "battery_temperature": {
+        "name": "Battery temperature"
+      },
+      "battery_current": {
+        "name": "Battery current"
+      },
+      "battery_plug_type": {
+        "name": "Battery power source"
+      },
+      "battery_observed_at": {
+        "name": "Battery observed"
+      },
+      "camera_policy": {
+        "name": "Camera privacy policy"
       },
       "uptime": {
         "name": "Uptime"
@@ -266,6 +289,33 @@
       },
       "firmware_update_problem": {
         "name": "Firmware update problem"
+      },
+      "battery_charging": {
+        "name": "Battery charging"
+      },
+      "battery_full": {
+        "name": "Battery full"
+      },
+      "battery_health_problem": {
+        "name": "Battery health problem"
+      },
+      "camera_ready": {
+        "name": "Camera ready"
+      },
+      "speaker_ready": {
+        "name": "Speaker ready"
+      },
+      "foreground_active": {
+        "name": "Companion foreground active"
+      },
+      "dock_enabled": {
+        "name": "Dock mode enabled"
+      },
+      "dock_active": {
+        "name": "Dock mode active"
+      },
+      "active_alert": {
+        "name": "Active alert"
       }
     },
     "event": {
@@ -274,11 +324,29 @@
       },
       "meshtastic_message": {
         "name": "Meshtastic message"
+      },
+      "notification_response": {
+        "name": "Notification response"
       }
     },
     "image": {
       "current_screen": {
         "name": "Current screen"
+      }
+    },
+    "camera": {
+      "camera_snapshot": {
+        "name": "Camera snapshot"
+      }
+    },
+    "media_player": {
+      "speaker": {
+        "name": "Speaker"
+      }
+    },
+    "notify": {
+      "display_notification": {
+        "name": "Display notification"
       }
     },
     "button": {
@@ -314,6 +382,12 @@
       },
       "test_chime": {
         "name": "Test chime"
+      },
+      "take_snapshot": {
+        "name": "Take snapshot"
+      },
+      "clear_alert": {
+        "name": "Clear alert"
       },
       "volume_up": {
         "name": "Volume up"
@@ -434,6 +508,9 @@
       },
       "frontlight": {
         "name": "Frontlight"
+      },
+      "microphone_enabled": {
+        "name": "Allow push-to-talk microphone"
       }
     },
     "time": {

@@ -11,8 +11,16 @@ jobs:
     steps:
       # actions/checkout v6
       - uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
       - name: Validate release metadata
-        run: python3 scripts/check_release_metadata.py
+        run: >-
+          python3 scripts/check_release_metadata.py &&
+          python3 scripts/check_android_release_metadata.py &&
+          python3 -m py_compile
+          scripts/check_android_release_metadata.py
+          scripts/verify_android_release.py &&
+          python3 -m unittest discover -s scripts/tests -p 'test_*.py'
       - name: Install Python toolchain
         run: >-
           apt-get update &&

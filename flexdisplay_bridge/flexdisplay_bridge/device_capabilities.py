@@ -46,7 +46,9 @@ ANDROID_ACTIONS = tuple(action for action in XTEINK_ACTIONS if action != "instal
     "brightness-up",
     "brightness-down",
 )
+ANDROID_PHONE_ACTIONS = ANDROID_ACTIONS + ("camera-snapshot",)
 GENERIC_ACTIONS = ("refresh",)
+COLOR_RECEIVER_ACTIONS = ("refresh", "next", "previous", "overview")
 
 XTEINK_MODES = (
     "reader",
@@ -67,6 +69,18 @@ _ROOK_ALIASES = frozenset(
 _CHECKERS_ALIASES = frozenset(
     {"CHECKERS", "ECHOSHOW5", "ECHOSHOW52019", "AMAZONECHOSHOW5"}
 )
+_JC3636_ALIASES = frozenset(
+    {
+        "JC3636",
+        "JC3636W518",
+        "JC3636W518EN",
+        "GUITIONJC3636W518",
+        "TAICHIPI",
+    }
+)
+_ANDROID_PHONE_ALIASES = frozenset(
+    {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
+)
 _GENERIC_MODEL_MARKERS = ("ESP32", "ESP8266", "LCD", "OLED", "TFT")
 _GENERIC_CAPABILITIES = frozenset(
     {
@@ -78,6 +92,8 @@ _GENERIC_CAPABILITIES = frozenset(
         "mqtt-screen-refresh",
         "mqtt-refresh",
         "push-refresh-mqtt",
+        "lvgl-ui-v1",
+        "rgb565",
     }
 )
 _MQTT_WAKE_CAPABILITIES = frozenset(
@@ -188,6 +204,9 @@ class ManagementCapabilities:
     supports_notifications: bool
     supports_audio: bool
     supports_button_actions: bool
+    supports_camera: bool
+    supports_microphone: bool
+    supports_brightness: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -251,6 +270,9 @@ def _management(
     notifications: bool = False,
     audio: bool = False,
     button_actions: bool = True,
+    camera: bool = False,
+    microphone: bool = False,
+    brightness: bool = False,
 ) -> ManagementCapabilities:
     return ManagementCapabilities(
         actions=actions,
@@ -268,6 +290,9 @@ def _management(
         supports_notifications=notifications,
         supports_audio=audio,
         supports_button_actions=button_actions,
+        supports_camera=camera,
+        supports_microphone=microphone,
+        supports_brightness=brightness,
     )
 
 
@@ -329,6 +354,9 @@ _X4_PRO_READ_ONLY_MANAGEMENT = ManagementCapabilities(
     supports_notifications=False,
     supports_audio=False,
     supports_button_actions=False,
+    supports_camera=False,
+    supports_microphone=False,
+    supports_brightness=False,
 )
 
 _X4_PRO = DeviceCapabilityDescriptor(
@@ -386,6 +414,8 @@ _ANDROID_MANAGEMENT = _management(
     notifications=True,
     audio=True,
     button_actions=False,
+    microphone=True,
+    brightness=True,
 )
 
 _ROOK = DeviceCapabilityDescriptor(
@@ -408,6 +438,64 @@ _CHECKERS = replace(
     model_key="checkers",
     label="Echo Show 5 (2019)",
     display=DisplayCapabilities(960, 480, "lcd", True, "rectangular", "png", True),
+)
+
+_JC3636 = DeviceCapabilityDescriptor(
+    family="esp_color_receiver",
+    model_key="jc3636",
+    label="JC3636W518EN",
+    known_model=True,
+    display=DisplayCapabilities(360, 360, "lcd", True, "round", "lvgl-json", True),
+    hardware=replace(_NO_HARDWARE, board_id="jc3636", management_profile="external"),
+    inputs=replace(_NO_INPUTS, touch=True),
+    frontlight=_NO_FRONTLIGHT,
+    power=PowerCapabilities("always_on_color", False, False, True, False),
+    delivery=DeliveryCapabilities("poll", False, False, False, False),
+    # Source exists in the external firmware repository, but Bridge OTA remains
+    # unassigned until an independently verified release artifact/partition
+    # contract is published for this family.
+    firmware=FirmwareCapabilities("external", "none", False, False),
+    management=_management(
+        actions=COLOR_RECEIVER_ACTIONS,
+        modes=("home_assistant",),
+        fleet_policy=True,
+        battery_policy=False,
+        sleep_policy=False,
+        rendering_profile=True,
+        opendisplay_policy=False,
+        page_selection=True,
+        interactions=True,
+    ),
+)
+
+_ANDROID_PHONE = DeviceCapabilityDescriptor(
+    family="android_receiver",
+    model_key="android_phone",
+    label="Android companion",
+    known_model=True,
+    display=DisplayCapabilities(None, None, "lcd", True, "rectangular", "png", True),
+    hardware=replace(_NO_HARDWARE, management_profile="android"),
+    inputs=replace(_NO_INPUTS, touch=True),
+    frontlight=_NO_FRONTLIGHT,
+    power=PowerCapabilities("on_demand", True, True, True, False),
+    delivery=DeliveryCapabilities("long_poll", True, True, False, False),
+    firmware=FirmwareCapabilities("android_app", "android_app", False, False),
+    management=_management(
+        actions=ANDROID_PHONE_ACTIONS,
+        modes=RENDERED_MODES,
+        fleet_policy=True,
+        battery_policy=False,
+        sleep_policy=False,
+        rendering_profile=True,
+        opendisplay_policy=False,
+        page_selection=True,
+        interactions=True,
+        notifications=True,
+        audio=True,
+        camera=True,
+        microphone=True,
+        brightness=True,
+    ),
 )
 
 _GENERIC = DeviceCapabilityDescriptor(
@@ -463,6 +551,9 @@ _UNKNOWN = DeviceCapabilityDescriptor(
         supports_notifications=False,
         supports_audio=False,
         supports_button_actions=False,
+        supports_camera=False,
+        supports_microphone=False,
+        supports_brightness=False,
     ),
 )
 
@@ -477,6 +568,8 @@ DEVICE_CAPABILITY_REGISTRY: Mapping[str, DeviceCapabilityDescriptor] = MappingPr
             _NOTE4,
             _ROOK,
             _CHECKERS,
+            _JC3636,
+            _ANDROID_PHONE,
             _GENERIC,
             _UNKNOWN,
         )
@@ -491,6 +584,8 @@ _MODEL_ALIASES: Mapping[str, str] = MappingProxyType(
         **{alias: "note4" for alias in _NOTE4_ALIASES},
         **{alias: "rook" for alias in _ROOK_ALIASES},
         **{alias: "checkers" for alias in _CHECKERS_ALIASES},
+        **{alias: "jc3636" for alias in _JC3636_ALIASES},
+        **{alias: "android_phone" for alias in _ANDROID_PHONE_ALIASES},
     }
 )
 
@@ -569,7 +664,9 @@ def _generic_descriptor(
         "oled"
         if "oled" in capabilities or "OLED" in normalized_model
         else "lcd"
-        if capabilities.intersection({"lcd", "tft", "always-on-color"})
+        if capabilities.intersection(
+            {"lcd", "tft", "always-on-color", "rgb565", "lvgl-ui-v1"}
+        )
         or "LCD" in normalized_model
         or "TFT" in normalized_model
         else "eink"
@@ -578,7 +675,9 @@ def _generic_descriptor(
     )
     color = bool(
         technology in {"lcd", "oled"}
-        or capabilities.intersection({"color", "colour", "always-on-color"})
+        or capabilities.intersection(
+            {"color", "colour", "always-on-color", "rgb565", "lvgl-ui-v1"}
+        )
     )
     always_on = bool(color and capabilities.intersection(_ALWAYS_ON_CAPABILITIES))
     mqtt_wake = bool(capabilities.intersection(_MQTT_WAKE_CAPABILITIES))
@@ -591,10 +690,18 @@ def _generic_descriptor(
     )
     management = replace(
         _GENERIC.management,
+        actions=(
+            COLOR_RECEIVER_ACTIONS
+            if "lvgl-ui-v1" in capabilities
+            else _GENERIC.management.actions
+        ),
         supports_battery_policy=reports_battery and not always_on,
         supports_sleep_policy=not always_on,
-        supports_page_selection="page-navigation" in capabilities,
-        supports_interactions=touch and "interactions" in capabilities,
+        supports_page_selection=bool(
+            capabilities.intersection({"page-navigation", "lvgl-ui-v1"})
+        ),
+        supports_interactions=touch
+        and bool(capabilities.intersection({"interactions", "lvgl-ui-v1"})),
         supports_notifications="notifications" in capabilities,
         supports_audio="audio" in capabilities,
     )

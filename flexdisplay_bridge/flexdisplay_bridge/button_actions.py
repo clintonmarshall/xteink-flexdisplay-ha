@@ -20,6 +20,8 @@ BLOCKED_SERVICES = {
 }
 MAX_MAPPINGS = len(BUTTONS) * len(GESTURES)
 MAX_SERVICE_DATA_BYTES = 4096
+MAX_SERVICE_BYTES = 128
+MAX_ENTITY_BYTES = 128
 
 
 class ButtonActionValidationError(ValueError):
@@ -52,7 +54,8 @@ def resolve_action(
     return {**configured, "source": "configured"} if configured else default_action(button, gesture, mode)
 
 
-def _normalized_action(raw: Any) -> dict[str, Any]:
+def normalize_action(raw: Any) -> dict[str, Any]:
+    """Validate and normalize one reusable FlexDisplay action."""
     if not isinstance(raw, dict):
         raise ButtonActionValidationError("Each mapping requires an action object")
     action_type = str(raw.get("type") or "")
@@ -71,23 +74,35 @@ def _normalized_action(raw: Any) -> dict[str, Any]:
     data = raw.get("data") or {}
     if not SERVICE_PATTERN.fullmatch(service):
         raise ButtonActionValidationError("Home Assistant service must use domain.service")
+    if len(service.encode("utf-8", errors="strict")) > MAX_SERVICE_BYTES:
+        raise ButtonActionValidationError("Home Assistant service is too long")
     if service.split(".", 1)[0] in BLOCKED_SERVICE_DOMAINS or service in BLOCKED_SERVICES:
         raise ButtonActionValidationError("That administrative Home Assistant service is not allowed")
     if entity_id and not ENTITY_PATTERN.fullmatch(entity_id):
         raise ButtonActionValidationError("Target entity must use domain.object_id")
+    if len(entity_id.encode("utf-8", errors="strict")) > MAX_ENTITY_BYTES:
+        raise ButtonActionValidationError("Target entity is too long")
     if not isinstance(data, dict):
         raise ButtonActionValidationError("Service data must be a JSON object")
     try:
-        encoded = json.dumps(data, separators=(",", ":"))
-    except (TypeError, ValueError) as err:
+        encoded = json.dumps(
+            data,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        )
+        encoded_bytes = encoded.encode("utf-8", errors="strict")
+    except (TypeError, ValueError, UnicodeError, RecursionError) as err:
         raise ButtonActionValidationError("Service data must be valid JSON") from err
-    if len(encoded.encode("utf-8")) > MAX_SERVICE_DATA_BYTES:
+    if len(encoded_bytes) > MAX_SERVICE_DATA_BYTES:
         raise ButtonActionValidationError("Service data is larger than 4 KB")
     normalized: dict[str, Any] = {"type": "home_assistant", "service": service}
     if entity_id:
         normalized["entity_id"] = entity_id
     if data:
-        normalized["data"] = data
+        # Round-trip so mutable/non-standard mapping subclasses cannot leak
+        # into persisted receiver action bindings.
+        normalized["data"] = json.loads(encoded)
     return normalized
 
 
@@ -119,7 +134,7 @@ def normalize_mappings(payload: Any) -> dict[str, dict[str, Any]]:
         key = mapping_key(button, gesture, mode)
         if key in result:
             raise ButtonActionValidationError("A button gesture can only be mapped once")
-        result[key] = _normalized_action(raw.get("action"))
+        result[key] = normalize_action(raw.get("action"))
     return result
 
 

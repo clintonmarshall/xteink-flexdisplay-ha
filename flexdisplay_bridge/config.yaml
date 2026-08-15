@@ -38,6 +38,7 @@ options:
   screen_history_enabled: true
   screen_history_limit: 5
   bridge_api_key: ""
+  lvgl_receiver_key_master: ""
   firmware_version: 1.5.0-flexdisplay.0.39.0
   firmware_url: packaged
   firmware_sha256: eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7
@@ -75,6 +76,7 @@ schema:
   screen_history_enabled: bool
   screen_history_limit: int(1,20)
   bridge_api_key: password
+  lvgl_receiver_key_master: password
   firmware_version: str
   firmware_url: str
   firmware_sha256: str

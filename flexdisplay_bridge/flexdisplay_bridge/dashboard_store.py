@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 import threading
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
+
+from .button_actions import ButtonActionValidationError, normalize_action
 
 from .config import (
     DashboardPageConfig,
@@ -22,6 +25,9 @@ TILE_SOURCES = {"home_assistant", "static"}
 IMAGE_FITS = {"cover", "contain"}
 BADGE_THEMES = {"classic", "bold", "diagonal", "halftone"}
 BADGE_ASSET_PATTERN = re.compile(r"^[a-f0-9]{24}$")
+COLOR_THEMES = {"auto", "midnight", "ocean", "sunrise", "paper"}
+COLOR_ROLES = {"auto", "primary", "info", "success", "warning", "danger"}
+CONTROL_STYLES = {"auto", "read_only", "button", "toggle"}
 ICONS = {
     "auto",
     "home",
@@ -68,9 +74,10 @@ def _bounded_value(value: Any, maximum: int = 1024) -> str:
 
 def _number(value: Any, fallback: float) -> float:
     try:
-        return float(value)
+        selected = float(value)
     except (TypeError, ValueError):
         return fallback
+    return selected if math.isfinite(selected) else fallback
 
 
 def _integer(value: Any, fallback: int, minimum: int, maximum: int) -> int:
@@ -153,6 +160,9 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
     raw_pages = payload.get("pages")
     if not isinstance(raw_pages, list) or not 1 <= len(raw_pages) <= 12:
         raise DashboardValidationError("A profile must contain between 1 and 12 pages")
+    color_theme = str(payload.get("color_theme") or "auto").lower()
+    if color_theme not in COLOR_THEMES:
+        raise DashboardValidationError("Profile has an unsupported colour theme")
 
     pages: list[DashboardPageConfig] = []
     for page_index, raw_page in enumerate(raw_pages):
@@ -252,6 +262,24 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                 50,
                 150,
             )
+            color_role = str(raw_entity.get("color_role") or "auto").lower()
+            if color_role not in COLOR_ROLES:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported colour role"
+                )
+            control_style = str(raw_entity.get("control_style") or "auto").lower()
+            if control_style not in CONTROL_STYLES:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1} has an unsupported control style"
+                )
+            try:
+                tap_action = normalize_action(
+                    raw_entity.get("tap_action", {"type": "none"})
+                )
+            except ButtonActionValidationError as err:
+                raise DashboardValidationError(
+                    f"Tile {tile_index + 1} on page {page_index + 1}: {err}"
+                ) from err
             entities.append(
                 EntityConfig(
                     entity_id=entity_id,
@@ -278,11 +306,14 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
                     badge_theme=badge_theme,
                     text_scale=text_scale,
                     qr_scale=qr_scale,
+                    color_role=color_role,
+                    control_style=control_style,
+                    tap_action=tap_action,
                 )
             )
         pages.append(
             DashboardPageConfig(
-                title=_bounded_text(raw_page.get("title"), f"PAGE {page_index + 1}", 40).upper(),
+                title=_bounded_text(raw_page.get("title"), f"PAGE {page_index + 1}", 48).upper(),
                 entities=tuple(entities),
                 layout=layout,
                 activation=_activation(raw_page.get("activation"), page_index + 1),
@@ -297,6 +328,7 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
         name=name,
         pages=tuple(pages),
         auto_rotate_seconds=max(0, min(86400, rotation)),
+        color_theme=color_theme,
     )
 
 
@@ -304,6 +336,7 @@ def profile_payload(profile: DashboardProfileConfig) -> dict[str, Any]:
     return {
         "name": profile.name,
         "auto_rotate_seconds": profile.auto_rotate_seconds,
+        "color_theme": profile.color_theme,
         "pages": [
             {
                 "title": page.title,
@@ -346,12 +379,18 @@ class DashboardProfileStore:
                     continue
                 selected = str(name)
                 if value.get("pages") == []:
+                    color_theme = str(value.get("color_theme") or "auto").lower()
+                    if color_theme not in COLOR_THEMES:
+                        continue
                     loaded[selected] = DashboardProfileConfig(
                         name=selected,
-                        auto_rotate_seconds=max(
+                        auto_rotate_seconds=_integer(
+                            value.get("auto_rotate_seconds"),
                             0,
-                            min(86400, int(value.get("auto_rotate_seconds", 0))),
+                            0,
+                            86400,
                         ),
+                        color_theme=color_theme,
                     )
                 else:
                     loaded[selected] = parse_profile(selected, value)

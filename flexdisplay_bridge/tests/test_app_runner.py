@@ -187,12 +187,17 @@ def test_main_records_configured_and_effective_firmware_sources(
         for release in LEGACY_PACKAGED_FIRMWARE
         if release["firmware_version"] == "1.4.1-flexdisplay.0.24.0"
     )
+    legacy["lvgl_receiver_key_master"] = "bridge-only-test-master"
     options_path = tmp_path / "options.json"
     options_path.write_text(json.dumps(legacy), encoding="utf-8")
     config_path = tmp_path / "config.yaml"
     config_path.write_text("dashboard: {}\n", encoding="utf-8")
     monkeypatch.setattr(app_runner, "OPTIONS_PATH", options_path)
     monkeypatch.setattr(app_runner, "CONFIG_PATH", config_path)
+    receiver_master_path = tmp_path / "receiver-master"
+    monkeypatch.setattr(
+        app_runner, "LVGL_RECEIVER_MASTER_PATH", receiver_master_path
+    )
     monkeypatch.setattr(app_runner.uvicorn, "run", lambda *args, **kwargs: None)
     environment: dict[str, str] = {}
     monkeypatch.setattr(app_runner.os, "environ", environment)
@@ -208,3 +213,8 @@ def test_main_records_configured_and_effective_firmware_sources(
     assert environment["FLEXDISPLAY_FIRMWARE_CONFIG_SOURCE"] == (
         "packaged_release"
     )
+    assert receiver_master_path.read_text(encoding="utf-8") == (
+        "bridge-only-test-master"
+    )
+    assert receiver_master_path.stat().st_mode & 0o077 == 0
+    assert "FLEXDISPLAY_LVGL_RECEIVER_KEY_MASTER" not in environment

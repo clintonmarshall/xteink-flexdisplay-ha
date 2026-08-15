@@ -46,17 +46,30 @@ final class ReceiverProfile {
                     false,
                     "echo_show_5");
         }
+        if (identity.contains("rook") || !BuildConfig.COMPANION) {
+            return new ReceiverProfile(
+                    "ROOK",
+                    "Echo Spot",
+                    "ROOK",
+                    480,
+                    480,
+                    true,
+                    "echo_spot");
+        }
         return new ReceiverProfile(
-                "ROOK",
-                "Echo Spot",
-                "ROOK",
-                480,
-                480,
-                true,
-                "echo_spot");
+                "ANDROID",
+                "Android phone",
+                "PHONE",
+                1200,
+                675,
+                false,
+                "android_phone");
     }
 
     String capabilities() {
+        if (BuildConfig.COMPANION) {
+            return "android,color,touch,png,empty-unchanged,interactions,notifications,audio,assist,long-poll-refresh,companion,battery,usb";
+        }
         String base = "android,color,touch,png,empty-unchanged,kiosk,interactions,notifications,audio,assist,always-on-color,long-poll-refresh";
         return round ? base + ",round-display" : base;
     }

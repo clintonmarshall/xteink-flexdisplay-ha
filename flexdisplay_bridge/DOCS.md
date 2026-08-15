@@ -126,8 +126,9 @@ Options:
   volume.
 - `screen_history_limit`: number of rendered screens retained per device,
   between 1 and 20.
-- `bridge_api_key`: protects bridge command endpoints and should also be
-  entered in the HACS integration.
+- `bridge_api_key`: required for the full device inventory, device detail,
+  camera, and notification management endpoints. Enter the same key in the
+  FlexDisplay Home Assistant integration; `/healthz` remains public.
 - `firmware_version`: latest FlexDisplay application version offered to devices.
 - `firmware_url`: direct HTTP(S) URL for the application `firmware.bin`.
 - `firmware_sha256`: lowercase SHA-256 digest for that exact file.

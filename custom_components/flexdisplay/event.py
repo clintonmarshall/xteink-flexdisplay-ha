@@ -9,9 +9,19 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import EVENT_TYPE, MESHTASTIC_EVENT_TYPE, MESHTASTIC_EVENT_TYPES
+from .const import (
+    EVENT_TYPE,
+    MESHTASTIC_EVENT_TYPE,
+    MESHTASTIC_EVENT_TYPES,
+    NOTIFICATION_EVENT_TYPE,
+    NOTIFICATION_RESPONSE_EVENT_TYPES,
+)
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import DynamicInputEventContract, input_event_types
+from .device_capabilities import (
+    DynamicInputEventContract,
+    input_event_types,
+    management_supports,
+)
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -62,6 +72,51 @@ class FlexDisplayButtonEvent(
         self.async_on_remove(self.hass.bus.async_listen(EVENT_TYPE, handle_event))
 
 
+class FlexDisplayNotificationResponseEvent(FlexDisplayEntity, EventEntity):
+    """Expose paired receiver outcomes as data-only native HA events."""
+
+    _attr_translation_key = "notification_response"
+    _attr_event_types: ClassVar[list[str]] = list(NOTIFICATION_RESPONSE_EVENT_TYPES)
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_notification_response"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "notifications")
+
+    async def async_added_to_hass(self) -> None:
+        """Listen only for Bridge-deduplicated response data for this receiver."""
+        await super().async_added_to_hass()
+
+        @callback
+        def handle_event(event: Event) -> None:
+            if event.data.get("flexdisplay_id") != self.device_id:
+                return
+            outcome = str(event.data.get("outcome") or "")
+            if outcome not in NOTIFICATION_RESPONSE_EVENT_TYPES:
+                return
+            attributes = {
+                key: event.data.get(key)
+                for key in (
+                    "event_id",
+                    "notification_id",
+                    "action_id",
+                    "received_at",
+                    "device_reported_at",
+                    "trust",
+                    "action_execution_success",
+                )
+                if event.data.get(key) is not None
+            }
+            self._trigger_event(outcome, attributes)
+            self.async_write_ha_state()
+
+        self.async_on_remove(
+            self.hass.bus.async_listen(NOTIFICATION_EVENT_TYPE, handle_event)
+        )
+
+
 class FlexHubMeshtasticEvent(FlexHubEntity, EventEntity):
     """Expose Meshtastic traffic as a native Home Assistant event entity."""
 
@@ -103,24 +158,23 @@ async def async_setup_entry(
 ) -> None:
     """Create physical-button event entities."""
     del hass
-    setup_dynamic_entities(
-        entry,
-        async_add_entities,
-        lambda coordinator, device_id: (
-            (FlexDisplayButtonEvent(coordinator, device_id),)
-            if input_event_types(
-                next(
-                    (
-                        item
-                        for item in coordinator.data
-                        if item.get("device_id") == device_id
-                    ),
-                    {},
-                )
-            )
-            else ()
-        ),
-    )
+    def entities_for_device(
+        coordinator: FlexDisplayCoordinator, device_id: str
+    ) -> tuple[EventEntity, ...]:
+        record = next(
+            (item for item in coordinator.data if item.get("device_id") == device_id),
+            {},
+        )
+        return (
+            *((FlexDisplayButtonEvent(coordinator, device_id),) if input_event_types(record) else ()),
+            *(
+                (FlexDisplayNotificationResponseEvent(coordinator, device_id),)
+                if management_supports(record, "notifications")
+                else ()
+            ),
+        )
+
+    setup_dynamic_entities(entry, async_add_entities, entities_for_device)
     setup_flexhub_entities(
         entry,
         async_add_entities,

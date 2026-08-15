@@ -6,12 +6,30 @@ android {
     namespace "au.com.ldcs.flexdisplay.rook"
     compileSdk 33
 
+    flavorDimensions "receiverMode"
+
     defaultConfig {
         applicationId "au.com.ldcs.flexdisplay.rook"
         minSdk 24
         targetSdk 33
+        // Android receiver versions are independent from the Bridge platform.
+        // versionCode must increase for every published Companion APK signed
+        // by the permanent FlexDisplay Companion release key.
         versionCode 5
         versionName "0.5.0"
+    }
+
+    productFlavors {
+        kiosk {
+            dimension "receiverMode"
+            buildConfigField "boolean", "COMPANION", "false"
+        }
+        companion {
+            dimension "receiverMode"
+            applicationIdSuffix ".companion"
+            versionNameSuffix "-companion"
+            buildConfigField "boolean", "COMPANION", "true"
+        }
     }
 
     buildTypes {
@@ -25,4 +43,8 @@ android {
         sourceCompatibility JavaVersion.VERSION_11
         targetCompatibility JavaVersion.VERSION_11
     }
+}
+
+dependencies {
+    testImplementation "junit:junit:4.13.2"
 }

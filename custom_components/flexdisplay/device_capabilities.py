@@ -43,7 +43,13 @@ _ANDROID_ALIASES = frozenset(
         "ECHOSHOW5",
         "ECHOSHOW52019",
         "AMAZONECHOSHOW5",
+        "ANDROID",
+        "ANDROIDPHONE",
+        "ANDROIDCOMPANION",
     }
+)
+_ANDROID_COMPANION_ALIASES = frozenset(
+    {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
 )
 _GENERIC_MARKERS = ("ESP32", "ESP8266", "LCD", "OLED", "TFT")
 
@@ -163,6 +169,19 @@ def supports_frontlight(record: Mapping[str, Any], control: str) -> bool:
     return available is True and supported is True
 
 
+def is_android_companion(record: Mapping[str, Any]) -> bool:
+    """Return whether the receiver is a foreground-only Android phone app."""
+    return _model_key(record) in _ANDROID_COMPANION_ALIASES
+
+
+def desired_microphone_enabled(record: Mapping[str, Any]) -> bool:
+    """Fail closed for a phone companion until the user explicitly enables it."""
+    value = record.get("desired_microphone_enabled")
+    if isinstance(value, bool):
+        return value
+    return _model_key(record) not in _ANDROID_COMPANION_ALIASES
+
+
 def device_manufacturer(record: Mapping[str, Any]) -> str:
     """Return a family-appropriate Home Assistant manufacturer label."""
     family = str(_descriptor(record).get("family") or record.get("device_family") or "")
@@ -171,6 +190,8 @@ def device_manufacturer(record: Mapping[str, Any]) -> str:
         return "XTEINK / FlexDisplay"
     if provider == "note4":
         return "Zectrix / FlexDisplay"
+    if _model_key(record) in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}:
+        return str(record.get("hardware_manufacturer") or "Android / FlexDisplay")
     if family == "android_receiver" or provider == "android_app":
         return "Amazon / FlexDisplay"
     if family == "generic_embedded" or any(
@@ -215,7 +236,7 @@ def reports_battery(record: Mapping[str, Any]) -> bool:
         return reported
     if _model_key(record) in _X4_PRO_ALIASES:
         return False
-    return firmware_provider(record) in {"xteink", "note4"}
+    return firmware_provider(record) in {"xteink", "note4", "android_app"}
 
 
 def reports_usb_power(record: Mapping[str, Any]) -> bool:
@@ -225,7 +246,7 @@ def reports_usb_power(record: Mapping[str, Any]) -> bool:
         return reported
     if _model_key(record) in _X4_PRO_ALIASES:
         return False
-    return firmware_provider(record) in {"xteink", "note4"}
+    return firmware_provider(record) in {"xteink", "note4", "android_app"}
 
 
 def management_supports(record: Mapping[str, Any], capability: str) -> bool:
@@ -252,6 +273,8 @@ def management_supports(record: Mapping[str, Any], capability: str) -> bool:
         return provider == "xteink"
     if capability in {"screen_history", "page_selection"}:
         return provider in {"xteink", "note4", "android_app"}
+    if capability in {"audio", "camera", "microphone", "notifications"}:
+        return provider in {"note4", "android_app"}
     return False
 
 

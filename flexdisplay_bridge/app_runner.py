@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import shutil
+import stat
 from pathlib import Path
 from urllib.request import Request, urlopen
 
@@ -12,6 +13,7 @@ import uvicorn
 
 OPTIONS_PATH = Path("/data/options.json")
 CONFIG_PATH = Path("/config/config.yaml")
+LVGL_RECEIVER_MASTER_PATH = Path("/data/flexdisplay-lvgl-receiver-master")
 DEFAULT_FIRMWARE = {
     "firmware_version": "1.5.0-flexdisplay.0.39.0",
     "firmware_url": "packaged",
@@ -293,6 +295,60 @@ def main() -> None:
         options, "screen_history_limit", 5
     )
     os.environ["FLEXDISPLAY_BRIDGE_API_KEY"] = option(options, "bridge_api_key")
+    receiver_master = option(options, "lvgl_receiver_key_master")
+    if receiver_master:
+        encoded_master = receiver_master.encode("utf-8", errors="strict")
+        if (
+            not 16 <= len(encoded_master) <= 256
+            or any(character < " " or character == "\x7f" for character in receiver_master)
+        ):
+            raise ValueError(
+                "LVGL receiver key master must contain 16-256 UTF-8 bytes without control characters"
+            )
+        LVGL_RECEIVER_MASTER_PATH.parent.mkdir(parents=True, exist_ok=True)
+        temporary_master = LVGL_RECEIVER_MASTER_PATH.with_suffix(".tmp")
+        try:
+            descriptor = os.open(
+                temporary_master,
+                os.O_WRONLY
+                | os.O_CREAT
+                | os.O_TRUNC
+                | getattr(os, "O_NOFOLLOW", 0),
+                0o600,
+            )
+            metadata = os.fstat(descriptor)
+            if not stat.S_ISREG(metadata.st_mode) or metadata.st_uid != os.getuid():
+                os.close(descriptor)
+                raise OSError("LVGL receiver master temporary path is unsafe")
+            os.fchmod(descriptor, 0o600)
+            with os.fdopen(descriptor, "w", encoding="utf-8") as output:
+                output.write(receiver_master)
+                output.flush()
+                os.fsync(output.fileno())
+            temporary_master.replace(LVGL_RECEIVER_MASTER_PATH)
+            LVGL_RECEIVER_MASTER_PATH.chmod(0o600)
+            directory = os.open(LVGL_RECEIVER_MASTER_PATH.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory)
+            finally:
+                os.close(directory)
+        except OSError:
+            try:
+                temporary_master.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
+    elif LVGL_RECEIVER_MASTER_PATH.is_symlink():
+        raise ValueError("LVGL receiver master path must not be a symlink")
+    elif LVGL_RECEIVER_MASTER_PATH.exists():
+        # Do not silently keep accepting a master after the protected App
+        # option has been explicitly cleared.
+        LVGL_RECEIVER_MASTER_PATH.unlink()
+        directory = os.open(LVGL_RECEIVER_MASTER_PATH.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     os.environ["FLEXDISPLAY_FIRMWARE_CONFIGURED_VERSION"] = option(
         options, "firmware_version"
     )
