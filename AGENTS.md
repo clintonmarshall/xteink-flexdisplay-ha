@@ -133,6 +133,11 @@ and release are blocked.
 - Scope Forgejo's automatic, repository-specific `${{ forgejo.token }}` to the
   draft-upload step. Do not add a long-lived Forgejo release token unless the
   automatic token is proven insufficient on the protected runner.
+- Use separate short-lived Forgejo Actions (Local) Authorized Integrations for
+  protected tag promotion and final Forgejo draft publication. Restrict each
+  integration to this repository, its exact workflow filename,
+  `refs/heads/main`, `workflow_dispatch`, and only its reviewed repository
+  capabilities. Do not share one release audience with other workflows.
 - Publish a Companion release in this order: create a draft Forgejo release,
   build and sign once, canary the exact signed bytes, publish the unchanged
   Forgejo draft, mirror those assets, then verify the complete GitHub Release.
