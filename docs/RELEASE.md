@@ -171,6 +171,13 @@ the downstream GitHub workflow runs the content-addressed upstream HACS action
 against the exact mirrored commit. A missing or failed affected-component gate
 at either boundary blocks release.
 
+A coordinated release pull request changes all four Platform version markers.
+That exact pattern now forces the ordinary Forgejo Android job even when no
+file below `rook_receiver/` changed. The job builds and lints both debug
+flavours and also runs the Companion release unit tests, release lint, and
+unsigned release assembly on the pull request's exact head. A skipped Android
+job on a coordinated release is therefore a release blocker.
+
 Record the exact Home Assistant Core version used for release verification in
 the release evidence; do not put the live Home Assistant hostname or address in
 the compatibility matrix.
@@ -243,6 +250,63 @@ Publishing does not authorize deployment. Deployment must use an approved,
 tag-scoped Forgejo Runner workflow. If that workflow or its fixed-purpose
 credential path is absent or unverified, stop; do not substitute manual UI,
 shell, SSH, or raw API operations.
+
+### Bridge-only deployment workflow
+
+`.forgejo/workflows/deploy-bridge.yml` is the reviewed Bridge-only stage for
+`DumbHA`. It is deliberately unavailable until a dedicated isolated runner has
+the `dumbha-flexdisplay-production` label and all three repository variables
+below are reviewed and set to the literal value `true`:
+
+- `FLEXDISPLAY_DUMBHA_DEPLOYMENT_ENABLED`
+- `FLEXDISPLAY_DUMBHA_RUNNER_ISOLATED`
+- `FLEXDISPLAY_DUMBHA_CREDENTIAL_PATH_APPROVED`
+
+Provision these repository secrets only after the corresponding credential
+path has been separately approved:
+
+- `FLEXDISPLAY_DUMBHA_DEPLOY_KEY`: a dedicated SSH private key whose public
+  key is restricted on `DumbHA` to the reviewed forced-command receiver;
+- `FLEXDISPLAY_DUMBHA_KNOWN_HOSTS`: one exact `10.200.40.4` host-key entry;
+  the client requires the independently inventoried ED25519 fingerprint; and
+- `FLEXDISPLAY_DUMBHA_BRIDGE_API_KEY`: the Bridge management key used only for
+  the read-only before/after device inventory.
+
+Install the exact tagged
+`scripts/flexdisplay_bridge_deploy_receiver.sh` separately at
+`/config/.flexdisplay-deploy-control/bridge-deploy-receiver.sh`, owner-only,
+and bind only the dedicated public key to it with an OpenSSH
+`authorized_keys` forced command plus `restrict`. Installing that receiver,
+adding its key, registering the runner, or setting variables/secrets is a
+separate infrastructure or credential change; this workflow does none of
+those things. At runtime the client compares the installed receiver's SHA-256
+with the copy in the protected tag.
+
+The deployment dispatch accepts only a published stable annotated `vX.Y.Z`
+tag, its exact 40-character `origin/main` commit, the observed current Bridge
+version, and the literal confirmation
+`deploy-flexdisplay-bridge-to-dumbha`. It requires successful exact-commit
+Forgejo `bridge`, `app`, `integration`, `android`, and `required` push
+contexts. The administrator must still verify the tag-protection rule before
+publication because the workflow token cannot inspect that rule.
+
+The receiver refuses to deploy unless App automatic updates are already
+disabled. It records but never changes that setting. Disabling automatic
+updates remains a separate, explicitly approved Home Assistant mutation. The
+receiver runs `ha core check`, refreshes App metadata, proves the store's
+latest Bridge version exactly equals the tag, creates and verifies a partial
+backup containing the installed Bridge version, and updates only App slug
+`629898c9_flexdisplay_bridge` from the expected compatibility distribution
+source. It cannot install an arbitrary version, restart Home Assistant Core,
+restore a backup, update the integration, or touch device firmware.
+
+After the App update, the runner requires the tagged version at `/healthz`,
+Home Assistant HTTP access, MQTT connectivity when enabled, FlexHub
+connectivity when configured, Studio HTTP access, and preservation of every
+existing device check-in record and non-regressing `last_seen` timestamp. It
+reports the backup identifier for a separately authorised rollback. A failed
+post-deployment check stops the job; it does not automatically restore,
+restart, publish, or roll forward.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.

@@ -107,6 +107,7 @@ jobs:
       integration: ${{ steps.paths.outputs.integration }}
       integration_source: ${{ steps.paths.outputs.integration_source }}
       android: ${{ steps.paths.outputs.android }}
+      release: ${{ steps.paths.outputs.release }}
     steps:
       - name: Check out exact candidate and base without credentials
         env:
@@ -182,7 +183,15 @@ jobs:
           else
             integration=false
           fi
-          if changed '^rook_receiver/'; then
+          if changed '^flexdisplay_bridge/config\.yaml$' && \
+             changed '^flexdisplay_bridge/pyproject\.toml$' && \
+             changed '^flexdisplay_bridge/flexdisplay_bridge/__init__\.py$' && \
+             changed '^custom_components/flexdisplay/manifest\.json$'; then
+            release=true
+          else
+            release=false
+          fi
+          if changed '^rook_receiver/' || [ "$release" = "true" ]; then
             android=true
           else
             android=false
@@ -192,6 +201,7 @@ jobs:
             echo "integration=$integration"
             echo "integration_source=$integration_source"
             echo "android=$android"
+            echo "release=$release"
           } >> "$FORGEJO_OUTPUT"
 
   bridge:
@@ -717,6 +727,35 @@ jobs:
             testKioskDebugUnitTest testCompanionDebugUnitTest \
             assembleKioskDebug assembleCompanionDebug \
             lintKioskDebug lintCompanionDebug
+      - name: Validate release Android package on the exact release head
+        if: ${{ needs.changes.outputs.release == 'true' }}
+        working-directory: rook_receiver
+        env:
+          ANDROID_HOME: /tmp/flexdisplay-android-sdk
+          ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+          ./gradlew --no-daemon \
+            testCompanionReleaseUnitTest \
+            lintCompanionRelease \
+            assembleCompanionRelease
 
   required:
     if: ${{ always() }}
