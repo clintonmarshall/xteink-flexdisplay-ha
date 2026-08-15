@@ -7,10 +7,11 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.46.0 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.47.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 5; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
+| Colour/LVGL receiver contract | v1 | Bridge and Studio contract available; JC3636 receiver firmware is separately versioned and is not packaged by the Platform release |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | No minimum declared | Bridge App and integration; each release must record the exact tested Home Assistant Core version in its release evidence |
@@ -39,6 +40,15 @@ discards URL query parameters cannot fetch managed packs and reports a content
 error; normal dashboard delivery remains available. Pack downloads use local
 HTTP, so sensitive Quick Cards belong only on a trusted display LAN unless a
 TLS proxy or private tunnel protects that traffic.
+
+Platform 0.47.0 adds colour/LVGL receiver contract v1. Compatible receivers
+must present a verified device identity, derived receiver credential, matching
+hardware profile, and supported contract version before the Bridge will deliver
+a bounded declarative manifest or accept an event. Existing e-paper and Android
+receivers retain their established render paths. Unknown receivers, older LVGL
+contracts, and profiles using unsupported widgets fail closed instead of being
+treated as a similar device. JC3636 receiver firmware is owned and released
+separately and is not included in this software-only Platform release.
 
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen
