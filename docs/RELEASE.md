@@ -117,47 +117,89 @@ event.
 Forgejo 16 restricts `GET /repos/{owner}/{repo}/tag_protections` to repository
 administrators, while its automatic Actions token has repository-write rather
 than repository-admin access. The workflow therefore fails closed on source
-status but cannot truthfully inspect tag-protection rules with that token.
-Before creating the tag, an administrator must verify in **Settings > Tags**
-that the requested `vX.Y.Z` is covered by the reviewed release-tag protection;
-do not substitute a broader static administrator token in the signing workflow.
+status but cannot truthfully inspect tag-protection rules with that token. The
+promotion and publication workflows use separate, short-lived Forgejo 16
+Authorized Integration JWTs instead of a static administrator token. Each
+integration must be restricted to this repository, its exact workflow filename,
+`refs/heads/main`, and `workflow_dispatch`, with only the reviewed repository
+capabilities. Before enabling either audience, verify in **Settings > Tags**
+that one `v*` rule matches and allows only `clintonmarshall`.
 
-The committed workflow intentionally targets the unavailable `trusted-release`
-label. Provision and review that isolated runner, its JDK/Android SDK, protected
-environment and signer record in the release task before dispatching it. The
-ordinary Forgejo validation job does not currently build Android; local Android
-evidence is useful for feature review but is not the first-publish authority.
+The release workflows intentionally target the unavailable `trusted-release`
+label. Provision and review that isolated runner, its JDK/Android SDK, OIDC
+audiences, and signer record in the release task before dispatching any of them.
+The ordinary exact-head Forgejo validation now builds Android for receiver and
+coordinated release changes, but it is not the production signing authority.
+
+### Protected tag promotion and Forgejo draft publication
+
+`.forgejo/workflows/promote-release-tag.yml` and
+`.forgejo/workflows/publish-release.yml` are separate manual stages. Both
+require an exact stable version, the current fully green `main` commit, an
+owner dispatch, literal release confirmation, the isolated `trusted-release`
+runner, and three enabled infrastructure variables:
+
+- `FLEXDISPLAY_RELEASE_AUTOMATION_ENABLED`
+- `FLEXDISPLAY_RELEASE_RUNNER_ISOLATED`
+- `FLEXDISPLAY_RELEASE_CREDENTIAL_PATH_APPROVED`
+
+Configure two separate Forgejo Actions (Local) Authorized Integrations and put
+their non-secret audience values in:
+
+- `FLEXDISPLAY_RELEASE_PROMOTION_AUDIENCE`, restricted to
+  `promote-release-tag.yml`; and
+- `FLEXDISPLAY_RELEASE_PUBLICATION_AUDIENCE`, restricted to
+  `publish-release.yml`.
+
+The promotion stage rechecks protected `main`, all exact post-merge release
+contexts, the single owner-only matching tag rule, metadata, and signer record.
+It then creates an annotated tag and a draft Forgejo release with canonical
+changelog notes. It is idempotent only for that exact tag, commit, and unchanged
+draft; it never moves a tag or replaces a release.
+
+The publication stage has its own confirmation and authority. It rechecks the
+same controls, requires the exact draft ID, and, when the Companion changed,
+downloads the three draft assets back from Forgejo and verifies their exact
+names, APK SHA-256 sidecar, source tag/commit metadata, package version, and
+reviewed signer fingerprint. Only then does it publish that same draft without
+rebuilding or replacing an asset. Forgejo's automatic workflow token is not
+used for promotion because changes authored by it do not recursively trigger
+workflows and it cannot inspect tag protection.
 
 ### Android Companion publication contract
 
-1. Merge the green release pull request in Forgejo and wait for
-   `Validate / bridge (push)` to succeed on the resulting exact `main` SHA.
-2. As a repository administrator, verify the reviewed tag-protection rule in
-   **Settings > Tags**, then create and push the annotated `vX.Y.Z` tag to
-   Forgejo only.
-3. Create an associated **draft** Forgejo release.
-4. When the release contains the Companion, manually run
+1. Merge the green release pull request in Forgejo and wait for all required
+   release push contexts to succeed on the resulting exact `main` SHA.
+2. As a repository administrator, verify the reviewed tag-protection rule and
+   exact Authorized Integration restrictions, then separately authorize and
+   dispatch `Promote protected release tag`. Record its protected annotated tag
+   and draft release ID.
+3. When the release contains the Companion, manually run
    `Publish signed Android Companion candidate`, supplying the
    tag, its exact 40-character commit, and the draft release ID.
-5. The protected runner builds and signs once, rejects the Android Debug
+4. The protected runner builds and signs once, rejects the Android Debug
    certificate, verifies package/version/manifest/signer, and uploads these
    immutable assets:
    `flexdisplay-companion-VERSION-vcCODE.apk`, `.apk.sha256`, and
    `.metadata.json`.
-6. Install that exact SHA-256 on one Galaxy canary. Verify direct Bridge port
+5. Install that exact SHA-256 on one Galaxy canary. Verify direct Bridge port
    8099 check-in, camera/mic/speaker privacy behavior, foreground/background
    lifecycle, and rollback readiness.
-7. Publish the same Forgejo draft without replacing or rebuilding any asset.
-8. Verify the Forgejo push mirror copied `main` and the tag to GitHub, then
+6. Obtain separate publication approval, then dispatch
+   `Publish authoritative Forgejo release` with the same tag, commit, and draft
+   ID. It must publish without replacing or rebuilding any asset.
+7. Verify the Forgejo push mirror copied `main` and the tag to GitHub, then
    mirror the already-signed assets from Forgejo and verify byte-for-byte hashes
    on the complete GitHub Release. GitHub never receives the Android signing
    key. HACS does not treat a bare tag as a published version.
 
 The Android candidate workflow deliberately stops after reconciling the draft
-Forgejo assets. Draft promotion and GitHub asset mirroring are separate release
-operations and are not automated by this feature pull request. Do not call the
-first Android release published until both are implemented or performed through
-reviewed Forgejo-controlled release steps and the hashes match.
+Forgejo assets. Publishing that unchanged draft and downstream GitHub asset
+mirroring are separate release operations. The reviewed Forgejo publisher now
+implements the first operation; authenticated GitHub release handoff and
+byte-for-byte downstream asset verification remain blocked. Do not call the
+first Android release fully distributed until that final path is implemented
+and the hashes match.
 
 Record the successful required checks and their exact tested commit. GitHub
 checks are downstream evidence only. A missing, skipped, zero-coverage, or
@@ -170,6 +212,13 @@ public GitHub repository properties through the anonymous API. After merge,
 the downstream GitHub workflow runs the content-addressed upstream HACS action
 against the exact mirrored commit. A missing or failed affected-component gate
 at either boundary blocks release.
+
+A coordinated release pull request changes all four Platform version markers.
+That exact pattern now forces the ordinary Forgejo Android job even when no
+file below `rook_receiver/` changed. The job builds and lints both debug
+flavours and also runs the Companion release unit tests, release lint, and
+unsigned release assembly on the pull request's exact head. A skipped Android
+job on a coordinated release is therefore a release blocker.
 
 Record the exact Home Assistant Core version used for release verification in
 the release evidence; do not put the live Home Assistant hostname or address in
@@ -220,12 +269,14 @@ local tag or release commands, a raw API, or direct GitHub publication.
    a different merge commit.
 3. Obtain fresh publication confirmation naming the tag, exact tested commit,
    assets, destinations, and rollback constraints.
-4. Dispatch the reviewed Forgejo tag-promotion job with that exact commit. It
-   may create the protected immutable annotated tag but must not publish
-   release assets from an untagged ref.
-5. Verify the tag exists in Forgejo and resolves to the exact tested commit,
-   then allow the tag-triggered Forgejo publishing job to run from that tag. It
-   must recheck metadata and attach checksum-verified assets.
+4. Dispatch the reviewed Forgejo tag-promotion job with that exact commit and
+   its literal confirmation. It creates the protected immutable annotated tag
+   and canonical draft release, but does not publish it.
+5. Verify the tag and draft ID in Forgejo. For a Companion release, run the
+   signed-candidate job and complete the physical canary on those exact bytes.
+   Then obtain a separate publication confirmation and dispatch the manual
+   Forgejo publisher with the exact tag, commit, and draft ID. It must recheck
+   metadata and checksum-verified assets before publishing the unchanged draft.
 6. Verify Forgejo contains the immutable tag, release, expected assets, and
    checksums before considering downstream distribution.
 7. Verify the Forgejo-controlled mirror copied `main` and the same tag and
@@ -243,6 +294,63 @@ Publishing does not authorize deployment. Deployment must use an approved,
 tag-scoped Forgejo Runner workflow. If that workflow or its fixed-purpose
 credential path is absent or unverified, stop; do not substitute manual UI,
 shell, SSH, or raw API operations.
+
+### Bridge-only deployment workflow
+
+`.forgejo/workflows/deploy-bridge.yml` is the reviewed Bridge-only stage for
+`DumbHA`. It is deliberately unavailable until a dedicated isolated runner has
+the `dumbha-flexdisplay-production` label and all three repository variables
+below are reviewed and set to the literal value `true`:
+
+- `FLEXDISPLAY_DUMBHA_DEPLOYMENT_ENABLED`
+- `FLEXDISPLAY_DUMBHA_RUNNER_ISOLATED`
+- `FLEXDISPLAY_DUMBHA_CREDENTIAL_PATH_APPROVED`
+
+Provision these repository secrets only after the corresponding credential
+path has been separately approved:
+
+- `FLEXDISPLAY_DUMBHA_DEPLOY_KEY`: a dedicated SSH private key whose public
+  key is restricted on `DumbHA` to the reviewed forced-command receiver;
+- `FLEXDISPLAY_DUMBHA_KNOWN_HOSTS`: one exact `10.200.40.4` host-key entry;
+  the client requires the independently inventoried ED25519 fingerprint; and
+- `FLEXDISPLAY_DUMBHA_BRIDGE_API_KEY`: the Bridge management key used only for
+  the read-only before/after device inventory.
+
+Install the exact tagged
+`scripts/flexdisplay_bridge_deploy_receiver.sh` separately at
+`/config/.flexdisplay-deploy-control/bridge-deploy-receiver.sh`, owner-only,
+and bind only the dedicated public key to it with an OpenSSH
+`authorized_keys` forced command plus `restrict`. Installing that receiver,
+adding its key, registering the runner, or setting variables/secrets is a
+separate infrastructure or credential change; this workflow does none of
+those things. At runtime the client compares the installed receiver's SHA-256
+with the copy in the protected tag.
+
+The deployment dispatch accepts only a published stable annotated `vX.Y.Z`
+tag, its exact 40-character `origin/main` commit, the observed current Bridge
+version, and the literal confirmation
+`deploy-flexdisplay-bridge-to-dumbha`. It requires successful exact-commit
+Forgejo `bridge`, `app`, `integration`, `android`, and `required` push
+contexts. The administrator must still verify the tag-protection rule before
+publication because the workflow token cannot inspect that rule.
+
+The receiver refuses to deploy unless App automatic updates are already
+disabled. It records but never changes that setting. Disabling automatic
+updates remains a separate, explicitly approved Home Assistant mutation. The
+receiver runs `ha core check`, refreshes App metadata, proves the store's
+latest Bridge version exactly equals the tag, creates and verifies a partial
+backup containing the installed Bridge version, and updates only App slug
+`629898c9_flexdisplay_bridge` from the expected compatibility distribution
+source. It cannot install an arbitrary version, restart Home Assistant Core,
+restore a backup, update the integration, or touch device firmware.
+
+After the App update, the runner requires the tagged version at `/healthz`,
+Home Assistant HTTP access, MQTT connectivity when enabled, FlexHub
+connectivity when configured, Studio HTTP access, and preservation of every
+existing device check-in record and non-regressing `last_seen` timestamp. It
+reports the backup identifier for a separately authorised rollback. A failed
+post-deployment check stops the job; it does not automatically restore,
+restart, publish, or roll forward.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.

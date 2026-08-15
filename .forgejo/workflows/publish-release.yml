@@ -1,94 +1,155 @@
 name: Publish authoritative Forgejo release
 
 on:
-  push:
-    tags:
-      - "v*"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing protected annotated Platform tag (vX.Y.Z)
+        required: true
+        type: string
+      commit:
+        description: Exact tested current main commit SHA resolved by the tag
+        required: true
+        type: string
+      draft_release_id:
+        description: Existing immutable-asset Forgejo draft release numeric ID
+        required: true
+        type: string
+      confirmation:
+        description: Type publish-vX.Y.Z-at-FULL_SHA after separate approval
+        required: true
+        type: string
+
+enable-openid-connect: true
+
+concurrency:
+  group: flexdisplay-release-publication-${{ inputs.tag }}
+  cancel-in-progress: false
 
 jobs:
-  verify-tagged-release:
+  publish:
+    if: ${{ forgejo.actor == forgejo.repository_owner }}
     runs-on: trusted-release
+    env:
+      RELEASE_TAG: ${{ inputs.tag }}
+      RELEASE_COMMIT: ${{ inputs.commit }}
+      DRAFT_RELEASE_ID: ${{ inputs.draft_release_id }}
+      RELEASE_CONFIRMATION: ${{ inputs.confirmation }}
+      FORGEJO_API_URL: ${{ forgejo.api_url }}
+      FORGEJO_REPOSITORY: ${{ forgejo.repository }}
     steps:
-      - name: Check out protected tag without credentials
+      - name: Require reviewed release infrastructure
+        shell: bash
         env:
-          RELEASE_TAG: ${{ forgejo.ref_name }}
-          FORGEJO_SERVER_URL: ${{ forgejo.server_url }}
+          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_RELEASE_AUTOMATION_ENABLED }}
+          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_RELEASE_RUNNER_ISOLATED }}
+          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_RELEASE_CREDENTIAL_PATH_APPROVED }}
+          AUTH_AUDIENCE: ${{ vars.FLEXDISPLAY_RELEASE_PUBLICATION_AUDIENCE }}
           FORGEJO_TOKEN: ""
-          GITEA_TOKEN: ""
           GITHUB_TOKEN: ""
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RUNTIME_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_ID_TOKEN_REQUEST_URL: ""
-          GIT_TERMINAL_PROMPT: "0"
+        run: |
+          set -euo pipefail
+          test "$AUTOMATION_ENABLED" = "true"
+          test "$RUNNER_ISOLATED" = "true"
+          test "$CREDENTIAL_PATH_APPROVED" = "true"
+          test -n "$AUTH_AUDIENCE"
+          [[ "$RELEASE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$RELEASE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$DRAFT_RELEASE_ID" =~ ^[0-9]+$ ]]
+          test "$RELEASE_CONFIRMATION" = "publish-$RELEASE_TAG-at-$RELEASE_COMMIT"
+
+      - name: Check out exact protected release tag
+        # actions/checkout v6, reviewed 2026-08-13
+        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+
+      - name: Verify immutable tag and local release metadata
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = "tag"
+          test "$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")" = "$RELEASE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$RELEASE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          python3 scripts/check_release_metadata.py --release "${RELEASE_TAG#v}"
+          python3 scripts/check_android_release_metadata.py --require-signer
+
+      - name: Acquire one-run publication authority
+        id: release-auth
+        shell: bash
+        env:
+          AUTH_AUDIENCE: ${{ vars.FLEXDISPLAY_RELEASE_PUBLICATION_AUDIENCE }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
           http_proxy: ""
           https_proxy: ""
           HTTP_PROXY: ""
           HTTPS_PROXY: ""
           ALL_PROXY: ""
         run: |
-          set -eu
-          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
-          forgejo_origin="${FORGEJO_SERVER_URL%/}"
-          case "$forgejo_origin" in
-            http://*|https://*) ;;
-            *) echo "Refusing invalid Forgejo server origin" >&2; exit 1 ;;
-          esac
-          git init .
-          git remote add origin \
-            "$forgejo_origin/clintonmarshall/xteink-flexdisplay-ha.git"
-          git -c http.proxy= -c https.proxy= -c http.followRedirects=false \
-            fetch --force --tags origin \
-            "refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG" \
-            '+refs/heads/main:refs/remotes/origin/main'
-          git checkout --detach "refs/tags/$RELEASE_TAG^{}"
-      - name: Verify protected immutable release tag
+          set -euo pipefail
+          umask 077
+          auth_dir="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-release-auth.XXXXXX")"
+          response="$auth_dir/oidc.json"
+          token_file="$auth_dir/release.jwt"
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_TOKEN"
+          test -n "$ACTIONS_ID_TOKEN_REQUEST_URL"
+          curl --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            --header "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=$AUTH_AUDIENCE" > "$response"
+          RESPONSE_FILE="$response" TOKEN_FILE="$token_file" python3 -I - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          response = json.loads(Path(os.environ["RESPONSE_FILE"]).read_text())
+          token = response.get("value")
+          if not isinstance(token, str) or not token or "\n" in token or "\r" in token:
+              raise SystemExit("Forgejo did not issue a safe one-run release JWT")
+          Path(os.environ["TOKEN_FILE"]).write_text(token, encoding="utf-8")
+          PY
+          : > "$response"
+          rm -f -- "$response"
+          chmod 600 "$token_file"
+          echo "::add-mask::$(<"$token_file")"
+          echo "token_file=$token_file" >> "$FORGEJO_OUTPUT"
+          echo "auth_dir=$auth_dir" >> "$FORGEJO_OUTPUT"
+
+      - name: Verify immutable assets and publish the unchanged Forgejo draft
+        shell: bash
         env:
-          RELEASE_TAG: ${{ forgejo.ref_name }}
-          EVENT_COMMIT: ${{ forgejo.sha }}
+          FLEXDISPLAY_RELEASE_TOKEN_FILE: ${{ steps.release-auth.outputs.token_file }}
           FORGEJO_TOKEN: ""
-          GITEA_TOKEN: ""
           GITHUB_TOKEN: ""
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RUNTIME_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+        run: |
+          set -euo pipefail
+          python3 scripts/forgejo_release.py publish \
+            --tag "$RELEASE_TAG" \
+            --commit "$RELEASE_COMMIT" \
+            --release-id "$DRAFT_RELEASE_ID" \
+            --confirmation "$RELEASE_CONFIRMATION" \
+            --token-file "$FLEXDISPLAY_RELEASE_TOKEN_FILE" \
+            --api-url "$FORGEJO_API_URL"
+
+      - name: Remove one-run publication authority
+        if: ${{ always() }}
+        shell: bash
+        env:
+          AUTH_DIR: ${{ steps.release-auth.outputs.auth_dir }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
         run: |
           set -eu
-          case "$RELEASE_TAG" in
-            v[0-9]*.[0-9]*.[0-9]*) ;;
-            *) echo "Invalid release tag: $RELEASE_TAG" >&2; exit 1 ;;
-          esac
-          test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = "tag"
-          tagged_commit="$(git rev-list -n 1 "refs/tags/$RELEASE_TAG")"
-          test "$tagged_commit" = "$EVENT_COMMIT"
-          test "$tagged_commit" = "$(git rev-parse HEAD)"
-          python3 scripts/check_release_metadata.py --release "${RELEASE_TAG#v}"
-      - name: Require reviewed publication controls
-        env:
-          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_RELEASE_AUTOMATION_ENABLED }}
-          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_RELEASE_RUNNER_ISOLATED }}
-          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_RELEASE_CREDENTIAL_PATH_APPROVED }}
-          FORGEJO_TOKEN: ""
-          GITEA_TOKEN: ""
-          GITHUB_TOKEN: ""
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RUNTIME_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_ID_TOKEN_REQUEST_URL: ""
-        run: |
-          set -eu
-          test "$AUTOMATION_ENABLED" = "true"
-          test "$RUNNER_ISOLATED" = "true"
-          test "$CREDENTIAL_PATH_APPROVED" = "true"
-          echo "Tagged release checks passed, but Forgejo release publication is" >&2
-          echo "intentionally disabled in this scaffold. Add the reviewed publisher" >&2
-          echo "plus authenticated tag-protection, required-check, and checksum" >&2
-          echo "verification in a separate change; no raw API fallback." >&2
-          exit 1
+          if [ -n "$AUTH_DIR" ] && [ -d "$AUTH_DIR" ]; then
+            find "$AUTH_DIR" -depth -type f -exec sh -c ': > "$1"; rm -f -- "$1"' sh {} \;
+            find "$AUTH_DIR" -depth -type d -exec rmdir {} \;
+          fi
