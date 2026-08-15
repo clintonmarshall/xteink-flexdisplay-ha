@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pytest
@@ -18,6 +19,50 @@ from flexdisplay_bridge.config import (
 from flexdisplay_bridge.mqtt_service import MqttService
 
 
+_MANAGEMENT_API_KEY = "bridge-secret"
+
+
+class _ManagedDeviceReadClient(TestClient):
+    """Test client that defaults ordinary calls to explicit management auth."""
+
+    def __init__(self, app, *, management_key: str) -> None:
+        self._management_key = management_key
+        super().__init__(app)
+
+    def _managed_request(self, method: str, url: str, *args, **kwargs):
+        if "headers" not in kwargs:
+            kwargs["headers"] = {
+                "X-FlexDisplay-Bridge-Key": self._management_key,
+            }
+        elif kwargs["headers"]:
+            headers = dict(kwargs["headers"])
+            headers.setdefault("X-FlexDisplay-Bridge-Key", self._management_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, *args, **kwargs)
+
+    def get(self, url: str, *args, **kwargs):
+        return self._managed_request("GET", url, *args, **kwargs)
+
+    def post(self, url: str, *args, **kwargs):
+        return self._managed_request("POST", url, *args, **kwargs)
+
+    def put(self, url: str, *args, **kwargs):
+        return self._managed_request("PUT", url, *args, **kwargs)
+
+    def patch(self, url: str, *args, **kwargs):
+        return self._managed_request("PATCH", url, *args, **kwargs)
+
+    def delete(self, url: str, *args, **kwargs):
+        return self._managed_request("DELETE", url, *args, **kwargs)
+
+
+def _managed_device_client(config: BridgeConfig) -> TestClient:
+    key = config.api_key or _MANAGEMENT_API_KEY
+    if not config.api_key:
+        config = replace(config, api_key=key)
+    return _ManagedDeviceReadClient(create_app(config), management_key=key)
+
+
 def _firmware(version: str, marker: str) -> FirmwareConfig:
     return FirmwareConfig(
         version=version,
@@ -31,6 +76,15 @@ def _firmware(version: str, marker: str) -> FirmwareConfig:
 
 
 def _check_in(client: TestClient, device_id: str, model: str) -> None:
+    android_model = "".join(character for character in model.upper() if character.isalnum()) in {
+        "ROOK",
+        "ECHOSPOT",
+        "CHECKERS",
+        "ECHOSHOW5",
+        "ANDROID",
+        "ANDROIDPHONE",
+        "ANDROIDCOMPANION",
+    }
     response = client.get(
         "/api/v1/screen",
         headers={
@@ -40,6 +94,11 @@ def _check_in(client: TestClient, device_id: str, model: str) -> None:
             "X-FlexDisplay-SD-Ready": "true",
             "X-FlexDisplay-USB-Connected": "true",
             "X-FlexDisplay-Battery-Percent": "100",
+            **(
+                {"X-FlexDisplay-Receiver-Token": f"receiver-{device_id.lower()}"}
+                if android_model
+                else {}
+            ),
         },
     )
     assert response.status_code == 200
@@ -62,7 +121,7 @@ def test_device_list_and_detail_expose_the_same_capability_contract(
         "ESP-CAPS06": "ESP32-S3-LCD",
     }
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id, model in models.items():
             _check_in(client, device_id, model)
 
@@ -96,7 +155,7 @@ def test_missing_model_header_never_grants_xteink_firmware_to_unknown_identity(
         firmware=_firmware("1.5.0-flexdisplay.9.0.0", "9"),
     )
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         checked_in = client.get(
             "/api/v1/screen",
             headers={"X-FlexDisplay-ID": "ESP-NOMODE01"},
@@ -124,7 +183,7 @@ def test_auto_provisioning_filters_defaults_and_reconciles_corrected_identity(
         provisioning=ProvisioningConfig(default_mode="reader"),
     )
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         first = client.get(
             "/api/v1/screen",
             headers={
@@ -139,6 +198,7 @@ def test_auto_provisioning_filters_defaults_and_reconciles_corrected_identity(
             headers={
                 "X-FlexDisplay-ID": "X3-RECLASS01",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "reclass-receiver-token",
             },
         )
         record = client.app.state.store.get("X3-RECLASS01")
@@ -449,7 +509,7 @@ def test_global_x_rollout_reset_is_never_exposed_on_other_device_families(
     firmware = _firmware("1.5.0-flexdisplay.9.0.0", "6")
     config = BridgeConfig(state_path=tmp_path / "state.json", firmware=firmware)
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         for device_id, model in {
             "X4-RESET01": "XTEINK_X4",
             "N4-RESET02": "ZECTRIX_NOTE4",
@@ -778,17 +838,21 @@ def test_missing_model_header_preserves_explicit_non_x_identity(
         firmware=_firmware("1.5.0-flexdisplay.9.0.0", "b"),
     )
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         explicit = client.get(
             "/api/v1/screen",
             headers={
                 "X-FlexDisplay-ID": "X3-WAS-ROOK",
                 "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "persist-receiver-token",
             },
         )
         missing = client.get(
             "/api/v1/screen",
-            headers={"X-FlexDisplay-ID": "X3-WAS-ROOK"},
+            headers={
+                "X-FlexDisplay-ID": "X3-WAS-ROOK",
+                "X-FlexDisplay-Receiver-Token": "persist-receiver-token",
+            },
         )
         device = client.get("/api/v1/devices/X3-WAS-ROOK").json()
 
@@ -999,11 +1063,13 @@ def test_device_identity_and_management_timeline_follow_model_correction(
     )
     auth = {"X-FlexDisplay-Bridge-Key": "bridge-key"}
 
-    with TestClient(create_app(config)) as client:
+    with _managed_device_client(config) as client:
         _check_in(client, "X3-IDENTITY01", "XTEINK_X3")
         _check_in(client, "X3-IDENTITY01", "ROOK")
         assert (
-            client.get("/api/v1/devices/X3-IDENTITY01/timeline").status_code
+            client.get(
+                "/api/v1/devices/X3-IDENTITY01/timeline", headers={}
+            ).status_code
             == 401
         )
         response = client.get(

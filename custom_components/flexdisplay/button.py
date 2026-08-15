@@ -10,7 +10,13 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
-from .device_capabilities import supported_actions, supports_xteink_ota
+from .device_capabilities import (
+    is_android_companion,
+    is_android_receiver,
+    management_supports,
+    supported_actions,
+    supports_xteink_ota,
+)
 from .entity import (
     FlexDisplayEntity,
     FlexHubEntity,
@@ -134,6 +140,71 @@ class FlexDisplayCancelCommandsButton(FlexDisplayEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
+class FlexDisplayTakeSnapshotButton(FlexDisplayEntity, ButtonEntity):
+    """Queue one explicit, privacy-sensitive camera snapshot."""
+
+    _attr_translation_key = "take_snapshot"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_take_snapshot"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "camera")
+
+    @property
+    def available(self) -> bool:
+        """Only capture when permission is granted and no command is active."""
+        return (
+            super().available
+            and self.record.get("online") is True
+            and self.record.get("camera_available") is True
+            and self.record.get("camera_permission") is True
+            and (
+                not is_android_companion(self.record)
+                or (
+                    self.record.get("camera_policy") == "allow_while_open"
+                    and self.record.get("foreground_active") is True
+                    and bool(self.record.get("foreground_session"))
+                )
+            )
+            and not self.record.get("pending_commands")
+            and not self.record.get("dispatched_commands")
+        )
+
+    async def async_press(self) -> None:
+        """Ask the phone to capture a single JPEG."""
+        await self.coordinator.client.request_camera_snapshot(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
+class FlexDisplayClearAlertButton(FlexDisplayEntity, ButtonEntity):
+    """Explicitly clear the receiver's current alert."""
+
+    _attr_translation_key = "clear_alert"
+
+    def __init__(self, coordinator: FlexDisplayCoordinator, device_id: str) -> None:
+        super().__init__(coordinator, device_id)
+        self._attr_unique_id = f"{device_id}_clear_alert"
+
+    def _record_supported(self, record: dict) -> bool:
+        return management_supports(record, "notifications")
+
+    @property
+    def available(self) -> bool:
+        """Avoid presenting a remote clear when the receiver is inactive."""
+        return (
+            super().available
+            and self.record.get("online") is True
+            and self.record.get("active_alert") is True
+        )
+
+    async def async_press(self) -> None:
+        """Clear the active receiver alert through management authentication."""
+        await self.coordinator.client.clear_notification(self.device_id)
+        await self.coordinator.async_request_refresh()
+
+
 class FlexDisplayRetryFirmwareButton(FlexDisplayEntity, ButtonEntity):
     """Retry one failed firmware installation."""
 
@@ -210,30 +281,12 @@ class FlexDisplayVerifyUsbRecoveryButton(FlexDisplayEntity, ButtonEntity):
         await self.coordinator.async_request_refresh()
 
 
-def _is_android_receiver(record: dict) -> bool:
-    model = str(record.get("model") or "").upper()
-    return model in {"ROOK", "CHECKERS", "ECHO SPOT", "ECHO SHOW 5"}
-
-
-def _device_buttons(
-    coordinator: FlexDisplayCoordinator, device_id: str
-) -> tuple[ButtonEntity, ...]:
-    record = next(
-        (item for item in coordinator.data if item.get("device_id") == device_id), {}
-    )
+def _command_descriptions(record: dict) -> tuple[FlexDisplayButtonDescription, ...]:
+    """Return commands owned by the receiver family."""
     descriptions = list(DESCRIPTIONS)
-    if _is_android_receiver(record):
+    if is_android_receiver(record):
         descriptions.extend(ANDROID_DESCRIPTIONS)
-    return (
-        *(
-            FlexDisplayCommandButton(coordinator, device_id, description)
-            for description in descriptions
-        ),
-        FlexDisplayCancelCommandsButton(coordinator, device_id),
-        FlexDisplayRetryFirmwareButton(coordinator, device_id),
-        FlexDisplayResetRolloutButton(coordinator, device_id),
-        FlexDisplayVerifyUsbRecoveryButton(coordinator, device_id),
-    )
+    return tuple(descriptions)
 
 
 @dataclass(frozen=True, kw_only=True)
@@ -320,7 +373,7 @@ async def async_setup_entry(
         actions = supported_actions(record)
         command_buttons = tuple(
             FlexDisplayCommandButton(coordinator, device_id, description)
-            for description in DESCRIPTIONS
+            for description in _command_descriptions(record)
             if description.command in actions
         )
         firmware_buttons: tuple[ButtonEntity, ...] = ()
@@ -333,6 +386,16 @@ async def async_setup_entry(
         return (
             *command_buttons,
             FlexDisplayCancelCommandsButton(coordinator, device_id),
+            *(
+                (FlexDisplayTakeSnapshotButton(coordinator, device_id),)
+                if management_supports(record, "camera")
+                else ()
+            ),
+            *(
+                (FlexDisplayClearAlertButton(coordinator, device_id),)
+                if management_supports(record, "notifications")
+                else ()
+            ),
             *firmware_buttons,
         )
 

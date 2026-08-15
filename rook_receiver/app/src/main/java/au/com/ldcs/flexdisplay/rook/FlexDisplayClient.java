@@ -1,14 +1,14 @@
 package au.com.ldcs.flexdisplay.rook;
 
 import android.content.Context;
-import android.content.Intent;
-import android.content.IntentFilter;
+import android.app.KeyguardManager;
 import android.content.pm.PackageManager;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.hardware.camera2.CameraAccessException;
+import android.hardware.camera2.CameraManager;
 import android.net.wifi.WifiInfo;
 import android.net.wifi.WifiManager;
-import android.os.BatteryManager;
 import android.os.Build;
 import android.os.SystemClock;
 
@@ -34,7 +34,8 @@ import java.util.List;
 import java.util.Map;
 
 final class FlexDisplayClient {
-    static final String FIRMWARE_VERSION = "android-0.5.0";
+    static final String FIRMWARE_VERSION = "android-" + BuildConfig.VERSION_NAME;
+    static final int MAX_CAMERA_SNAPSHOT_BYTES = 2 * 1024 * 1024;
 
     static final class Interaction {
         final String id;
@@ -168,10 +169,63 @@ final class FlexDisplayClient {
 
     private final Context context;
     private final ReceiverProfile profile;
+    private volatile boolean foregroundAllowed = !BuildConfig.COMPANION;
+    private volatile boolean dockEnabled;
+    private volatile boolean dockActive;
+    private volatile int brightnessPercent;
+    private volatile String foregroundSession = "";
+    private volatile HttpURLConnection activeScreenConnection;
+    private volatile HttpURLConnection activeNotificationConnection;
+    private volatile HttpURLConnection activeNotificationImageConnection;
+    private volatile HttpURLConnection activeCameraConnection;
+    private volatile HttpURLConnection activeResponseConnection;
+    private volatile HttpURLConnection activeAssistConnection;
 
     FlexDisplayClient(Context context) {
         this.context = context.getApplicationContext();
         this.profile = ReceiverProfile.detect();
+        this.brightnessPercent = systemBrightnessPercent();
+    }
+
+    void setForegroundAllowed(boolean allowed) {
+        foregroundAllowed = allowed || !BuildConfig.COMPANION;
+        if (!foregroundAllowed) cancelForegroundRequests();
+    }
+
+    void setDockState(boolean enabled, boolean active) {
+        dockEnabled = enabled && BuildConfig.COMPANION;
+        dockActive = active && dockEnabled;
+    }
+
+    void setBrightnessPercent(int percent) {
+        brightnessPercent = BrightnessTelemetry.clampPercent(percent);
+    }
+
+    int brightnessPercent() {
+        return brightnessPercent;
+    }
+
+    void setForegroundSession(String session) {
+        foregroundSession = BuildConfig.COMPANION && session != null ? session : "";
+    }
+
+    void cancelCameraSnapshotUpload() {
+        HttpURLConnection camera = activeCameraConnection;
+        if (camera != null) camera.disconnect();
+    }
+
+    void cancelForegroundRequests() {
+        HttpURLConnection screen = activeScreenConnection;
+        if (screen != null) screen.disconnect();
+        HttpURLConnection notification = activeNotificationConnection;
+        if (notification != null) notification.disconnect();
+        HttpURLConnection notificationImage = activeNotificationImageConnection;
+        if (notificationImage != null) notificationImage.disconnect();
+        cancelCameraSnapshotUpload();
+        HttpURLConnection response = activeResponseConnection;
+        if (response != null) response.disconnect();
+        HttpURLConnection assist = activeAssistConnection;
+        if (assist != null) assist.disconnect();
     }
 
     Result fetch(
@@ -181,26 +235,43 @@ final class FlexDisplayClient {
             String commandResult,
             String commandId,
             String quickAction) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(config, "/api/v1/screen", "GET", 25_000);
+        activeScreenConnection = connection;
         connection.setRequestProperty("Accept", "image/png");
         connection.setRequestProperty("X-FlexDisplay-ID", config.deviceId);
         connection.setRequestProperty("X-FlexDisplay-Width", Integer.toString(profile.width));
         connection.setRequestProperty("X-FlexDisplay-Height", Integer.toString(profile.height));
         connection.setRequestProperty("X-FlexDisplay-Model", profile.model);
         connection.setRequestProperty("X-FlexDisplay-Firmware", FIRMWARE_VERSION);
-        boolean cameraAvailable = hasFeature(PackageManager.FEATURE_CAMERA_ANY);
-        boolean microphoneAvailable = hasFeature(PackageManager.FEATURE_MICROPHONE);
-        connection.setRequestProperty("X-FlexDisplay-Capabilities", capabilities(cameraAvailable, microphoneAvailable));
-        connection.setRequestProperty("X-FlexDisplay-Camera-Available", Boolean.toString(cameraAvailable));
-        connection.setRequestProperty("X-FlexDisplay-Microphone-Available", Boolean.toString(microphoneAvailable));
+        connection.setRequestProperty("X-FlexDisplay-Capabilities", deviceCapabilities());
+        connection.setRequestProperty("X-FlexDisplay-Hardware-Manufacturer", safeHeader(Build.MANUFACTURER));
+        connection.setRequestProperty("X-FlexDisplay-Hardware-Model", safeHeader(Build.MODEL));
+        connection.setRequestProperty("X-FlexDisplay-Camera-Available", Boolean.toString(cameraAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Camera-Permission", Boolean.toString(permissionGranted(android.Manifest.permission.CAMERA)));
+        connection.setRequestProperty(
+                "X-FlexDisplay-Camera-Policy",
+                BuildConfig.COMPANION
+                        ? CompanionPreferences.cameraPolicy(context)
+                        : CompanionPreferences.CAMERA_POLICY_OFF);
+        connection.setRequestProperty("X-FlexDisplay-Foreground-Active", Boolean.toString(foregroundAllowed));
+        if (BuildConfig.COMPANION && !foregroundSession.isEmpty()) {
+            connection.setRequestProperty("X-FlexDisplay-Foreground-Session", foregroundSession);
+        }
+        connection.setRequestProperty("X-FlexDisplay-Dock-Enabled", Boolean.toString(dockEnabled));
+        connection.setRequestProperty("X-FlexDisplay-Dock-Active", Boolean.toString(dockActive));
+        connection.setRequestProperty("X-FlexDisplay-Microphone-Available", Boolean.toString(microphoneAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Microphone-Permission", Boolean.toString(permissionGranted(android.Manifest.permission.RECORD_AUDIO)));
+        connection.setRequestProperty("X-FlexDisplay-Speaker-Available", Boolean.toString(speakerAvailable()));
+        connection.setRequestProperty("X-FlexDisplay-Speaker-Permission", "true");
         connection.setRequestProperty("X-FlexDisplay-Audio-Available", "true");
         connection.setRequestProperty("X-FlexDisplay-Touch-Available", "true");
-        connection.setRequestProperty("X-FlexDisplay-Always-On", "true");
+        connection.setRequestProperty("X-FlexDisplay-Always-On", Boolean.toString(!BuildConfig.COMPANION));
         connection.setRequestProperty("X-FlexDisplay-Device-Class", profile.deviceClass);
         AudioState audioState = audioState();
         connection.setRequestProperty("X-FlexDisplay-Volume", Integer.toString(audioState.volume));
         connection.setRequestProperty("X-FlexDisplay-Muted", Boolean.toString(audioState.muted));
-        connection.setRequestProperty("X-FlexDisplay-Brightness", Integer.toString(screenBrightness()));
+        connection.setRequestProperty("X-FlexDisplay-Brightness", Integer.toString(brightnessPercent));
         connection.setRequestProperty(
                 "X-FlexDisplay-Uptime-Seconds",
                 Long.toString(SystemClock.elapsedRealtime() / 1000));
@@ -212,8 +283,26 @@ final class FlexDisplayClient {
         connection.setRequestProperty("X-FlexDisplay-Wake-Reason", "android_kiosk");
         connection.setRequestProperty("X-FlexDisplay-Reset-Reason", "android_boot");
         connection.setRequestProperty("X-FlexDisplay-Boot-ID", Build.FINGERPRINT);
-        connection.setRequestProperty("X-FlexDisplay-Battery-Percent", Integer.toString(batteryPercent()));
-        connection.setRequestProperty("X-FlexDisplay-USB-Connected", Boolean.toString(isPluggedIn()));
+        BatteryTelemetry battery = BatteryTelemetry.read(context);
+        if (battery.present) {
+            if (battery.percent >= 0) {
+                connection.setRequestProperty("X-FlexDisplay-Battery-Percent", Integer.toString(battery.percent));
+            }
+            connection.setRequestProperty("X-FlexDisplay-USB-Connected", Boolean.toString(battery.usbConnected()));
+            connection.setRequestProperty("X-FlexDisplay-Battery-Charging", Boolean.toString(battery.charging));
+            connection.setRequestProperty("X-FlexDisplay-Battery-Status", battery.status);
+            connection.setRequestProperty("X-FlexDisplay-Battery-Health", battery.health);
+            connection.setRequestProperty("X-FlexDisplay-Battery-Plug-Type", battery.plugType);
+            if (!battery.temperatureHeader().isEmpty()) {
+                connection.setRequestProperty("X-FlexDisplay-Battery-Temperature-C", battery.temperatureHeader());
+            }
+            if (battery.voltageMv != null) {
+                connection.setRequestProperty("X-FlexDisplay-Battery-Voltage-MV", Integer.toString(battery.voltageMv));
+            }
+            if (!battery.currentHeader().isEmpty()) {
+                connection.setRequestProperty("X-FlexDisplay-Battery-Current-MA", battery.currentHeader());
+            }
+        }
         int rssi = wifiRssi();
         if (rssi != Integer.MIN_VALUE) connection.setRequestProperty("X-FlexDisplay-RSSI", Integer.toString(rssi));
         if (!imageSha256.isEmpty()) connection.setRequestProperty("X-FlexDisplay-Image-SHA256", imageSha256);
@@ -222,32 +311,30 @@ final class FlexDisplayClient {
         if (!commandId.isEmpty()) connection.setRequestProperty("X-FlexDisplay-Command-ID", commandId);
         if (!quickAction.isEmpty()) connection.setRequestProperty("X-FlexDisplay-Quick-Action", quickAction);
 
-        requireSuccess(connection);
-        Map<String, String> headers = responseHeaders(connection);
-        byte[] body = readBytes(connection.getInputStream());
-        connection.disconnect();
+        Map<String, String> headers;
+        byte[] body;
+        try {
+            requireSuccess(connection);
+            headers = responseHeaders(connection);
+            body = readBytes(connection.getInputStream());
+        } finally {
+            connection.disconnect();
+            if (activeScreenConnection == connection) activeScreenConnection = null;
+        }
         Bitmap bitmap = body.length == 0 ? null : BitmapFactory.decodeByteArray(body, 0, body.length);
         if (body.length > 0 && bitmap == null) throw new IOException("Bridge response was not a supported image");
+        requireForeground();
         return new Result(bitmap, Collections.unmodifiableMap(headers), fetchInteractions(config));
     }
 
-    private String capabilities(boolean cameraAvailable, boolean microphoneAvailable) {
-        String caps = profile.capabilities();
-        if (cameraAvailable) caps += ",camera,camera-snapshot";
-        if (microphoneAvailable) caps += ",microphone";
-        return caps;
-    }
-
-    private boolean hasFeature(String feature) {
-        return context.getPackageManager().hasSystemFeature(feature);
-    }
-
     List<Interaction> fetchInteractions(ReceiverConfig config) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/interactions",
                 "GET",
                 10_000);
+        activeScreenConnection = connection;
         requireSuccess(connection);
         try {
             JSONObject payload = new JSONObject(readText(connection.getInputStream()));
@@ -263,6 +350,7 @@ final class FlexDisplayClient {
             throw new IOException("Bridge returned invalid interaction data", error);
         } finally {
             connection.disconnect();
+            if (activeScreenConnection == connection) activeScreenConnection = null;
         }
     }
 
@@ -274,13 +362,15 @@ final class FlexDisplayClient {
     }
 
     NotificationEvent waitForNotification(ReceiverConfig config, long after) throws IOException {
+        requireForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/notifications/next?after=" + after + "&timeout=25",
                 "GET",
                 35_000);
-        requireSuccess(connection);
+        activeNotificationConnection = connection;
         try {
+            requireSuccess(connection);
             JSONObject payload = new JSONObject(readText(connection.getInputStream()));
             long sequence = payload.optLong("sequence", after);
             JSONObject value = payload.optJSONObject("notification");
@@ -294,66 +384,155 @@ final class FlexDisplayClient {
             throw new IOException("Bridge returned invalid notification data", error);
         } finally {
             connection.disconnect();
+            if (activeNotificationConnection == connection) activeNotificationConnection = null;
+        }
+    }
+
+    void uploadCameraSnapshot(
+            ReceiverConfig config,
+            byte[] jpeg,
+            String facing,
+            String commandId) throws IOException {
+        requireInteractiveForeground();
+        if (commandId == null || commandId.trim().isEmpty()) {
+            throw new IOException("Camera snapshot command ID is missing");
+        }
+        if (jpeg == null || jpeg.length < 2 || jpeg.length > MAX_CAMERA_SNAPSHOT_BYTES) {
+            throw new IOException("Camera snapshot is empty or exceeds 2 MiB");
+        }
+        if ((jpeg[0] & 0xff) != 0xff || (jpeg[1] & 0xff) != 0xd8) {
+            throw new IOException("Camera snapshot is not JPEG data");
+        }
+        HttpURLConnection connection = open(
+                config,
+                "/api/v1/devices/" + config.deviceId + "/camera/snapshot",
+                "PUT",
+                30_000);
+        activeCameraConnection = connection;
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/octet-stream");
+        connection.setRequestProperty("X-FlexDisplay-Camera-Facing", safeHeader(facing));
+        connection.setRequestProperty("X-FlexDisplay-Command-ID", safeHeader(commandId));
+        connection.setFixedLengthStreamingMode(jpeg.length);
+        try {
+            requireInteractiveForeground();
+            try (OutputStream output = connection.getOutputStream()) {
+                requireInteractiveForeground();
+                output.write(jpeg);
+            }
+            requireInteractiveForeground();
+            requireSuccess(connection);
+            readBytes(connection.getInputStream());
+            requireInteractiveForeground();
+        } finally {
+            connection.disconnect();
+            if (activeCameraConnection == connection) activeCameraConnection = null;
         }
     }
 
     Bitmap fetchNotificationImage(ReceiverConfig config, String notificationId) throws IOException {
+        requireInteractiveForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/notifications/" + notificationId + "/image",
                 "GET",
                 20_000);
-        requireSuccess(connection);
-        byte[] body = readBytes(connection.getInputStream());
-        connection.disconnect();
-        Bitmap bitmap = BitmapFactory.decodeByteArray(body, 0, body.length);
-        if (bitmap == null) throw new IOException("Notification image was unreadable");
-        return bitmap;
+        activeNotificationImageConnection = connection;
+        Bitmap bitmap = null;
+        boolean returned = false;
+        try {
+            requireInteractiveForeground();
+            requireSuccess(connection);
+            NotificationImagePolicy.requireContentLength(connection.getContentLengthLong());
+            requireInteractiveForeground();
+            byte[] body = NotificationImagePolicy.readBounded(connection.getInputStream());
+            requireInteractiveForeground();
+
+            BitmapFactory.Options bounds = new BitmapFactory.Options();
+            bounds.inJustDecodeBounds = true;
+            BitmapFactory.decodeByteArray(body, 0, body.length, bounds);
+            NotificationImagePolicy.requireDimensions(bounds.outWidth, bounds.outHeight);
+            requireInteractiveForeground();
+
+            bitmap = BitmapFactory.decodeByteArray(body, 0, body.length);
+            if (bitmap == null) throw new IOException("Notification image was unreadable");
+            NotificationImagePolicy.requireDimensions(bitmap.getWidth(), bitmap.getHeight());
+            requireInteractiveForeground();
+            returned = true;
+            return bitmap;
+        } finally {
+            connection.disconnect();
+            if (activeNotificationImageConnection == connection) {
+                activeNotificationImageConnection = null;
+            }
+            if (!returned && bitmap != null) bitmap.recycle();
+        }
     }
 
-    void dismissNotification(ReceiverConfig config, String notificationId) throws IOException {
-        postJson(
-                config,
-                "/api/v1/devices/" + config.deviceId + "/notifications/" + notificationId + "/dismiss",
-                new JSONObject());
-    }
-
-    String performNotificationAction(
+    String reportNotificationResponse(
             ReceiverConfig config,
             String notificationId,
+            String outcome,
             String actionId,
             boolean confirmed) throws IOException {
-        return postJson(
-                config,
-                "/api/v1/devices/" + config.deviceId + "/notifications/" + notificationId
-                        + "/actions/" + actionId,
-                confirmationPayload(confirmed));
+        requireInteractiveForeground();
+        if (!"action".equals(outcome) && !"dismissed".equals(outcome) && !"expired".equals(outcome)) {
+            throw new IOException("Notification outcome is invalid");
+        }
+        try {
+            JSONObject payload = new JSONObject().put("outcome", outcome);
+            if ("action".equals(outcome)) {
+                if (actionId == null || actionId.trim().isEmpty()) {
+                    throw new IOException("Notification action ID is missing");
+                }
+                payload.put("action_id", actionId);
+                payload.put("confirmed", confirmed);
+            }
+            return postNotificationResponseJson(
+                    config,
+                    "/api/v1/devices/" + config.deviceId + "/notifications/" + notificationId
+                            + "/response",
+                    payload);
+        } catch (JSONException error) {
+            throw new IOException("Could not encode notification response", error);
+        }
     }
 
     VoiceAssistantResponse runAssist(
             ReceiverConfig config,
             byte[] audio,
             boolean newConversation) throws IOException {
+        requireInteractiveForeground();
         HttpURLConnection connection = open(
                 config,
                 "/api/v1/devices/" + config.deviceId + "/assist",
                 "POST",
                 60_000);
-        connection.setDoOutput(true);
-        connection.setRequestProperty("Content-Type", "application/octet-stream");
-        connection.setRequestProperty("Accept", "application/octet-stream");
-        connection.setRequestProperty(
-                "X-FlexDisplay-New-Conversation",
-                Boolean.toString(newConversation));
-        connection.setFixedLengthStreamingMode(audio.length);
-        try (OutputStream output = connection.getOutputStream()) {
-            output.write(audio);
-        }
-        requireSuccess(connection);
+        activeAssistConnection = connection;
         try {
-            return decodeVoiceResponse(readBytes(connection.getInputStream()));
+            connection.setDoOutput(true);
+            connection.setRequestProperty("Content-Type", "application/octet-stream");
+            connection.setRequestProperty("Accept", "application/octet-stream");
+            connection.setRequestProperty(
+                    "X-FlexDisplay-New-Conversation",
+                    Boolean.toString(newConversation));
+            connection.setFixedLengthStreamingMode(audio.length);
+            requireInteractiveForeground();
+            try (OutputStream output = connection.getOutputStream()) {
+                requireInteractiveForeground();
+                output.write(audio);
+            }
+            requireInteractiveForeground();
+            requireSuccess(connection);
+            requireInteractiveForeground();
+            byte[] body = readBytes(connection.getInputStream());
+            requireInteractiveForeground();
+            VoiceAssistantResponse response = decodeVoiceResponse(body);
+            requireInteractiveForeground();
+            return response;
         } finally {
             connection.disconnect();
+            if (activeAssistConnection == connection) activeAssistConnection = null;
         }
     }
 
@@ -365,6 +544,20 @@ final class FlexDisplayClient {
         connection.setRequestMethod(method);
         connection.setRequestProperty("X-FlexDisplay-Receiver-Token", config.receiverToken);
         return connection;
+    }
+
+    private void requireForeground() throws IOException {
+        if (BuildConfig.COMPANION && !foregroundAllowed) {
+            throw new IOException("Companion receiver is in the background");
+        }
+    }
+
+    private void requireInteractiveForeground() throws IOException {
+        requireForeground();
+        KeyguardManager keyguard = (KeyguardManager) context.getSystemService(Context.KEYGUARD_SERVICE);
+        if (BuildConfig.COMPANION && keyguard != null && keyguard.isDeviceLocked()) {
+            throw new IOException("Companion receiver is locked");
+        }
     }
 
     private static JSONObject confirmationPayload(boolean confirmed) throws IOException {
@@ -395,6 +588,35 @@ final class FlexDisplayClient {
         }
     }
 
+    private String postNotificationResponseJson(
+            ReceiverConfig config, String path, JSONObject payload) throws IOException {
+        requireInteractiveForeground();
+        HttpURLConnection connection = open(config, path, "POST", 20_000);
+        activeResponseConnection = connection;
+        connection.setDoOutput(true);
+        connection.setRequestProperty("Content-Type", "application/json");
+        byte[] body = payload.toString().getBytes(StandardCharsets.UTF_8);
+        if (body.length > 2 * 1024) throw new IOException("Notification response exceeds 2 KiB");
+        connection.setFixedLengthStreamingMode(body.length);
+        try {
+            requireInteractiveForeground();
+            try (OutputStream output = connection.getOutputStream()) {
+                output.write(body);
+            }
+            requireInteractiveForeground();
+            requireSuccess(connection);
+            try {
+                JSONObject response = new JSONObject(readText(connection.getInputStream()));
+                return response.optString("detail", "Done");
+            } catch (JSONException error) {
+                return "Done";
+            }
+        } finally {
+            connection.disconnect();
+            if (activeResponseConnection == connection) activeResponseConnection = null;
+        }
+    }
+
     private static void requireSuccess(HttpURLConnection connection) throws IOException {
         int status = connection.getResponseCode();
         if (status >= 200 && status < 300) return;
@@ -413,17 +635,6 @@ final class FlexDisplayClient {
         return headers;
     }
 
-    private int batteryPercent() {
-        BatteryManager manager = (BatteryManager) context.getSystemService(Context.BATTERY_SERVICE);
-        int value = manager == null ? -1 : manager.getIntProperty(BatteryManager.BATTERY_PROPERTY_CAPACITY);
-        return Math.max(0, Math.min(100, value));
-    }
-
-    private boolean isPluggedIn() {
-        Intent battery = context.registerReceiver(null, new IntentFilter(Intent.ACTION_BATTERY_CHANGED));
-        return battery != null && battery.getIntExtra(BatteryManager.EXTRA_PLUGGED, 0) != 0;
-    }
-
     @SuppressWarnings("deprecation")
     private int wifiRssi() {
         WifiManager manager = (WifiManager) context.getApplicationContext().getSystemService(Context.WIFI_SERVICE);
@@ -437,18 +648,55 @@ final class FlexDisplayClient {
         if (manager == null) return new AudioState(0, false);
         int max = Math.max(1, manager.getStreamMaxVolume(android.media.AudioManager.STREAM_MUSIC));
         int current = manager.getStreamVolume(android.media.AudioManager.STREAM_MUSIC);
-        return new AudioState(Math.max(0, Math.min(100, current * 100 / max)), current == 0);
+        return new AudioState(
+                Math.max(0, Math.min(100, Math.round(current * 100f / max))),
+                current == 0);
     }
 
-    private int screenBrightness() {
+    private int systemBrightnessPercent() {
         try {
             int raw = android.provider.Settings.System.getInt(
                     context.getContentResolver(),
                     android.provider.Settings.System.SCREEN_BRIGHTNESS);
-            return Math.max(0, Math.min(100, raw * 100 / 255));
+            return BrightnessTelemetry.fromSystemRaw(raw);
         } catch (android.provider.Settings.SettingNotFoundException error) {
             return 100;
         }
+    }
+
+    private String deviceCapabilities() {
+        String result = profile.capabilities();
+        if (!BuildConfig.COMPANION) return result;
+        if (cameraAvailable()) result += ",camera";
+        if (microphoneAvailable()) result += ",microphone";
+        if (speakerAvailable()) result += ",speaker";
+        return result;
+    }
+
+    private boolean cameraAvailable() {
+        if (!context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_CAMERA_ANY)) return false;
+        CameraManager manager = (CameraManager) context.getSystemService(Context.CAMERA_SERVICE);
+        try {
+            return manager != null && manager.getCameraIdList().length > 0;
+        } catch (CameraAccessException | SecurityException error) {
+            return false;
+        }
+    }
+
+    private boolean microphoneAvailable() {
+        return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_MICROPHONE);
+    }
+
+    private boolean speakerAvailable() {
+        return context.getPackageManager().hasSystemFeature("android.hardware.audio.output");
+    }
+
+    private boolean permissionGranted(String permission) {
+        return context.checkSelfPermission(permission) == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private static String safeHeader(String value) {
+        return value == null ? "" : value.replace("\r", " ").replace("\n", " ").trim();
     }
 
     private static final class AudioState {

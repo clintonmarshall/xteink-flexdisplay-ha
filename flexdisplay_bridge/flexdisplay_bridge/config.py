@@ -458,6 +458,8 @@ def _default_dimensions(model: str) -> tuple[int, int]:
         return (480, 480)
     if normalized in {"CHECKERS", "ECHOSHOW5", "ECHOSHOW52019", "AMAZONECHOSHOW5"}:
         return (960, 480)
+    if normalized in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}:
+        return (1200, 675)
     return (528, 792)
 
 

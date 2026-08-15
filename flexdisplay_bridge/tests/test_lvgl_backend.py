@@ -292,6 +292,11 @@ def test_existing_known_family_cannot_be_reprovisioned_as_custom_lvgl(
     height: int,
 ) -> None:
     app = create_app(_config(tmp_path))
+    receiver_headers = (
+        {"X-FlexDisplay-Receiver-Token": "bound-receiver-token"}
+        if original_model in {"ROOK", "CHECKERS"}
+        else {}
+    )
     with TestClient(app) as client:
         original = client.get(
             "/api/v1/screen",
@@ -300,6 +305,7 @@ def test_existing_known_family_cannot_be_reprovisioned_as_custom_lvgl(
                 "X-FlexDisplay-Model": original_model,
                 "X-FlexDisplay-Width": str(width),
                 "X-FlexDisplay-Height": str(height),
+                **receiver_headers,
             },
         )
         assert original.status_code == 200
@@ -322,12 +328,15 @@ def test_existing_known_family_cannot_be_reprovisioned_as_custom_lvgl(
         assert saved.status_code == 200, saved.text
         attempted = client.get(
             "/api/v1/screen",
-            headers=_headers(
-                device_id=device_id,
-                model="CUSTOM_PANEL",
-                width=width,
-                height=height,
-            ),
+            headers={
+                **_headers(
+                    device_id=device_id,
+                    model="CUSTOM_PANEL",
+                    width=width,
+                    height=height,
+                ),
+                **receiver_headers,
+            },
         )
     assert attempted.status_code == 409
     record = app.state.store.get(device_id)

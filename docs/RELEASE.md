@@ -15,9 +15,16 @@
 7. If the Android receiver changes, make `versionName` match both receiver rows
    in the compatibility matrix and increase `versionCode` from the preceding
    receiver release.
-8. Classify the release explicitly as either software-only (the packaged
+8. When the Companion changes, keep its independent version name and strictly
+   increasing version code synchronized in `rook_receiver/app/build.gradle`
+   and `rook_receiver/release/companion-release.json`.
+9. The platform tag used as Companion provenance must contain the Companion and
+   its Bridge/Home Assistant contract in `main`, with an accurate platform
+   changelog. Do not attach Companion 0.5.0 to the older platform 0.46.0 source
+   tag.
+10. Classify the release explicitly as either software-only (the packaged
    device-firmware bytes are unchanged) or firmware-bearing.
-9. For changed packaged firmware, record the authoritative source repository,
+11. For changed packaged firmware, record the authoritative source repository,
    exact immutable commit or tag, byte size, SHA-256, durable known-good
    recovery artifact, and coordinated release-manifest commit. A filename or
    version string is not provenance.
@@ -25,6 +32,7 @@
 ## 2. Verify
 
 ```bash
+python3 scripts/check_android_release_metadata.py
 python3 scripts/check_release_metadata.py --release X.Y.Z
 python3 -m unittest discover -s scripts/tests -v
 python3 -m compileall -q flexdisplay_bridge/flexdisplay_bridge \
@@ -41,17 +49,127 @@ Forgejo required checks are authoritative. The Forgejo Runner must execute the
 baseline commands above and, when affected:
 
 - build the Home Assistant App image;
-- run the available local HACS schemas and hassfest for the integration; and
-- run `./gradlew clean assembleDebug lintDebug` in `rook_receiver/`.
+- run the exact-checkout HACS source validator, public-repository metadata
+  validator, and hassfest for the integration; and
+- run `./gradlew clean testKioskDebugUnitTest testCompanionDebugUnitTest
+  assembleKioskDebug assembleCompanionDebug lintKioskDebug
+  lintCompanionDebug` in `rook_receiver/`.
+
+Build the Home Assistant app image and the Android receiver when affected. The
+Android gate is:
+
+```bash
+cd rook_receiver
+./gradlew --no-daemon clean \
+  testKioskDebugUnitTest testCompanionDebugUnitTest \
+  assembleKioskDebug assembleCompanionDebug \
+  lintKioskDebug lintCompanionDebug \
+  testCompanionReleaseUnitTest lintCompanionRelease \
+  assembleCompanionRelease
+```
+
+Firmware releases additionally require verified size and SHA-256 metadata, a
+USB-powered canary, successful reboot telemetry, and only then fleet rollout.
+
+### Android signing preflight
+
+The first published Companion APK permanently establishes both application ID
+`au.com.ldcs.flexdisplay.rook.companion` and its production signer. Provision a
+dedicated disposable Forgejo runner with the `trusted-release` label. Configure
+these repository secrets only immediately before an authorised release run:
+
+- `FLEXDISPLAY_COMPANION_KEYSTORE_B64`
+- `FLEXDISPLAY_COMPANION_STORE_PASSWORD`
+- `FLEXDISPLAY_COMPANION_KEY_ALIAS`
+- `FLEXDISPLAY_COMPANION_KEY_PASSWORD`
+
+Generate the production key only as an explicit release operation. Keep the
+canonical PKCS12/JKS file and every encoded copy outside Git, and retain two
+encrypted offline backups; losing it prevents in-place upgrades. Independently
+record the public certificate SHA-256, then add that lowercase fingerprint to
+`rook_receiver/release/companion-release-cert.sha256` in the reviewed release
+pull request. The release workflow reads the committed fingerprint and refuses
+to sign while it is absent. Run this additional release gate:
+
+```bash
+python3 scripts/check_android_release_metadata.py --require-signer
+```
+
+The publication runner must not run pull-request code or share a persistent
+workspace with untrusted jobs. The signing secrets are exposed only to the
+short signing step. Before checkout, a token-scoped API preflight requires the
+exact source SHA's combined Forgejo status and `Validate / bridge (push)` status
+to both be successful. After checkout, the reviewed tag must resolve to that
+same SHA and it must still be the exact current Forgejo `main` commit; Gradle
+never receives the token or signing secrets. Draft uploads use Forgejo's
+automatic, repository-specific workflow token, explicitly scoped to the upload
+step.
+
+Forgejo 16 does not provide a verified protected-environment approval or
+environment-secret boundary for this repository. The `environment:` YAML key is
+therefore not treated as authorisation. Register the isolated runner and load
+the repository signing secrets just in time for the explicitly authorised run;
+remove the secrets and runner registration after the candidate assets have been
+reconciled. A future external secret broker may replace that manual boundary
+only if it binds access to this repository, workflow, exact tag and manual
+event.
+
+Forgejo 16 restricts `GET /repos/{owner}/{repo}/tag_protections` to repository
+administrators, while its automatic Actions token has repository-write rather
+than repository-admin access. The workflow therefore fails closed on source
+status but cannot truthfully inspect tag-protection rules with that token.
+Before creating the tag, an administrator must verify in **Settings > Tags**
+that the requested `vX.Y.Z` is covered by the reviewed release-tag protection;
+do not substitute a broader static administrator token in the signing workflow.
+
+The committed workflow intentionally targets the unavailable `trusted-release`
+label. Provision and review that isolated runner, its JDK/Android SDK, protected
+environment and signer record in the release task before dispatching it. The
+ordinary Forgejo validation job does not currently build Android; local Android
+evidence is useful for feature review but is not the first-publish authority.
+
+### Android Companion publication contract
+
+1. Merge the green release pull request in Forgejo and wait for
+   `Validate / bridge (push)` to succeed on the resulting exact `main` SHA.
+2. As a repository administrator, verify the reviewed tag-protection rule in
+   **Settings > Tags**, then create and push the annotated `vX.Y.Z` tag to
+   Forgejo only.
+3. Create an associated **draft** Forgejo release.
+4. When the release contains the Companion, manually run
+   `Publish signed Android Companion candidate`, supplying the
+   tag, its exact 40-character commit, and the draft release ID.
+5. The protected runner builds and signs once, rejects the Android Debug
+   certificate, verifies package/version/manifest/signer, and uploads these
+   immutable assets:
+   `flexdisplay-companion-VERSION-vcCODE.apk`, `.apk.sha256`, and
+   `.metadata.json`.
+6. Install that exact SHA-256 on one Galaxy canary. Verify direct Bridge port
+   8099 check-in, camera/mic/speaker privacy behavior, foreground/background
+   lifecycle, and rollback readiness.
+7. Publish the same Forgejo draft without replacing or rebuilding any asset.
+8. Verify the Forgejo push mirror copied `main` and the tag to GitHub, then
+   mirror the already-signed assets from Forgejo and verify byte-for-byte hashes
+   on the complete GitHub Release. GitHub never receives the Android signing
+   key. HACS does not treat a bare tag as a published version.
+
+The Android candidate workflow deliberately stops after reconciling the draft
+Forgejo assets. Draft promotion and GitHub asset mirroring are separate release
+operations and are not automated by this feature pull request. Do not call the
+first Android release published until both are implemented or performed through
+reviewed Forgejo-controlled release steps and the hashes match.
 
 Record the successful required checks and their exact tested commit. GitHub
 checks are downstream evidence only. A missing, skipped, zero-coverage, or
 unavailable affected-component check blocks the release.
 
-Full HACS repository validation is not yet available on the Forgejo Runner.
-Until an equivalent local validator is reviewed and implemented, any change to
-`custom_components/flexdisplay/` or `hacs.json` is blocked from review and
-release even when the local schemas and hassfest pass.
+The Forgejo exact-head suite validates the candidate's HACS and integration
+manifests, repository layout, brand asset, license presence, and hassfest
+results without exposing a GitHub token. It separately validates the stable
+public GitHub repository properties through the anonymous API. After merge,
+the downstream GitHub workflow runs the content-addressed upstream HACS action
+against the exact mirrored commit. A missing or failed affected-component gate
+at either boundary blocks release.
 
 Record the exact Home Assistant Core version used for release verification in
 the release evidence; do not put the live Home Assistant hostname or address in
@@ -159,6 +277,20 @@ shell, SSH, or raw API operations.
     non-destructive render or control smoke test on one device from each
     affected family. A software-only release must not queue firmware.
 
+When the signed Companion APK is included, install the exact canary-approved
+APK only on the confirmed Android serial, then verify its SHA-256, signer,
+package/version, Bridge check-in, foreground/background lifecycle, and local
+privacy defaults before treating it as a daily endpoint.
+
+The current Galaxy canary uses the same application ID but an Android Debug
+certificate. Android will not upgrade it in place to the production signer.
+Record the non-secret Bridge URL/device ID and local policy choices, uninstall
+the debug app, remove or re-pair its pinned Bridge identity, install the signed
+APK, and restore runtime grants and local policies. That one-time migration
+clears private app data. Later same-signer, higher-version-code updates preserve
+data normally. Installation, uninstall, re-pairing, and permission changes each
+remain separately authorized device/deployment actions.
+
 ## Rollback
 
 Stop further deployment or device rollout at the first unexplained regression
@@ -176,6 +308,9 @@ integration, persistent data, and device firmware as separate rollback scopes.
 - Obtain fresh confirmation immediately before any rollback deployment,
   restart, restore, or firmware write, naming the interruption and verification
   path.
+- Do not roll an Android release back by reusing a version code or changing its
+  signer. Build known-good source with the same production key and a higher
+  version code, verify it, and repeat the draft, canary, and promotion path.
 
 After rollback, repeat the relevant health and affected-family checks above.
 Do not move, replace, or delete an existing tag or published asset. Correct the

@@ -1067,6 +1067,7 @@
             <button data-model="N4">N4</button>
             <button data-model="ROOK">Spot</button>
             <button data-model="CHECKERS">Show 5</button>
+            <button data-model="ANDROID">Android</button>
           </div>
           <label class="preview-toolbar-meta">Zoom
             <select id="previewZoom" class="preview-zoom" aria-label="Preview zoom">
@@ -1675,7 +1676,7 @@
           <div class="task-card-title"><h3>Send album</h3><span>Choose one display</span></div>
           <label><span class="field-title">Photo Frame device<button type="button" class="help-tip" data-tooltip="Assigns this album as the device's Photo Frame source and queues a refresh. If the display is asleep, it will update after its next wake.">Help</button></span><select id="photoDevice"></select></label>
           <button id="assignPhotoAlbum">Assign album and refresh</button>
-          <label><span class="field-title">Preview model<button type="button" class="help-tip" data-tooltip="Changes only the Studio previews so you can check cropping and proportions for each display.">Help</button></span><select id="photoModel"><option value="X3">X3 · 528 × 792</option><option value="X4">X4 · 480 × 800</option><option value="ROOK">Spot · 480 × 480</option><option value="CHECKERS">Show 5 · 960 × 480</option></select></label>
+          <label><span class="field-title">Preview model<button type="button" class="help-tip" data-tooltip="Changes only the Studio previews so you can check cropping and proportions for each display.">Help</button></span><select id="photoModel"><option value="X3">X3 · 528 × 792</option><option value="X4">X4 · 480 × 800</option><option value="ROOK">Spot · 480 × 480</option><option value="CHECKERS">Show 5 · 960 × 480</option><option value="ANDROID">Android · 1200 × 675</option></select></label>
         </section>
       </div>
       <div id="photoGallery" class="library-gallery"></div>
@@ -1988,6 +1989,7 @@
               <option value="X4">X4 · 480 × 800</option>
               <option value="ROOK">Spot · 480 × 480</option>
               <option value="CHECKERS">Show 5 · 960 × 480</option>
+              <option value="ANDROID">Android · 1200 × 675</option>
             </select>
           </label>
           <button id="saveLoadingScreen" class="primary" style="align-self:end">Save and refresh</button>

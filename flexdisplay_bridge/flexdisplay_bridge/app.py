@@ -6,8 +6,10 @@ import hmac
 import io
 import json
 import logging
+import math
 import os
 import re
+import threading
 from contextlib import asynccontextmanager, suppress
 from dataclasses import replace
 from datetime import UTC, datetime, time, timedelta
@@ -125,6 +127,7 @@ from .rook_interactions import (
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
 from .voice_assistant import (
+    MAX_AUDIO_BYTES,
     HomeAssistantVoiceClient,
     VoiceAssistantError,
     display_text,
@@ -135,6 +138,9 @@ LOGGER = logging.getLogger(__name__)
 
 DEVICE_ID_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{2,63}$")
 JC36_DEVICE_ID_PATTERN = re.compile(r"^JC36-[0-9A-F]{12}$")
+MAX_CAMERA_SNAPSHOT_BYTES = 5 * 1024 * 1024
+MAX_CAMERA_SNAPSHOT_PIXELS = 20_000_000
+CAMERA_SNAPSHOT_TTL_SECONDS = 300
 SUPPORTED_COMMANDS = {
     "refresh",
     "full-refresh",
@@ -157,6 +163,60 @@ SUPPORTED_COMMANDS = {
 }
 SUPPORTED_BUTTONS = {"back", "confirm", "left", "right", "up", "down", "power"}
 SUPPORTED_MODES = {"reader", "home_assistant", "trmnl", "opendisplay", "photo_frame"}
+
+
+class CameraSnapshotBroker:
+    """Retain only the latest explicitly requested Android camera snapshot."""
+
+    def __init__(self) -> None:
+        self._lock = threading.RLock()
+        self._snapshots: dict[str, tuple[bytes, dict[str, Any]]] = {}
+
+    def put(
+        self,
+        device_id: str,
+        content: bytes,
+        *,
+        captured_at: str,
+        facing: str,
+    ) -> dict[str, Any]:
+        metadata = {
+            "captured_at": captured_at,
+            "facing": facing,
+            "content_type": "image/jpeg",
+            "size": len(content),
+        }
+        with self._lock:
+            self._snapshots[device_id] = (bytes(content), metadata)
+        return dict(metadata)
+
+    def get(self, device_id: str) -> tuple[bytes, dict[str, Any]] | None:
+        with self._lock:
+            snapshot = self._snapshots.get(device_id)
+            if snapshot is None:
+                return None
+            content, metadata = snapshot
+            return bytes(content), dict(metadata)
+
+    def remove(self, device_id: str) -> None:
+        with self._lock:
+            self._snapshots.pop(device_id, None)
+
+    def expire(self, max_age_seconds: int) -> list[str]:
+        """Remove cached JPEGs after their bounded privacy-retention window."""
+        now = datetime.now(UTC)
+        with self._lock:
+            expired: list[str] = []
+            for device_id, (_content, metadata) in self._snapshots.items():
+                try:
+                    captured = datetime.fromisoformat(str(metadata["captured_at"]))
+                except (KeyError, TypeError, ValueError):
+                    captured = datetime.min.replace(tzinfo=UTC)
+                if (now - captured).total_seconds() > max_age_seconds:
+                    expired.append(device_id)
+            for device_id in expired:
+                self._snapshots.pop(device_id, None)
+            return expired
 FLEET_POLICY_PRESETS: dict[str, dict[str, Any]] = {
     "battery_saver": {
         "label": "Battery Saver",
@@ -426,8 +486,22 @@ def _is_note4(record: dict[str, Any] | str) -> bool:
 
 
 def _is_android_display(record: dict[str, Any] | str) -> bool:
+    return _device_capabilities(record).family == "android_receiver"
+
+
+def _is_android_companion(record: dict[str, Any] | str) -> bool:
+    """Distinguish opt-in phone companions from the always-on Echo receivers."""
     model = record if isinstance(record, str) else str(record.get("model") or "")
-    return resolve_device_capabilities(model).family == "android_receiver"
+    normalized = re.sub(r"[^A-Z0-9]", "", model.upper())
+    return normalized in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
+
+
+def _desired_microphone_enabled(record: dict[str, Any]) -> bool:
+    """Fail closed for phone companions until management explicitly opts in."""
+    value = record.get("desired_microphone_enabled")
+    if isinstance(value, bool):
+        return value
+    return not _is_android_companion(record)
 
 
 def _device_capabilities(record: dict[str, Any] | str):
@@ -661,10 +735,8 @@ def _is_always_on_color_display(record: dict[str, Any]) -> bool:
     explicitly_always_on = bool(
         capabilities.intersection({"always-on-color", "always-on", "mains-powered"})
     )
-    return color and (
-        descriptor.family in {"android_receiver", "esp_color_receiver"}
-        or explicitly_always_on
-    )
+    trusted_always_on = descriptor.power.power_class == "always_on_color"
+    return color and (trusted_always_on or explicitly_always_on)
 
 
 def _supports_mqtt_screen_refresh(record: dict[str, Any]) -> bool:
@@ -691,9 +763,16 @@ def _display_runtime(record: dict[str, Any]) -> dict[str, str]:
         )
         delivery = "mqtt" if _supports_mqtt_screen_refresh(record) else "poll"
     always_on = _is_always_on_color_display(record)
+    power_class = (
+        "always_on_color"
+        if always_on
+        else "on_demand"
+        if descriptor.power.power_class == "on_demand"
+        else "battery_managed"
+    )
     return {
         "display_technology": technology,
-        "power_class": "always_on_color" if always_on else "battery_managed",
+        "power_class": power_class,
         "refresh_delivery": delivery,
         "policy_overlay": "always_on_color" if always_on else "",
     }
@@ -1138,6 +1217,8 @@ def _decorate_device(
                 int(profile.refresh_interval_seconds * 1.5) + 60,
                 planned_sleep + 300,
             )
+            if descriptor.power.power_class == "on_demand":
+                online_window = 60
             online = age <= online_window
             sleep_action = str(result.get("sleep_action") or "")
             if sleep_action == "power_off":
@@ -1163,8 +1244,15 @@ def _decorate_device(
                 )
         except ValueError:
             pass
+    if not online and descriptor.power.power_class == "on_demand":
+        power_state = "inactive"
     result["online"] = online
     result["power_state"] = power_state
+    if _is_android_companion(result) and not online:
+        # Foreground and active-dock reports describe a short-lived app session,
+        # not durable configuration. Never project them as active after staleness.
+        result["foreground_active"] = False
+        result["dock_active"] = False
     device_firmware = _device_firmware(settings, result)
     result["latest_firmware"] = device_firmware.version or result.get("firmware", "")
     profile = _effective_device(
@@ -1331,7 +1419,7 @@ def _decorate_device(
         battery is not None and battery <= profile.low_battery_percent
     )
     health_issues: list[str] = []
-    if not online and power_state != "powered_off":
+    if not online and power_state not in {"powered_off", "inactive"}:
         health_issues.append("offline")
     if result.get("sd_ready") is False and not _is_android_display(result):
         health_issues.append("sd_card")
@@ -1375,7 +1463,7 @@ def _decorate_device(
         result["health_state"] = (
             "offline" if health_issues == ["offline"] else "needs_attention"
         )
-    elif power_state in {"sleeping", "powered_off"}:
+    elif power_state in {"sleeping", "powered_off", "inactive"}:
         result["health_state"] = power_state
     else:
         result["health_state"] = "healthy"
@@ -1574,6 +1662,16 @@ def _boolean(value: str | None) -> bool | None:
     if value is None:
         return None
     return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _strict_boolean(value: str | None) -> bool | None:
+    """Parse explicitly reported booleans while preserving unknown/omitted state."""
+    selected = str(value or "").strip().lower()
+    if selected == "true":
+        return True
+    if selected == "false":
+        return False
+    return None
 
 
 def _capabilities(value: str | None) -> set[str]:
@@ -1928,8 +2026,50 @@ def _button_action_activation(record: dict[str, Any]) -> dict[str, Any]:
 
 def _number(value: str | None) -> float | None:
     try:
-        return float(value) if value not in (None, "") else None
+        parsed = float(value) if value not in (None, "") else None
     except ValueError:
+        return None
+    return parsed if parsed is None or math.isfinite(parsed) else None
+
+
+def _bounded_number(
+    value: str | None, minimum: float, maximum: float
+) -> float | None:
+    """Parse a finite telemetry number without silently clamping bad input."""
+    parsed = _number(value)
+    return parsed if parsed is not None and minimum <= parsed <= maximum else None
+
+
+def _bounded_integer(
+    value: str | None, minimum: int, maximum: int
+) -> int | None:
+    """Parse a bounded telemetry integer without silently clamping bad input."""
+    if value in (None, ""):
+        return None
+    try:
+        parsed = int(value)
+    except ValueError:
+        return None
+    return parsed if minimum <= parsed <= maximum else None
+
+
+def _enum_header(value: str | None, allowed: set[str]) -> str | None:
+    """Normalize a bounded telemetry enum, treating unsupported values as unknown."""
+    selected = str(value or "").strip().lower().replace("-", "_")
+    return selected if selected in allowed else None
+
+
+def _reported_at(value: str | None) -> str | None:
+    """Accept only recent RFC3339 receiver timestamps for public audit fields."""
+    if not value:
+        return None
+    try:
+        selected = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if selected.tzinfo is None:
+            return None
+        age = abs((datetime.now(UTC) - selected.astimezone(UTC)).total_seconds())
+        return selected.astimezone(UTC).isoformat(timespec="seconds") if age <= 300 else None
+    except (TypeError, ValueError):
         return None
 
 
@@ -2036,6 +2176,36 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     renderer = DashboardRenderer()
     color_renderer = ColorDisplayRenderer()
     rook = RookBroker()
+    notification_response_locks: dict[str, threading.Lock] = {}
+    notification_response_locks_guard = threading.Lock()
+
+    def notification_lock_for(device_id: str) -> threading.Lock:
+        """Return the shared lifecycle lock for one receiver notification slot."""
+        with notification_response_locks_guard:
+            return notification_response_locks.setdefault(device_id, threading.Lock())
+    camera_snapshots = CameraSnapshotBroker()
+    for persisted_device in store.all():
+        persisted_device_id = str(persisted_device.get("device_id") or "")
+        store.clear_camera_snapshot_metadata(persisted_device_id)
+        active_notification_id = str(
+            persisted_device.get("active_notification_id") or ""
+        )
+        if active_notification_id:
+            restart_outcome = "bridge_restarted"
+            try:
+                persisted_expiry = datetime.fromisoformat(
+                    str(persisted_device.get("active_notification_expires_at") or "")
+                )
+                if persisted_expiry <= datetime.now(UTC):
+                    restart_outcome = "server_expired"
+            except (TypeError, ValueError):
+                pass
+            store.record_notification_response(
+                persisted_device_id,
+                notification_id=active_notification_id,
+                outcome=restart_outcome,
+                trust="bridge",
+            )
 
     def resolve_display_profile(
         model: str,
@@ -2800,6 +2970,21 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             store.expire_stale_firmware_installs(
                 settings.firmware.stale_install_seconds
             )
+            for expired_device_id in camera_snapshots.expire(
+                CAMERA_SNAPSHOT_TTL_SECONDS
+            ):
+                store.clear_camera_snapshot_metadata(expired_device_id)
+            for expired_device_id in rook.notification_device_ids():
+                with notification_lock_for(expired_device_id):
+                    expired = rook.expire_notification(expired_device_id)
+                    if expired is None:
+                        continue
+                    store.record_notification_response(
+                        expired_device_id,
+                        notification_id=str(expired["notification_id"]),
+                        outcome="server_expired",
+                        trust="bridge",
+                    )
             advance_firmware_rollout()
             for current in store.all():
                 publish_current(str(current.get("device_id") or ""))
@@ -2983,7 +3168,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     @app.get("/api/v1/system")
     def system_status(request: Request) -> dict[str, Any]:
         """Return the effective, redacted operational configuration for Studio."""
-        authorize(request)
+        authorize_sensitive(request)
         flexhub_health = flexhub.summary()
         mirror = firmware_mirror.status(settings.firmware)
         maintenance = _firmware_maintenance_status(settings)
@@ -3411,13 +3596,47 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return system_payload
 
     @app.post("/api/v1/devices/{device_id}/assist")
-    def run_device_assist(
+    async def run_device_assist(
         device_id: str,
         request: Request,
-        audio: bytes = Body(..., media_type="application/octet-stream"),
     ) -> Response:
-        authorize(request)
         selected = _device_id(device_id)
+        record = authorize_receiver(request, selected)
+        descriptor = _device_capabilities(record)
+        if not descriptor.management.supports_microphone:
+            raise HTTPException(status_code=409, detail="Microphone is not supported")
+        if not _desired_microphone_enabled(record):
+            raise HTTPException(status_code=409, detail="Microphone is disabled")
+        if record.get("microphone_available") is False:
+            raise HTTPException(status_code=409, detail="Microphone is unavailable")
+        if record.get("microphone_permission") is False:
+            raise HTTPException(status_code=409, detail="Microphone permission is required")
+        if _is_android_companion(record):
+            if record.get("foreground_active") is not True or not re.fullmatch(
+                r"[A-Za-z0-9_-]{8,64}", str(record.get("foreground_session") or "")
+            ):
+                raise HTTPException(status_code=409, detail="Companion must be open")
+            if not _decorate_device(
+                record, settings, store, dashboards.names()
+            ).get("online"):
+                raise HTTPException(status_code=409, detail="Device must be online")
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+        if content_type != "application/octet-stream":
+            raise HTTPException(
+                status_code=415, detail="Assist audio requires application/octet-stream"
+            )
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > MAX_AUDIO_BYTES:
+            raise HTTPException(status_code=413, detail="Assist audio is too large")
+        audio_buffer = bytearray()
+        async for chunk in request.stream():
+            audio_buffer.extend(chunk)
+            if len(audio_buffer) > MAX_AUDIO_BYTES:
+                raise HTTPException(status_code=413, detail="Assist audio is too large")
+        audio = bytes(audio_buffer)
         if request.headers.get("X-FlexDisplay-New-Conversation", "").lower() in {
             "1",
             "true",
@@ -3457,12 +3676,13 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         payload: dict[str, Any],
         request: Request,
     ) -> dict[str, Any]:
-        authorize(request)
+        authorize_sensitive(request)
         selected = _device_id(device_id)
         current = store.get(selected)
         if not current:
             raise HTTPException(status_code=404, detail="Device has not checked in")
-        if not (_is_note4(current) or _is_android_display(current)):
+        descriptor = _device_capabilities(current)
+        if not descriptor.management.supports_audio:
             raise HTTPException(
                 status_code=409,
                 detail="Voice controls require a Note4 or Android receiver",
@@ -3472,9 +3692,26 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             changes["desired_voice_volume"] = max(0, min(100, int(payload["volume"])))
         if "muted" in payload:
             changes["desired_voice_muted"] = bool(payload["muted"])
+        if "microphone_enabled" in payload:
+            if not descriptor.management.supports_microphone:
+                raise HTTPException(
+                    status_code=409, detail="Microphone control is not supported"
+                )
+            microphone_enabled = payload["microphone_enabled"]
+            if not isinstance(microphone_enabled, bool):
+                raise HTTPException(
+                    status_code=400,
+                    detail="microphone_enabled must be a boolean",
+                )
+            changes["desired_microphone_enabled"] = microphone_enabled
         if not changes:
-            raise HTTPException(status_code=400, detail="Volume or mute state is required")
-        record = store.touch(selected, changes)
+            raise HTTPException(
+                status_code=400,
+                detail="Volume, mute, or microphone state is required",
+            )
+        record = store.update_metadata(selected, changes) or current
+        if _is_android_display(record):
+            rook.publish_refresh(selected, "voice-settings")
         return {"updated": True, "device": record}
 
     @app.put("/api/v1/devices/{device_id}/display")
@@ -3483,7 +3720,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         payload: dict[str, Any],
         request: Request,
     ) -> dict[str, Any]:
-        authorize(request)
+        authorize_sensitive(request)
         selected = _device_id(device_id)
         current = store.get(selected)
         if not current:
@@ -3500,8 +3737,219 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
         if not changes:
             raise HTTPException(status_code=400, detail="Brightness is required")
-        record = store.touch(selected, changes)
+        record = store.update_metadata(selected, changes) or current
+        rook.publish_refresh(selected, "display-settings")
         return {"updated": True, "device": record}
+
+    @app.post("/api/v1/devices/{device_id}/camera/snapshot/request")
+    def request_camera_snapshot(
+        device_id: str, request: Request
+    ) -> dict[str, Any]:
+        authorize_sensitive(request)
+        selected = _device_id(device_id)
+        current = store.get(selected)
+        if not current:
+            raise HTTPException(status_code=404, detail="Device has not checked in")
+        store.expire_camera_snapshot_command(selected)
+        current = store.get(selected) or current
+        descriptor = _device_capabilities(current)
+        if not descriptor.management.supports_camera:
+            raise HTTPException(status_code=409, detail="Camera is not supported")
+        if current.get("camera_available") is not True:
+            raise HTTPException(status_code=409, detail="Camera is unavailable")
+        if current.get("camera_permission") is not True:
+            raise HTTPException(status_code=409, detail="Camera permission is required")
+        if _is_android_companion(current) and current.get("camera_policy") != "allow_while_open":
+            raise HTTPException(status_code=409, detail="Camera policy is off")
+        if _is_android_companion(current) and current.get("foreground_active") is not True:
+            raise HTTPException(status_code=409, detail="Companion must be open")
+        foreground_session = str(current.get("foreground_session") or "")
+        if _is_android_companion(current) and not re.fullmatch(
+            r"[A-Za-z0-9_-]{8,64}", foreground_session
+        ):
+            raise HTTPException(
+                status_code=409, detail="A current foreground session is required"
+            )
+        if not _decorate_device(
+            current, settings, store, dashboards.names()
+        ).get("online"):
+            raise HTTPException(status_code=409, detail="Device must be online")
+        active_commands = list(current.get("pending_commands") or []) + list(
+            current.get("dispatched_commands") or []
+        )
+        if active_commands:
+            raise HTTPException(
+                status_code=409,
+                detail="Finish or cancel the active device command before taking a snapshot",
+            )
+        record = store.queue_camera_snapshot(selected, foreground_session)
+        if record is None:
+            raise HTTPException(
+                status_code=409,
+                detail="Finish or cancel the active device command before taking a snapshot",
+            )
+        return {
+            "queued": "camera-snapshot",
+            "command_id": str(record.get("pending_command_id") or ""),
+            "device": _decorate_device(
+                record, settings, store, dashboards.names()
+            ),
+        }
+
+    @app.put("/api/v1/devices/{device_id}/camera/snapshot")
+    async def upload_camera_snapshot(
+        device_id: str,
+        request: Request,
+        x_flexdisplay_command_id: str | None = Header(default=None),
+        x_flexdisplay_camera_facing: str | None = Header(default=None),
+    ) -> dict[str, Any]:
+        selected = _device_id(device_id)
+        current = authorize_receiver(request, selected)
+        descriptor = _device_capabilities(current)
+        if not descriptor.management.supports_camera:
+            raise HTTPException(status_code=409, detail="Camera is not supported")
+        if _is_android_companion(current):
+            if current.get("camera_permission") is not True:
+                raise HTTPException(status_code=409, detail="Camera permission is required")
+            if current.get("camera_policy") != "allow_while_open":
+                raise HTTPException(status_code=409, detail="Camera policy is off")
+            if current.get("foreground_active") is not True:
+                raise HTTPException(status_code=409, detail="Companion must be open")
+            current_session = str(current.get("foreground_session") or "")
+            bound_session = str(
+                current.get("camera_snapshot_foreground_session") or ""
+            )
+            if not current_session or not hmac.compare_digest(
+                current_session, bound_session
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Foreground session has changed"
+                )
+        command_id = str(x_flexdisplay_command_id or "").strip()
+        expected_id = str(current.get("dispatched_command_id") or "")
+        if (
+            not command_id
+            or not expected_id
+            or not hmac.compare_digest(command_id, expected_id)
+            or "camera-snapshot" not in (current.get("dispatched_commands") or [])
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail="A matching dispatched camera snapshot command is required",
+            )
+        content_type = request.headers.get("content-type", "").split(";", 1)[0].lower()
+        if content_type != "application/octet-stream":
+            raise HTTPException(
+                status_code=415,
+                detail="Snapshot uploads require application/octet-stream",
+            )
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > MAX_CAMERA_SNAPSHOT_BYTES:
+            raise HTTPException(status_code=413, detail="JPEG snapshot is too large")
+        buffer = bytearray()
+        async for chunk in request.stream():
+            buffer.extend(chunk)
+            if len(buffer) > MAX_CAMERA_SNAPSHOT_BYTES:
+                raise HTTPException(status_code=413, detail="JPEG snapshot is too large")
+        content = bytes(buffer)
+        if not content or len(content) > MAX_CAMERA_SNAPSHOT_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=f"JPEG snapshot must be 1-{MAX_CAMERA_SNAPSHOT_BYTES} bytes",
+            )
+        if not content.startswith(b"\xff\xd8"):
+            raise HTTPException(status_code=415, detail="A JPEG snapshot is required")
+        try:
+            with Image.open(io.BytesIO(content)) as image:
+                if image.format != "JPEG":
+                    raise ValueError("not JPEG")
+                width, height = image.size
+                if width < 1 or height < 1 or width * height > MAX_CAMERA_SNAPSHOT_PIXELS:
+                    raise ValueError("unsafe dimensions")
+                image.load()
+                canonical = io.BytesIO()
+                image.convert("RGB").save(
+                    canonical, format="JPEG", quality=90, optimize=True
+                )
+                normalized_content = canonical.getvalue()
+                if len(normalized_content) > MAX_CAMERA_SNAPSHOT_BYTES:
+                    raise ValueError("canonical JPEG is too large")
+        except (Image.DecompressionBombError, OSError, ValueError) as err:
+            raise HTTPException(status_code=415, detail="Invalid JPEG snapshot") from err
+        facing = str(x_flexdisplay_camera_facing or "unknown").strip().lower()
+        if facing not in {"front", "rear", "external", "unknown"}:
+            facing = "unknown"
+        captured_at = datetime.now(UTC).isoformat(timespec="seconds")
+        # Re-read immediately before the atomic consume. Permissions and local
+        # privacy state may tighten while a bounded upload is in flight.
+        current = store.get(selected) or {}
+        if _is_android_companion(current):
+            current_session = str(current.get("foreground_session") or "")
+            bound_session = str(
+                current.get("camera_snapshot_foreground_session") or ""
+            )
+            if (
+                current.get("camera_available") is not True
+                or current.get("camera_permission") is not True
+                or current.get("camera_policy") != "allow_while_open"
+                or current.get("foreground_active") is not True
+                or not current_session
+                or not hmac.compare_digest(current_session, bound_session)
+            ):
+                raise HTTPException(
+                    status_code=409, detail="Camera privacy state changed"
+                )
+        if not store.consume_camera_snapshot_command(selected, command_id):
+            raise HTTPException(status_code=409, detail="Snapshot command is no longer active")
+        metadata = camera_snapshots.put(
+            selected,
+            normalized_content,
+            captured_at=captured_at,
+            facing=facing,
+        )
+        store.update_metadata(
+            selected,
+            {
+                "camera_snapshot_at": captured_at,
+                "camera_snapshot_facing": facing,
+                "camera_snapshot_content_type": "image/jpeg",
+                "camera_snapshot_size": len(normalized_content),
+            },
+        )
+        return {"accepted": True, "snapshot": metadata}
+
+    @app.get("/api/v1/devices/{device_id}/camera/snapshot")
+    def camera_snapshot(device_id: str, request: Request) -> Response:
+        authorize_sensitive(request)
+        selected = _device_id(device_id)
+        if not store.get(selected):
+            raise HTTPException(status_code=404, detail="Device not found")
+        snapshot = camera_snapshots.get(selected)
+        if snapshot is None:
+            store.clear_camera_snapshot_metadata(selected)
+            raise HTTPException(status_code=404, detail="No camera snapshot is cached")
+        content, metadata = snapshot
+        try:
+            captured = datetime.fromisoformat(str(metadata["captured_at"]))
+        except ValueError:
+            captured = datetime.min.replace(tzinfo=UTC)
+        if (datetime.now(UTC) - captured).total_seconds() > CAMERA_SNAPSHOT_TTL_SECONDS:
+            camera_snapshots.remove(selected)
+            store.clear_camera_snapshot_metadata(selected)
+            raise HTTPException(status_code=404, detail="Camera snapshot has expired")
+        return Response(
+            content=content,
+            media_type="image/jpeg",
+            headers={
+                "Cache-Control": "no-store, private",
+                "X-Content-Type-Options": "nosniff",
+                "X-FlexDisplay-Camera-Captured-At": str(metadata["captured_at"]),
+                "X-FlexDisplay-Camera-Facing": str(metadata["facing"]),
+            },
+        )
 
     @app.get("/api/v1/flexhub")
     def flexhub_status(request: Request, refresh: bool = False) -> dict[str, Any]:
@@ -3694,7 +4142,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         }
 
     @app.get("/api/v1/devices")
-    def devices(compact: bool = False) -> dict[str, Any]:
+    def devices(request: Request, compact: bool = False) -> dict[str, Any]:
+        authorize_sensitive(request)
         store.expire_stale_firmware_installs(settings.firmware.stale_install_seconds)
         payload: list[dict[str, Any]] = []
         for record in store.all():
@@ -3724,7 +4173,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return {"devices": payload}
 
     @app.get("/api/v1/devices/{device_id}")
-    def device(device_id: str) -> dict[str, Any]:
+    def device(device_id: str, request: Request) -> dict[str, Any]:
+        authorize_sensitive(request)
         selected = _device_id(device_id)
         record = store.get(selected)
         if not record:
@@ -3829,6 +4279,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
         profile = _effective_device(configured, current)
         removed = store.remove_device(selected)
+        camera_snapshots.remove(selected)
         mqtt.remove_device(selected, profile, current)
         return {"deleted": selected, "device": removed}
 
@@ -4091,6 +4542,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         except ValueError as err:
             raise HTTPException(status_code=409, detail=str(err)) from err
         return {"device_id": selected, **status}
+
+    def authorize_sensitive(request: Request) -> None:
+        """Require an explicitly configured secret for sensitive management data."""
+        if not settings.api_key:
+            raise HTTPException(
+                status_code=503,
+                detail="A Bridge API key is required for sensitive management access",
+            )
+        authorize(request)
 
     def authorize_receiver(request: Request, device_id: str) -> dict[str, Any]:
         selected = _device_id(device_id)
@@ -4361,14 +4821,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             str(action.get("entity_id") or ""),
             action.get("data") if isinstance(action.get("data"), dict) else None,
         )
-        store.touch(
+        action_metadata = {
+            "last_touch_action_at": datetime.now(UTC).isoformat(timespec="seconds"),
+            "last_touch_action_source": source,
+            "last_touch_action_result": detail,
+        }
+        if source != "notification":
+            action_metadata["last_touch_action_label"] = action.get("label")
+        store.update_metadata(
             device_id,
-            {
-                "last_touch_action_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "last_touch_action_source": source,
-                "last_touch_action_label": action.get("label"),
-                "last_touch_action_result": detail,
-            },
+            action_metadata,
         )
         publish_current(device_id)
         if not success:
@@ -4388,6 +4850,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         payload: dict[str, Any] = Body(default={}),
     ) -> dict[str, Any]:
         authorize_receiver(request, device_id)
+        confirmed = payload.get("confirmed", False)
+        if not isinstance(confirmed, bool):
+            raise HTTPException(status_code=400, detail="confirmed must be a boolean")
         selected = _device_id(device_id)
         action = rook.interaction_action(selected, action_id)
         if not action:
@@ -4395,7 +4860,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         return execute_rook_action(
             selected,
             action,
-            bool(payload.get("confirmed")),
+            confirmed,
             "dashboard",
         )
 
@@ -4405,11 +4870,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         request: Request,
         payload: dict[str, Any] = Body(...),
     ) -> dict[str, Any]:
-        authorize(request)
+        authorize_sensitive(request)
         selected = _device_id(device_id)
         record = store.get(selected)
         if not record or not _is_android_display(record):
             raise HTTPException(status_code=404, detail="Android receiver not found")
+        if _is_android_companion(record) and not _decorate_device(
+            record, settings, store, dashboards.names()
+        ).get("online"):
+            raise HTTPException(status_code=409, detail="Device must be online")
+        if _is_android_companion(record) and (
+            record.get("foreground_active") is not True
+            or not record.get("foreground_session")
+        ):
+            raise HTTPException(status_code=409, detail="Companion must be open")
         title = str(payload.get("title") or "Notification").replace("\n", " ").strip()[:80]
         message = str(payload.get("message") or "").replace("\r", " ").strip()[:320]
         chime = str(payload.get("chime") or "default").strip().lower()
@@ -4430,25 +4904,40 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 image, image_media_type = ha.camera_image(camera_entity)
             except ValueError as err:
                 raise HTTPException(status_code=422, detail=str(err)) from err
-        result = rook.publish_notification(
-            selected,
-            title=title,
-            message=message,
-            chime=chime,
-            duration=duration,
-            image=image,
-            image_media_type=image_media_type,
-            public_actions=public_actions,
-            private_actions=private_actions,
-        )
-        store.touch(
-            selected,
-            {
-                "last_notification_at": datetime.now(UTC).isoformat(timespec="seconds"),
-                "last_notification_title": title,
-                "last_notification_camera": camera_entity,
-            },
-        )
+        with notification_lock_for(selected):
+            current = store.get(selected) or record
+            previous_notification_id = str(
+                current.get("active_notification_id") or ""
+            )
+            if previous_notification_id:
+                rook.clear_notification(selected)
+                store.record_notification_response(
+                    selected,
+                    notification_id=previous_notification_id,
+                    outcome="superseded",
+                    trust="bridge",
+                )
+            result = rook.publish_notification(
+                selected,
+                title=title,
+                message=message,
+                chime=chime,
+                duration=duration,
+                image=image,
+                image_media_type=image_media_type,
+                public_actions=public_actions,
+                private_actions=private_actions,
+            )
+            notification = result.get("notification") or {}
+            contract = rook.notification_contract(
+                selected, str(notification.get("id") or "")
+            ) or {}
+            store.record_notification_created(
+                selected,
+                notification_id=str(notification.get("id") or ""),
+                expires_at=str(contract.get("expires_at") or ""),
+            )
+        store.update_metadata(selected, {"last_notification_camera": camera_entity})
         publish_current(selected)
         return {"queued": True, **result}
 
@@ -4460,7 +4949,20 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         timeout: float = 25.0,
     ) -> dict[str, Any]:
         authorize_receiver(request, device_id)
-        return rook.wait(_device_id(device_id), max(0, after), timeout)
+        selected = _device_id(device_id)
+        result = rook.wait(selected, max(0, after), timeout)
+        notification = result.get("notification") or {}
+        with notification_lock_for(selected):
+            if notification.get("id"):
+                store.record_notification_fetched(selected, str(notification["id"]))
+            elif result.get("reason") == "expired" and result.get("notification_id"):
+                store.record_notification_response(
+                    selected,
+                    notification_id=str(result["notification_id"]),
+                    outcome="server_expired",
+                    trust="bridge",
+                )
+        return result
 
     @app.get("/api/v1/devices/{device_id}/notifications/{notification_id}/image")
     def receiver_notification_image(
@@ -4475,37 +4977,142 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         image, media_type = selected
         return Response(content=image, media_type=media_type)
 
-    @app.post("/api/v1/devices/{device_id}/notifications/{notification_id}/dismiss")
-    def dismiss_receiver_notification(
-        device_id: str,
-        notification_id: str,
-        request: Request,
-    ) -> dict[str, Any]:
-        authorize_receiver(request, device_id)
-        dismissed = rook.dismiss(_device_id(device_id), notification_id)
-        return {"dismissed": dismissed}
-
     @app.post(
-        "/api/v1/devices/{device_id}/notifications/{notification_id}/actions/{action_id}"
+        "/api/v1/devices/{device_id}/notifications/{notification_id}/response"
     )
-    def receiver_notification_action(
+    async def receiver_notification_response(
         device_id: str,
         notification_id: str,
-        action_id: str,
         request: Request,
-        payload: dict[str, Any] = Body(default={}),
     ) -> dict[str, Any]:
+        """Record one paired-receiver outcome without reflecting private actions."""
         authorize_receiver(request, device_id)
         selected = _device_id(device_id)
-        action = rook.notification_action(selected, notification_id, action_id)
-        if not action:
-            raise HTTPException(status_code=404, detail="Notification action not found")
-        return execute_rook_action(
-            selected,
-            action,
-            bool(payload.get("confirmed")),
-            "notification",
-        )
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,96}", notification_id):
+            raise HTTPException(status_code=400, detail="Invalid notification ID")
+        if request.headers.get("content-type", "").split(";", 1)[0].lower() != "application/json":
+            raise HTTPException(status_code=415, detail="JSON response body required")
+        try:
+            content_length = int(request.headers.get("content-length", "0"))
+        except ValueError:
+            content_length = 0
+        if content_length > 2048:
+            raise HTTPException(status_code=413, detail="Notification response is too large")
+        body = bytearray()
+        async for chunk in request.stream():
+            body.extend(chunk)
+            if len(body) > 2048:
+                raise HTTPException(status_code=413, detail="Notification response is too large")
+        try:
+            payload = json.loads(bytes(body))
+        except (UnicodeDecodeError, json.JSONDecodeError) as err:
+            raise HTTPException(status_code=400, detail="Invalid JSON response") from err
+        if not isinstance(payload, dict):
+            raise HTTPException(status_code=400, detail="Response must be an object")
+        if set(payload) - {"outcome", "action_id", "confirmed", "occurred_at"}:
+            raise HTTPException(status_code=400, detail="Unexpected response fields")
+        if not isinstance(payload.get("outcome"), str):
+            raise HTTPException(status_code=400, detail="Notification outcome must be a string")
+        outcome = payload["outcome"].strip().lower()
+        if outcome not in {"action", "dismissed", "expired"}:
+            raise HTTPException(status_code=400, detail="Unsupported notification outcome")
+        raw_action_id = payload.get("action_id", "")
+        if not isinstance(raw_action_id, str):
+            raise HTTPException(status_code=400, detail="action_id must be a string")
+        action_id = raw_action_id.strip()
+        if outcome == "action":
+            if not action_id or not re.fullmatch(r"action-[1-3]", action_id):
+                raise HTTPException(status_code=400, detail="A valid action_id is required")
+        elif action_id:
+            raise HTTPException(
+                status_code=400, detail="action_id is only valid for action outcomes"
+            )
+        confirmed = payload.get("confirmed", False)
+        if not isinstance(confirmed, bool):
+            raise HTTPException(status_code=400, detail="confirmed must be a boolean")
+        occurred_at = payload.get("occurred_at", "")
+        if not isinstance(occurred_at, str) or len(occurred_at) > 64:
+            raise HTTPException(status_code=400, detail="occurred_at must be RFC3339 text")
+        with notification_lock_for(selected):
+            existing = store.get(selected) or {}
+            for prior in existing.get("notification_response_history") or []:
+                if str(prior.get("notification_id") or "") == notification_id:
+                    return {"accepted": True, "duplicate": True, "response": prior}
+            consumed = rook.consume_notification_response(
+                selected,
+                notification_id,
+                outcome=outcome,
+                action_id=action_id,
+                confirmed=confirmed,
+            )
+            if consumed is None:
+                raise HTTPException(status_code=404, detail="Notification is no longer active")
+            if consumed.get("error") == "notification_has_not_expired":
+                raise HTTPException(status_code=409, detail="Notification has not expired")
+            if consumed.get("error") == "confirmation_required":
+                raise HTTPException(
+                    status_code=409,
+                    detail={
+                        "confirmation_required": True,
+                        "message": consumed.get("message") or "Confirm this action",
+                    },
+                )
+            stored_outcome = "device_timeout" if outcome == "expired" else outcome
+            stored, created = store.record_notification_response(
+                selected,
+                notification_id=notification_id,
+                outcome=stored_outcome,
+                action_id=str(consumed.get("action_id") or ""),
+                device_reported_at=_reported_at(occurred_at),
+            )
+            action = consumed.get("action")
+        if isinstance(action, dict):
+            try:
+                execute_rook_action(selected, action, confirmed, "notification")
+            except HTTPException:
+                stored = store.record_notification_action_execution(
+                    selected,
+                    str((stored or {}).get("event_id") or ""),
+                    success=False,
+                ) or stored
+            else:
+                stored = store.record_notification_action_execution(
+                    selected,
+                    str((stored or {}).get("event_id") or ""),
+                    success=True,
+                ) or stored
+        publish_current(selected)
+        return {"accepted": True, "duplicate": not created, "response": stored}
+
+    @app.delete("/api/v1/devices/{device_id}/notifications/current")
+    def clear_receiver_notification(
+        device_id: str, request: Request
+    ) -> dict[str, Any]:
+        """Clear an active alert through the authenticated management boundary."""
+        authorize_sensitive(request)
+        selected = _device_id(device_id)
+        record = store.get(selected)
+        if not record or not _is_android_display(record):
+            raise HTTPException(status_code=404, detail="Android receiver not found")
+        with notification_lock_for(selected):
+            current = store.get(selected) or record
+            active_notification_id = str(
+                current.get("active_notification_id") or ""
+            )
+            cleared = rook.clear_notification(selected)
+            stored = None
+            if active_notification_id:
+                stored, _ = store.record_notification_response(
+                    selected,
+                    notification_id=active_notification_id,
+                    outcome="cleared",
+                    trust="bridge",
+                )
+            metadata_cleared = store.clear_active_notification(selected)
+        if cleared or metadata_cleared:
+            rook.publish_refresh(selected, "notification-cleared")
+            publish_current(selected)
+        return {"cleared": bool(cleared or metadata_cleared), "response": stored}
 
     @app.get("/studio", include_in_schema=False)
     def studio_redirect() -> RedirectResponse:
@@ -4841,7 +5448,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if target != "default":
             _device_id(target)
         model = str(payload.get("model") or "X4").upper()
-        default_width, default_height = (528, 792) if model == "X3" else (480, 800)
+        default_width, default_height = (
+            (528, 792)
+            if model == "X3"
+            else (480, 480)
+            if model == "ROOK"
+            else (960, 480)
+            if model == "CHECKERS"
+            else (1200, 675)
+            if model in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
+            else (480, 800)
+        )
         width = _integer(
             str(payload.get("width") or default_width),
             default_width,
@@ -5108,7 +5725,15 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize(request)
         selected_model = model.upper()
         default_width, default_height = (
-            (528, 792) if selected_model == "X3" else (480, 800)
+            (528, 792)
+            if selected_model == "X3"
+            else (480, 480)
+            if selected_model == "ROOK"
+            else (960, 480)
+            if selected_model == "CHECKERS"
+            else (1200, 675)
+            if selected_model in {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
+            else (480, 800)
         )
         try:
             content = photo_frames.render(
@@ -6379,8 +7004,27 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_volume: str | None = Header(default=None),
         x_flexdisplay_muted: str | None = Header(default=None),
         x_flexdisplay_brightness: str | None = Header(default=None),
+        x_flexdisplay_hardware_manufacturer: str | None = Header(default=None),
+        x_flexdisplay_hardware_model: str | None = Header(default=None),
+        x_flexdisplay_camera_available: str | None = Header(default=None),
+        x_flexdisplay_camera_permission: str | None = Header(default=None),
+        x_flexdisplay_microphone_available: str | None = Header(default=None),
+        x_flexdisplay_microphone_permission: str | None = Header(default=None),
+        x_flexdisplay_speaker_available: str | None = Header(default=None),
         x_flexdisplay_battery_percent: str | None = Header(default=None),
         x_flexdisplay_battery_voltage: str | None = Header(default=None),
+        x_flexdisplay_battery_charging: str | None = Header(default=None),
+        x_flexdisplay_battery_status: str | None = Header(default=None),
+        x_flexdisplay_battery_health: str | None = Header(default=None),
+        x_flexdisplay_battery_temperature_c: str | None = Header(default=None),
+        x_flexdisplay_battery_voltage_mv: str | None = Header(default=None),
+        x_flexdisplay_battery_plug_type: str | None = Header(default=None),
+        x_flexdisplay_battery_current_ma: str | None = Header(default=None),
+        x_flexdisplay_camera_policy: str | None = Header(default=None),
+        x_flexdisplay_foreground_active: str | None = Header(default=None),
+        x_flexdisplay_foreground_session: str | None = Header(default=None),
+        x_flexdisplay_dock_enabled: str | None = Header(default=None),
+        x_flexdisplay_dock_active: str | None = Header(default=None),
         x_flexdisplay_rssi: str | None = Header(default=None),
         x_flexdisplay_mode: str | None = Header(default=None),
         x_flexdisplay_command_result: str | None = Header(default=None),
@@ -6401,8 +7045,6 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         x_flexdisplay_last_image_error: str | None = Header(default=None),
         x_flexdisplay_last_fetch_error: str | None = Header(default=None),
         x_flexdisplay_capabilities: str | None = Header(default=None),
-        x_flexdisplay_camera_available: str | None = Header(default=None),
-        x_flexdisplay_microphone_available: str | None = Header(default=None),
         x_flexdisplay_audio_available: str | None = Header(default=None),
         x_flexdisplay_touch_available: str | None = Header(default=None),
         x_flexdisplay_always_on: str | None = Header(default=None),
@@ -6444,6 +7086,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # read, so revoked/incorrect keys cannot probe or replace records.
             authorize_color_device(device_id, x_flexdisplay_device_key)
         existing_record = store.get(device_id) or {}
+        expected_receiver_token = str(existing_record.get("receiver_token_sha256") or "")
+        if expected_receiver_token and not store.pin_receiver_token(
+            device_id, str(x_flexdisplay_receiver_token or "")
+        ):
+            raise HTTPException(status_code=401, detail="Receiver token required")
         if x_flexdisplay_model:
             model = x_flexdisplay_model
         elif existing_record.get("model") and existing_record.get("model_reported") is True:
@@ -6462,6 +7109,23 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             # default. The device can advertise an explicit model next check-in.
             model = "UNKNOWN"
         device_firmware = _device_firmware(settings, model)
+        capabilities = _capabilities(x_flexdisplay_capabilities)
+        reported_descriptor = resolve_device_capabilities(
+            model,
+            capabilities=capabilities,
+            width=width,
+            height=height,
+        )
+        if (
+            reported_descriptor.family == "android_receiver"
+            and not store.pin_receiver_token(
+                device_id, str(x_flexdisplay_receiver_token or "")
+            )
+        ):
+            raise HTTPException(
+                status_code=401,
+                detail="Receiver token is required for initial Android pairing",
+            )
         def capability_flag(raw: str | None, *names: str) -> bool:
             parsed = _boolean(raw)
             if parsed is not None:
@@ -6575,6 +7239,88 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             and model != "UNKNOWN"
             and existing_record.get("last_seen") is None
         )
+        battery_voltage_mv = _bounded_integer(
+            x_flexdisplay_battery_voltage_mv, 1, 25_000
+        )
+        battery_status = _enum_header(
+            x_flexdisplay_battery_status,
+            {"charging", "full", "discharging", "not_charging", "unknown"},
+        )
+        battery_health = _enum_header(
+            x_flexdisplay_battery_health,
+            {
+                "good",
+                "overheat",
+                "dead",
+                "over_voltage",
+                "unspecified_failure",
+                "cold",
+                "unknown",
+            },
+        )
+        battery_plug_type = _enum_header(
+            x_flexdisplay_battery_plug_type,
+            {"ac", "usb", "wireless", "dock", "unknown", "none"},
+        )
+        if battery_plug_type == "unknown":
+            battery_plug_type = None
+        usb_connected = _strict_boolean(x_flexdisplay_usb_connected)
+        battery_values = {
+            "battery_percent": _bounded_number(
+                x_flexdisplay_battery_percent, 0, 100
+            ),
+            "battery_voltage": (
+                _bounded_number(x_flexdisplay_battery_voltage, 0.001, 100)
+                if x_flexdisplay_battery_voltage is not None
+                else battery_voltage_mv / 1000
+                if battery_voltage_mv is not None
+                else None
+            ),
+            "battery_charging": _strict_boolean(x_flexdisplay_battery_charging),
+            "battery_status": None if battery_status == "unknown" else battery_status,
+            "battery_health": None if battery_health == "unknown" else battery_health,
+            "battery_temperature_c": _bounded_number(
+                x_flexdisplay_battery_temperature_c, -40, 100
+            ),
+            "battery_voltage_mv": battery_voltage_mv,
+            "battery_plug_type": battery_plug_type,
+            "battery_current_ma": _bounded_number(
+                x_flexdisplay_battery_current_ma, -20_000, 20_000
+            ),
+        }
+        companion = _is_android_companion(model)
+        foreground_active = _strict_boolean(x_flexdisplay_foreground_active)
+        foreground_session = _header_value(x_flexdisplay_foreground_session)
+        if not re.fullmatch(r"[A-Za-z0-9_-]{8,64}", foreground_session):
+            foreground_session = ""
+        if foreground_active is not True:
+            foreground_session = ""
+        camera_policy = _enum_header(
+            x_flexdisplay_camera_policy, {"off", "allow_while_open"}
+        )
+        dock_enabled = _strict_boolean(x_flexdisplay_dock_enabled)
+        dock_active = _strict_boolean(x_flexdisplay_dock_active)
+        if companion:
+            camera_policy = camera_policy or "off"
+            foreground_active = foreground_active is True
+            dock_enabled = dock_enabled is True
+            externally_powered = battery_values["battery_plug_type"] in {
+                "ac",
+                "usb",
+                "wireless",
+                "dock",
+            }
+            dock_active = bool(
+                dock_active is True
+                and dock_enabled
+                and foreground_active
+                and externally_powered
+            )
+            usb_connected = (
+                battery_plug_type == "usb"
+                if battery_plug_type is not None
+                else None
+            )
         telemetry = {
             "model": model,
             "model_reported": (
@@ -6594,11 +7340,61 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "voice_volume": _optional_integer(x_flexdisplay_volume, 0, 100),
             "voice_muted": _boolean(x_flexdisplay_muted),
             "screen_brightness": _optional_integer(x_flexdisplay_brightness, 0, 100),
-            "battery_percent": _number(x_flexdisplay_battery_percent),
-            "battery_voltage": _number(x_flexdisplay_battery_voltage),
+            "hardware_manufacturer": _header_value(
+                x_flexdisplay_hardware_manufacturer
+            )[:80]
+            or None,
+            "hardware_model": _header_value(x_flexdisplay_hardware_model)[:120]
+            or None,
+            "camera_available": (
+                _strict_boolean(x_flexdisplay_camera_available)
+                if companion
+                else capability_flag(
+                    x_flexdisplay_camera_available, "camera", "camera-snapshot"
+                )
+            ),
+            "camera_permission": (
+                _strict_boolean(x_flexdisplay_camera_permission)
+                if companion
+                else _boolean(x_flexdisplay_camera_permission)
+            ),
+            "microphone_available": (
+                _strict_boolean(x_flexdisplay_microphone_available)
+                if companion
+                else capability_flag(
+                    x_flexdisplay_microphone_available, "microphone", "assist"
+                )
+            ),
+            "microphone_permission": (
+                _strict_boolean(x_flexdisplay_microphone_permission)
+                if companion
+                else _boolean(x_flexdisplay_microphone_permission)
+            ),
+            "desired_microphone_enabled": (
+                False
+                if _is_android_companion(model)
+                and "desired_microphone_enabled" not in existing_record
+                else None
+            ),
+            "speaker_available": (
+                _strict_boolean(x_flexdisplay_speaker_available)
+                if companion
+                else capability_flag(x_flexdisplay_speaker_available, "speaker", "audio")
+            ),
+            **battery_values,
+            "battery_observed_at": (
+                datetime.now(UTC).isoformat(timespec="seconds")
+                if any(value is not None for value in battery_values.values())
+                else None
+            ),
+            "camera_policy": camera_policy,
+            "foreground_active": foreground_active,
+            "foreground_session": foreground_session or None,
+            "dock_enabled": dock_enabled,
+            "dock_active": dock_active,
             "rssi": _number(x_flexdisplay_rssi),
             "mode": x_flexdisplay_mode or "home_assistant",
-            "usb_connected": _boolean(x_flexdisplay_usb_connected),
+            "usb_connected": usb_connected,
             "uptime_seconds": _optional_integer(
                 x_flexdisplay_uptime_seconds, 0, 31_536_000
             ),
@@ -6629,12 +7425,6 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "color_available": (
                 True if lvgl_display is not None else "color" in capabilities
             ),
-            "camera_available": capability_flag(
-                x_flexdisplay_camera_available, "camera", "camera-snapshot"
-            ),
-            "microphone_available": capability_flag(
-                x_flexdisplay_microphone_available, "microphone", "assist"
-            ),
             "audio_available": capability_flag(x_flexdisplay_audio_available, "audio"),
             "always_on_available": capability_flag(
                 x_flexdisplay_always_on, "always-on", "always-on-color"
@@ -6643,9 +7433,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "screen_resolution": f"{width}x{height}",
             "client_platform": "android" if "android" in capabilities else "embedded",
             "receiver_token_sha256": (
-                hashlib.sha256(x_flexdisplay_receiver_token.encode("utf-8")).hexdigest()
-                if x_flexdisplay_receiver_token
-                else None
+                expected_receiver_token or None
             ),
             "image_cached": image_cached,
             "reported_policy_revision": _optional_integer(
@@ -6693,6 +7481,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         elif image_cached:
             telemetry["dashboard_fetch_error"] = False
         record = store.touch(device_id, telemetry)
+        if store.reject_camera_snapshot_session(
+            device_id, str(record.get("foreground_session") or "")
+        ):
+            record = store.get(device_id) or record
+        if store.expire_camera_snapshot_command(device_id):
+            record = store.get(device_id) or record
         content_assignment = content_packs.observe(
             device_id,
             x_flexdisplay_content_version or "",
@@ -6947,6 +7741,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
                 if command_id:
                     response.headers["X-FlexDisplay-Command-ID"] = command_id
+                    if "camera-snapshot" in commands:
+                        response.headers[
+                            "X-FlexDisplay-Command-Foreground-Session"
+                        ] = str(
+                            record.get("camera_snapshot_foreground_session") or ""
+                        )
                 if provisioning_enabled:
                     response.headers["X-FlexDisplay-Provisioned"] = "true"
                     response.headers["X-FlexDisplay-Device-Name"] = _header_value(
@@ -6984,6 +7784,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 if _is_android_display(model):
                     response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                         int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
+                    )
+                    response.headers["X-FlexDisplay-Desired-Microphone-Enabled"] = (
+                        "true"
+                        if _desired_microphone_enabled(record)
+                        else "false"
                     )
                 if device_firmware.version:
                     response.headers["X-FlexDisplay-Latest-Firmware"] = (
@@ -7182,6 +7987,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
             if command_id:
                 response.headers["X-FlexDisplay-Command-ID"] = command_id
+                if "camera-snapshot" in commands:
+                    response.headers[
+                        "X-FlexDisplay-Command-Foreground-Session"
+                    ] = str(record.get("camera_snapshot_foreground_session") or "")
             if x_flexdisplay_command_result:
                 response.headers["X-FlexDisplay-Command-Acknowledged"] = (
                     "true" if command_acknowledged else "false"
@@ -7196,6 +8005,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if _is_android_display(model):
                 response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                     int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
+                )
+                response.headers["X-FlexDisplay-Desired-Microphone-Enabled"] = (
+                    "true"
+                    if _desired_microphone_enabled(record)
+                    else "false"
                 )
             if device_firmware.version:
                 response.headers["X-FlexDisplay-Latest-Firmware"] = (
@@ -7584,6 +8398,10 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         response.headers["X-FlexDisplay-Commands"] = ",".join(commands)
         if command_id:
             response.headers["X-FlexDisplay-Command-ID"] = command_id
+            if "camera-snapshot" in commands:
+                response.headers[
+                    "X-FlexDisplay-Command-Foreground-Session"
+                ] = str(record.get("camera_snapshot_foreground_session") or "")
         if x_flexdisplay_command_result:
             response.headers["X-FlexDisplay-Command-Acknowledged"] = (
                 "true" if command_acknowledged else "false"
@@ -7609,6 +8427,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         if _is_android_display(model):
             response.headers["X-FlexDisplay-Desired-Brightness"] = str(
                 int(record.get("desired_screen_brightness", record.get("screen_brightness") or 100))
+            )
+            response.headers["X-FlexDisplay-Desired-Microphone-Enabled"] = (
+                "true"
+                if _desired_microphone_enabled(record)
+                else "false"
             )
         if device_firmware.version:
             response.headers["X-FlexDisplay-Latest-Firmware"] = (

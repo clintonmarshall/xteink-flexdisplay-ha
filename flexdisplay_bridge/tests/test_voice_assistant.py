@@ -186,12 +186,24 @@ def test_device_assist_endpoint_returns_framed_pcm(tmp_path: Path) -> None:
     app.state.voice_assistant.reset_conversation = reset_devices.append  # type: ignore[method-assign]
 
     with TestClient(app) as client:
+        paired = client.get(
+            "/api/v1/screen",
+            headers={
+                "X-FlexDisplay-ID": "ROOK-226290",
+                "X-FlexDisplay-Model": "ROOK",
+                "X-FlexDisplay-Receiver-Token": "assist-receiver-token",
+                "X-FlexDisplay-Microphone-Available": "true",
+                "X-FlexDisplay-Microphone-Permission": "true",
+            },
+        )
+        assert paired.status_code == 200
         response = client.post(
-            "/api/v1/devices/N4-226290/assist",
+            "/api/v1/devices/ROOK-226290/assist",
             content=b"\x00\x00" * (MIN_AUDIO_BYTES // 2),
             headers={
                 "Content-Type": "application/octet-stream",
                 "X-FlexDisplay-New-Conversation": "true",
+                "X-FlexDisplay-Receiver-Token": "assist-receiver-token",
             },
         )
 
@@ -200,4 +212,4 @@ def test_device_assist_endpoint_returns_framed_pcm(tmp_path: Path) -> None:
     decoded = decode_voice_response(response.content)
     assert decoded.response_text == "Hall light turned on"
     assert decoded.audio_pcm == b"\x34\x12" * 100
-    assert reset_devices == ["N4-226290"]
+    assert reset_devices == ["ROOK-226290"]

@@ -10,7 +10,12 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.update_coordinator import DataUpdateCoordinator, UpdateFailed
 
 from .api import FlexDisplayApiClient, FlexDisplayApiError
-from .const import DOMAIN, EVENT_TYPE, MESHTASTIC_EVENT_TYPE
+from .const import (
+    DOMAIN,
+    EVENT_TYPE,
+    MESHTASTIC_EVENT_TYPE,
+    NOTIFICATION_EVENT_TYPE,
+)
 
 LOGGER = logging.getLogger(__name__)
 
@@ -35,6 +40,7 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
         self.config_entry_id = config_entry_id
         self.flexhub_id = f"flexhub_{config_entry_id}"
         self._seen_button_events: dict[str, set[tuple[int, str, int]]] = {}
+        self._seen_notification_event_ids: dict[str, set[str]] = {}
         self.flexhub_summary: dict = {}
         self.meshtastic_messages: list[dict] = []
         self.meshtastic_unread_count = 0
@@ -83,6 +89,59 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
                     "device_uptime_ms": event.get("uptime_ms"),
                     "received_at": event.get("received_at"),
                     "configured_action": event.get("configured_action"),
+                },
+            )
+
+    def _fire_new_notification_responses(self, record: dict) -> None:
+        """Forward only new Bridge-minted public response events after baseline."""
+        device_id = str(record.get("device_id") or "")
+        if not device_id:
+            return
+        responses = record.get("notification_response_history") or []
+        event_ids = {
+            str(item.get("event_id") or "")
+            for item in responses
+            if isinstance(item, dict)
+            and item.get("event_id")
+            and not (
+                item.get("outcome") == "action"
+                and not isinstance(item.get("action_execution_success"), bool)
+            )
+        }
+        previous = self._seen_notification_event_ids.get(device_id)
+        self._seen_notification_event_ids[device_id] = event_ids
+        if previous is None:
+            return
+        registry = dr.async_get(self._hass)
+        device = registry.async_get_device({(DOMAIN, device_id)})
+        allowed = {
+            "event_id",
+            "notification_id",
+            "outcome",
+            "action_id",
+            "device_reported_at",
+            "received_at",
+            "trust",
+            "action_execution_success",
+        }
+        for response in responses:
+            if not isinstance(response, dict):
+                continue
+            if response.get("outcome") == "action" and not isinstance(
+                response.get("action_execution_success"), bool
+            ):
+                continue
+            event_id = str(response.get("event_id") or "")
+            if not event_id or event_id in previous:
+                continue
+            self._hass.bus.async_fire(
+                NOTIFICATION_EVENT_TYPE,
+                {
+                    key: value for key, value in response.items() if key in allowed
+                }
+                | {
+                    "device_id": device.id if device else None,
+                    "flexdisplay_id": device_id,
                 },
             )
 
@@ -226,6 +285,7 @@ class FlexDisplayCoordinator(DataUpdateCoordinator[list[dict]]):
                         sw_version=str(record.get("firmware") or "unknown"),
                     )
                 self._fire_new_button_events(record)
+                self._fire_new_notification_responses(record)
 
             try:
                 self.flexhub_summary = await self.client.flexhub()

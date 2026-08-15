@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="256" height="256" viewBox="0 0 48 48">
+  <title>FlexDisplay</title>
+  <path fill="#040A11" d="M24 2a22 22 0 1 0 0 44 22 22 0 1 0 0-44"/>
+  <path fill="#36BFFF" d="M11 15h26v5H17v6h16v5H17v7h-6z"/>
+</svg>

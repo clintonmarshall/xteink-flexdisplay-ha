@@ -495,7 +495,7 @@ jobs:
           DEBIAN_FRONTEND=noninteractive apt-get install -y
           --no-install-recommends docker.io &&
           rm -rf /var/lib/apt/lists/*
-      - name: Run partial local-checkout HACS schemas
+      - name: Run exact-checkout HACS source validation
         env:
           FORGEJO_TOKEN: ""
           GITEA_TOKEN: ""
@@ -545,6 +545,23 @@ jobs:
           run_container=""
           cleanup
           trap - EXIT INT TERM HUP
+      - name: Validate public HACS repository metadata
+        env:
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: python3 scripts/check_hacs_repository.py
       - name: Run hassfest
         env:
           FORGEJO_TOKEN: ""
@@ -591,23 +608,6 @@ jobs:
           run_container=""
           cleanup
           trap - EXIT INT TERM HUP
-      - name: Keep integration-source validation fail-closed
-        if: ${{ needs.changes.outputs.integration_source == 'true' }}
-        env:
-          FORGEJO_TOKEN: ""
-          GITEA_TOKEN: ""
-          GITHUB_TOKEN: ""
-          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
-          ACTIONS_RUNTIME_TOKEN: ""
-          ACTIONS_CACHE_URL: ""
-          ACTIONS_RUNTIME_URL: ""
-          ACTIONS_RESULTS_URL: ""
-          ACTIONS_ID_TOKEN_REQUEST_URL: ""
-        run: |
-          echo "Full HACS repository validation is not yet available locally." >&2
-          echo "Integration-source changes remain blocked on the Forgejo Runner." >&2
-          exit 1
-
   android:
     needs:
       - candidate-policy
@@ -713,7 +713,10 @@ jobs:
           printf '%s  %s\n' \
             '14dfa961b6704bb3decdea06502781edaa796a82e6da41cd2e1962b14fbe21a3' \
             'gradle/wrapper/gradle-wrapper.jar' | sha256sum -c -
-          ./gradlew clean assembleDebug lintDebug
+          ./gradlew clean \
+            testKioskDebugUnitTest testCompanionDebugUnitTest \
+            assembleKioskDebug assembleCompanionDebug \
+            lintKioskDebug lintCompanionDebug
 
   required:
     if: ${{ always() }}

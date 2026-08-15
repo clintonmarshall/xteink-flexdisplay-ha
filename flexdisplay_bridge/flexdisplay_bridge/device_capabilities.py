@@ -38,6 +38,7 @@ ANDROID_ACTIONS = tuple(action for action in XTEINK_ACTIONS if action != "instal
     "brightness-up",
     "brightness-down",
 )
+ANDROID_PHONE_ACTIONS = ANDROID_ACTIONS + ("camera-snapshot",)
 GENERIC_ACTIONS = ("refresh",)
 COLOR_RECEIVER_ACTIONS = ("refresh", "next", "previous", "overview")
 
@@ -67,6 +68,9 @@ _JC3636_ALIASES = frozenset(
         "GUITIONJC3636W518",
         "TAICHIPI",
     }
+)
+_ANDROID_PHONE_ALIASES = frozenset(
+    {"ANDROID", "ANDROIDPHONE", "ANDROIDCOMPANION"}
 )
 _GENERIC_MODEL_MARKERS = ("ESP32", "ESP8266", "LCD", "OLED", "TFT")
 _GENERIC_CAPABILITIES = frozenset(
@@ -153,6 +157,9 @@ class ManagementCapabilities:
     supports_interactions: bool
     supports_notifications: bool
     supports_audio: bool
+    supports_camera: bool
+    supports_microphone: bool
+    supports_brightness: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -212,6 +219,9 @@ def _management(
     interactions: bool = False,
     notifications: bool = False,
     audio: bool = False,
+    camera: bool = False,
+    microphone: bool = False,
+    brightness: bool = False,
 ) -> ManagementCapabilities:
     return ManagementCapabilities(
         actions=actions,
@@ -228,6 +238,9 @@ def _management(
         supports_interactions=interactions,
         supports_notifications=notifications,
         supports_audio=audio,
+        supports_camera=camera,
+        supports_microphone=microphone,
+        supports_brightness=brightness,
     )
 
 
@@ -293,6 +306,8 @@ _ANDROID_MANAGEMENT = _management(
     interactions=True,
     notifications=True,
     audio=True,
+    microphone=True,
+    brightness=True,
 )
 
 _ROOK = DeviceCapabilityDescriptor(
@@ -336,6 +351,33 @@ _JC3636 = DeviceCapabilityDescriptor(
         opendisplay_policy=False,
         page_selection=True,
         interactions=True,
+    ),
+)
+
+_ANDROID_PHONE = DeviceCapabilityDescriptor(
+    family="android_receiver",
+    model_key="android_phone",
+    label="Android companion",
+    known_model=True,
+    display=DisplayCapabilities(None, None, "lcd", True, "rectangular", "png", True),
+    power=PowerCapabilities("on_demand", True, True, True, False),
+    delivery=DeliveryCapabilities("long_poll", True, True, False, False),
+    firmware=FirmwareCapabilities("android_app", False, False),
+    management=_management(
+        actions=ANDROID_PHONE_ACTIONS,
+        modes=RENDERED_MODES,
+        fleet_policy=True,
+        battery_policy=False,
+        sleep_policy=False,
+        rendering_profile=True,
+        opendisplay_policy=False,
+        page_selection=True,
+        interactions=True,
+        notifications=True,
+        audio=True,
+        camera=True,
+        microphone=True,
+        brightness=True,
     ),
 )
 
@@ -384,6 +426,9 @@ _UNKNOWN = DeviceCapabilityDescriptor(
         supports_interactions=False,
         supports_notifications=False,
         supports_audio=False,
+        supports_camera=False,
+        supports_microphone=False,
+        supports_brightness=False,
     ),
 )
 
@@ -398,6 +443,7 @@ DEVICE_CAPABILITY_REGISTRY: Mapping[str, DeviceCapabilityDescriptor] = MappingPr
             _ROOK,
             _CHECKERS,
             _JC3636,
+            _ANDROID_PHONE,
             _GENERIC,
             _UNKNOWN,
         )
@@ -412,6 +458,7 @@ _MODEL_ALIASES: Mapping[str, str] = MappingProxyType(
         **{alias: "rook" for alias in _ROOK_ALIASES},
         **{alias: "checkers" for alias in _CHECKERS_ALIASES},
         **{alias: "jc3636" for alias in _JC3636_ALIASES},
+        **{alias: "android_phone" for alias in _ANDROID_PHONE_ALIASES},
     }
 )
 

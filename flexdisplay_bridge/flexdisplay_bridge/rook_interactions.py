@@ -5,6 +5,7 @@ import secrets
 import threading
 import time
 from copy import deepcopy
+from datetime import UTC, datetime, timedelta
 from typing import Any, Iterable
 
 from .home_assistant import EntityState
@@ -255,6 +256,10 @@ class RookBroker:
                 "actions": deepcopy(private_actions),
                 "image": image,
                 "image_media_type": image_media_type,
+                "created_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                "expires_at_utc": (
+                    datetime.now(UTC) + timedelta(seconds=duration)
+                ).isoformat(timespec="seconds"),
             }
             self._events[device_id] = {
                 "event": "notification",
@@ -266,6 +271,85 @@ class RookBroker:
                 "sequence": sequence,
                 "notification": deepcopy(public),
                 **self._events[device_id],
+            }
+
+    def notification_contract(
+        self, device_id: str, notification_id: str
+    ) -> dict[str, Any] | None:
+        """Return trusted public lifecycle data for an active broker-minted alert."""
+        with self._condition:
+            self._expire_locked(device_id)
+            current = self._notifications.get(device_id)
+            if not current or current["public"]["id"] != notification_id:
+                return None
+            return {
+                "notification": deepcopy(current["public"]),
+                "created_at": str(current["created_at"]),
+                "expires_at": str(current["expires_at_utc"]),
+            }
+
+    def consume_notification_response(
+        self,
+        device_id: str,
+        notification_id: str,
+        *,
+        outcome: str,
+        action_id: str = "",
+        confirmed: bool = False,
+    ) -> dict[str, Any] | None:
+        """Validate and consume one active alert as one broker-atomic operation."""
+        with self._condition:
+            current = self._notifications.get(device_id)
+            if not current or current["public"]["id"] != notification_id:
+                return None
+            elapsed = time.monotonic() >= float(current["expires_at"])
+            if outcome == "expired" and not elapsed:
+                return {"error": "notification_has_not_expired"}
+            if outcome != "expired" and elapsed:
+                self._expire_locked(device_id)
+                return None
+            action = None
+            if outcome == "action":
+                action = current["actions"].get(action_id)
+                if not action:
+                    return None
+                if action.get("confirmation") and confirmed is not True:
+                    return {
+                        "error": "confirmation_required",
+                        "message": action.get("confirmation_text")
+                        or "Confirm this action",
+                    }
+            self._notifications.pop(device_id, None)
+            self._sequence[device_id] = self._next_sequence_locked(device_id)
+            self._events[device_id] = {
+                "event": "notification_dismissed",
+                "refresh": False,
+                "reason": outcome,
+                "notification_id": notification_id,
+            }
+            self._condition.notify_all()
+            return {
+                "notification_id": notification_id,
+                "outcome": outcome,
+                "action_id": action_id if action is not None else "",
+                "action": deepcopy(action) if action is not None else None,
+            }
+
+    def clear_notification(self, device_id: str) -> dict[str, Any] | None:
+        """Remove the active alert and return its public identity."""
+        with self._condition:
+            current = self._notifications.pop(device_id, None)
+            if not current:
+                return None
+            self._sequence[device_id] = self._next_sequence_locked(device_id)
+            self._events[device_id] = {
+                "event": "notification_dismissed",
+                "refresh": False,
+                "reason": "cleared",
+            }
+            self._condition.notify_all()
+            return {
+                "notification_id": str(current["public"]["id"]),
             }
 
     def publish_refresh(self, device_id: str, reason: str = "refresh") -> dict[str, Any]:
@@ -281,7 +365,7 @@ class RookBroker:
             self._condition.notify_all()
             return {"sequence": sequence, **self._events[device_id]}
 
-    def _expire_locked(self, device_id: str) -> None:
+    def _expire_locked(self, device_id: str) -> dict[str, Any] | None:
         current = self._notifications.get(device_id)
         if current and time.monotonic() >= float(current["expires_at"]):
             self._notifications.pop(device_id, None)
@@ -290,7 +374,34 @@ class RookBroker:
                 "event": "notification_dismissed",
                 "refresh": False,
                 "reason": "expired",
+                "notification_id": str(current["public"]["id"]),
             }
+            self._condition.notify_all()
+            return {
+                "notification_id": str(current["public"]["id"]),
+                "expires_at": str(current["expires_at_utc"]),
+            }
+        return None
+
+    def expire_notifications(self) -> list[dict[str, Any]]:
+        """Expire all elapsed alerts and return their public identities once."""
+        with self._condition:
+            expired = []
+            for device_id in list(self._notifications):
+                value = self._expire_locked(device_id)
+                if value is not None:
+                    expired.append({"device_id": device_id, **value})
+            return expired
+
+    def notification_device_ids(self) -> list[str]:
+        """Return a snapshot of devices with broker-resident alerts."""
+        with self._condition:
+            return list(self._notifications)
+
+    def expire_notification(self, device_id: str) -> dict[str, Any] | None:
+        """Expire one elapsed alert while its outer lifecycle lock is held."""
+        with self._condition:
+            return self._expire_locked(device_id)
 
     def _next_sequence_locked(self, device_id: str) -> int:
         return max(self._sequence.get(device_id, 0) + 1, int(time.time() * 1000))
