@@ -103,12 +103,38 @@ jobs:
           PY
 
       - name: Check out the exact release tag
-        # actions/checkout v6, reviewed 2026-08-13
-        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-          ref: ${{ inputs.tag }}
+        shell: bash
+        env:
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+          GIT_CONFIG_GLOBAL: /dev/null
+          GIT_CONFIG_SYSTEM: /dev/null
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+        run: |
+          set -euo pipefail
+          test -n "$FORGEJO_SERVER_URL"
+          test "$FORGEJO_REPOSITORY" = "clintonmarshall/xteink-flexdisplay-ha"
+          test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"
+          test ! -e .git
+          test -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)"
+          git init .
+          git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          git -c credential.helper= -c http.followRedirects=false fetch \
+            --no-tags --depth=1 origin \
+            +refs/heads/main:refs/remotes/origin/main
+          test "$(git rev-parse refs/remotes/origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
+          git -c credential.helper= -c http.followRedirects=false fetch \
+            --no-tags --depth=1 origin \
+            "+refs/tags/$REQUESTED_TAG:refs/tags/$REQUESTED_TAG"
+          test "$(git cat-file -t "refs/tags/$REQUESTED_TAG")" = tag
+          test "$(git rev-list -n 1 "refs/tags/$REQUESTED_TAG")" = "$CONFIRMED_SOURCE_COMMIT"
+          git checkout --detach "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CONFIRMED_SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
 
       - name: Install pinned Android release toolchain
         shell: bash

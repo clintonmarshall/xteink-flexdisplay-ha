@@ -150,14 +150,39 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             self.assertIn("Remove one-run", workflow)
             self.assertIn("chmod 600", workflow)
 
-    def test_external_actions_are_pinned_to_reviewed_full_shas(self) -> None:
+    def test_trusted_release_checkout_avoids_node_and_is_exact(self) -> None:
         for workflow in (self.promote, self.publish):
             uses = [
                 line.split("@", 1)[1]
                 for line in workflow.splitlines()
                 if line.strip().startswith("uses:")
             ]
-            self.assertEqual(uses, ["d23441a48e516b6c34aea4fa41551a30e30af803"])
+            self.assertEqual(uses, [])
+            self.assertIn("git init .", workflow)
+            self.assertIn("GIT_CONFIG_GLOBAL: /dev/null", workflow)
+            self.assertIn("GIT_CONFIG_SYSTEM: /dev/null", workflow)
+            self.assertIn("-c credential.helper= -c http.followRedirects=false", workflow)
+            self.assertIn("+refs/heads/main:refs/remotes/origin/main", workflow)
+            self.assertIn('test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"', workflow)
+            self.assertIn(
+                'test "$FORGEJO_REPOSITORY" = '
+                '"clintonmarshall/xteink-flexdisplay-ha"',
+                workflow,
+            )
+        self.assertIn(
+            'test "$(git rev-parse refs/remotes/origin/main)" = '
+            '"$RELEASE_COMMIT"',
+            self.promote,
+        )
+        self.assertNotIn("refs/tags/$RELEASE_TAG", self.promote)
+        self.assertIn(
+            '"+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"',
+            self.publish,
+        )
+        self.assertIn(
+            'test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag',
+            self.publish,
+        )
 
     def test_publication_rechecks_tag_assets_and_separate_confirmation(self) -> None:
         self.assertIn("draft_release_id:", self.publish)

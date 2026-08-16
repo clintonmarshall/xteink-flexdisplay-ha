@@ -104,6 +104,28 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("'platforms;android-33' 'build-tools;30.0.3'", self.workflow)
         self.assertIn("ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk", self.workflow)
 
+    def test_release_checkout_uses_native_git_without_node_or_credentials(self) -> None:
+        self.assertNotIn("uses:", self.workflow)
+        self.assertIn("git init .", self.workflow)
+        self.assertIn("GIT_CONFIG_GLOBAL: /dev/null", self.workflow)
+        self.assertIn("GIT_CONFIG_SYSTEM: /dev/null", self.workflow)
+        self.assertIn(
+            "-c credential.helper= -c http.followRedirects=false", self.workflow
+        )
+        self.assertIn(
+            "+refs/heads/main:refs/remotes/origin/main", self.workflow
+        )
+        self.assertIn(
+            '"+refs/tags/$REQUESTED_TAG:refs/tags/$REQUESTED_TAG"',
+            self.workflow,
+        )
+        self.assertIn(
+            'test "$(git rev-parse refs/remotes/origin/main)" = '
+            '"$CONFIRMED_SOURCE_COMMIT"',
+            self.workflow,
+        )
+        self.assertIn('test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"', self.workflow)
+
     def test_status_and_exact_main_checks_are_fail_closed(self) -> None:
         self.assertIn('payload.get("sha") != expected_sha', self.workflow)
         self.assertIn('payload.get("state") != "success"', self.workflow)
