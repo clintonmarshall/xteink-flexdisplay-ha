@@ -22,9 +22,14 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
             self.assertIn(marker, self.workflow)
         self.assertIn("release: ${{ steps.paths.outputs.release }}", self.workflow)
         self.assertIn(
-            "changed '^rook_receiver/' || [ \"$release\" = \"true\" ]",
+            "changed '^\\.forgejo/workflows/android-release\\.yml$'",
             self.workflow,
         )
+        self.assertIn(
+            '[ "$android_release" = "true" ]',
+            self.workflow,
+        )
+        self.assertIn('echo "android_release=$android_release"', self.workflow)
         self.assertIn('echo "release=$release"', self.workflow)
 
     def test_release_android_package_runs_on_the_exact_head(self) -> None:
@@ -34,7 +39,9 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
         required_job = self.workflow.index("\n  required:", release_step)
         block = self.workflow[release_step:required_job]
         self.assertIn(
-            "if: ${{ needs.changes.outputs.release == 'true' }}", block
+            "if: ${{ needs.changes.outputs.release == 'true' || "
+            "needs.changes.outputs.android_release == 'true' }}",
+            block,
         )
         self.assertIn("testCompanionReleaseUnitTest", block)
         self.assertIn("lintCompanionRelease", block)

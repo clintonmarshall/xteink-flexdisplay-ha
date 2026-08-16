@@ -107,6 +107,7 @@ jobs:
       integration: ${{ steps.paths.outputs.integration }}
       integration_source: ${{ steps.paths.outputs.integration_source }}
       android: ${{ steps.paths.outputs.android }}
+      android_release: ${{ steps.paths.outputs.android_release }}
       release: ${{ steps.paths.outputs.release }}
     steps:
       - name: Check out exact candidate and base without credentials
@@ -191,7 +192,13 @@ jobs:
           else
             release=false
           fi
-          if changed '^rook_receiver/' || [ "$release" = "true" ]; then
+          if changed '^\.forgejo/workflows/android-release\.yml$'; then
+            android_release=true
+          else
+            android_release=false
+          fi
+          if changed '^rook_receiver/' || [ "$release" = "true" ] || \
+             [ "$android_release" = "true" ]; then
             android=true
           else
             android=false
@@ -201,6 +208,7 @@ jobs:
             echo "integration=$integration"
             echo "integration_source=$integration_source"
             echo "android=$android"
+            echo "android_release=$android_release"
             echo "release=$release"
           } >> "$FORGEJO_OUTPUT"
 
@@ -728,7 +736,7 @@ jobs:
             assembleKioskDebug assembleCompanionDebug \
             lintKioskDebug lintCompanionDebug
       - name: Validate release Android package on the exact release head
-        if: ${{ needs.changes.outputs.release == 'true' }}
+        if: ${{ needs.changes.outputs.release == 'true' || needs.changes.outputs.android_release == 'true' }}
         working-directory: rook_receiver
         env:
           ANDROID_HOME: /tmp/flexdisplay-android-sdk
