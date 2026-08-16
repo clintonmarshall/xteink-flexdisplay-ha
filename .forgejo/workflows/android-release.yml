@@ -1,5 +1,7 @@
 name: Publish signed Android Companion candidate
 
+# Changes to this release workflow must trigger exact-head unsigned Companion
+# packaging through validate-exact.yml before they can reach a protected tag.
 on:
   workflow_dispatch:
     inputs:

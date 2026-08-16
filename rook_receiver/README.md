@@ -84,6 +84,10 @@ unexpected repository identity, and commit or tag mismatches before any
 release step can run. Promotion, publication, and deployment remain separate
 approval gates.
 
+Edits to release infrastructure require the full exact-head product matrix,
+including this receiver's debug checks and unsigned Companion release package,
+before that commit can be promoted.
+
 ## Install and configure
 
 Install the Echo kiosk flavor with:

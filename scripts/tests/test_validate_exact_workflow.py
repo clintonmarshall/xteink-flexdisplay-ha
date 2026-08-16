@@ -32,6 +32,37 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
         self.assertIn('echo "android_release=$android_release"', self.workflow)
         self.assertIn('echo "release=$release"', self.workflow)
 
+    def test_release_infrastructure_changes_force_every_release_component(self) -> None:
+        self.assertIn(
+            "release_infra: ${{ steps.paths.outputs.release_infra }}",
+            self.workflow,
+        )
+        for path in (
+            "android-release",
+            "promote-release-tag",
+            "publish-release",
+            "validate-exact",
+        ):
+            self.assertIn(path, self.workflow)
+        for script in (
+            "check_android_release_metadata",
+            "check_release_metadata",
+            "forgejo_release",
+            "verify_android_release",
+        ):
+            self.assertIn(script, self.workflow)
+        self.assertIn('[ "$release_infra" = "true" ]', self.workflow)
+        self.assertIn('echo "release_infra=$release_infra"', self.workflow)
+
+        classifier = self.workflow[
+            self.workflow.index("- name: Classify affected components") :
+            self.workflow.index("\n  bridge:")
+        ]
+        self.assertGreaterEqual(
+            classifier.count('[ "$release_infra" = "true" ]'),
+            3,
+        )
+
     def test_release_android_package_runs_on_the_exact_head(self) -> None:
         release_step = self.workflow.index(
             "- name: Validate release Android package on the exact release head"
@@ -40,7 +71,8 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
         block = self.workflow[release_step:required_job]
         self.assertIn(
             "if: ${{ needs.changes.outputs.release == 'true' || "
-            "needs.changes.outputs.android_release == 'true' }}",
+            "needs.changes.outputs.android_release == 'true' || "
+            "needs.changes.outputs.release_infra == 'true' }}",
             block,
         )
         self.assertIn("testCompanionReleaseUnitTest", block)

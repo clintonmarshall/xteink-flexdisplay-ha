@@ -4,6 +4,11 @@ This Home Assistant App runs the local image renderer and fleet API used by
 FlexDisplay firmware on XTEINK X3 and X4 devices and by the Android receiver
 for the original 2017 Echo Spot (`rook`).
 
+Release-infrastructure changes are validated against the exact candidate as a
+complete product release: Forgejo rebuilds this App and reruns the Bridge,
+integration, Android, and aggregate gates even when the App source itself is
+unchanged.
+
 After installation:
 
 1. Start the app.

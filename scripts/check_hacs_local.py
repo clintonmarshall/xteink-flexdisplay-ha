@@ -5,6 +5,10 @@ This script is run inside the content-addressed HACS Action container. It reads
 only the local checkout, so Forgejo pull-request jobs do not need a GitHub token
 or access to a mirrored ref. Repository-level GitHub metadata is checked by the
 separate secretless ``check_hacs_repository.py`` gate.
+
+Forgejo also runs this exact-checkout validator for release-infrastructure
+changes, so a commit cannot become a release candidate using only stale
+integration evidence.
 """
 
 from __future__ import annotations
