@@ -163,6 +163,8 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             self.assertIn("GIT_CONFIG_SYSTEM: /dev/null", workflow)
             self.assertIn("-c credential.helper= -c http.followRedirects=false", workflow)
             self.assertIn("+refs/heads/main:refs/remotes/origin/main", workflow)
+            self.assertIn('"+refs/tags/v*:refs/tags/v*"', workflow)
+            self.assertNotIn("--depth=1", workflow)
             self.assertIn('test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"', workflow)
             self.assertIn(
                 'test "$FORGEJO_REPOSITORY" = '
@@ -175,10 +177,6 @@ class ReleaseWorkflowContractTests(unittest.TestCase):
             self.promote,
         )
         self.assertNotIn("refs/tags/$RELEASE_TAG", self.promote)
-        self.assertIn(
-            '"+refs/tags/$RELEASE_TAG:refs/tags/$RELEASE_TAG"',
-            self.publish,
-        )
         self.assertIn(
             'test "$(git cat-file -t "refs/tags/$RELEASE_TAG")" = tag',
             self.publish,

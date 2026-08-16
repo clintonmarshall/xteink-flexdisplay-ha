@@ -116,9 +116,10 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
             "+refs/heads/main:refs/remotes/origin/main", self.workflow
         )
         self.assertIn(
-            '"+refs/tags/$REQUESTED_TAG:refs/tags/$REQUESTED_TAG"',
+            '"+refs/tags/v*:refs/tags/v*"',
             self.workflow,
         )
+        self.assertNotIn("--depth=1", self.workflow)
         self.assertIn(
             'test "$(git rev-parse refs/remotes/origin/main)" = '
             '"$CONFIRMED_SOURCE_COMMIT"',

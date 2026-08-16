@@ -74,10 +74,16 @@ jobs:
           test -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)"
           git init .
           git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          # Release validation compares Android metadata with the newest
+          # reachable v* release, so retain main ancestry and fetch only the
+          # release-tag namespace rather than an unbounded tag set.
           git -c credential.helper= -c http.followRedirects=false fetch \
-            --no-tags --depth=1 origin \
+            --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse refs/remotes/origin/main)" = "$RELEASE_COMMIT"
+          git -c credential.helper= -c http.followRedirects=false fetch \
+            --no-tags origin \
+            "+refs/tags/v*:refs/tags/v*"
           git checkout --detach "$RELEASE_COMMIT"
           test "$(git rev-parse HEAD)" = "$RELEASE_COMMIT"
           test -z "$(git status --porcelain --untracked-files=all)"

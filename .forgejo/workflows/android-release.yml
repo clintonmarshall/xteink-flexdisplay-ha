@@ -125,13 +125,15 @@ jobs:
           test -z "$(find . -mindepth 1 -maxdepth 1 -print -quit)"
           git init .
           git remote add origin "$FORGEJO_SERVER_URL/$FORGEJO_REPOSITORY.git"
+          # Strict release validation needs complete main ancestry plus every
+          # reachable v* release tag to compare Android version metadata.
           git -c credential.helper= -c http.followRedirects=false fetch \
-            --no-tags --depth=1 origin \
+            --no-tags origin \
             +refs/heads/main:refs/remotes/origin/main
           test "$(git rev-parse refs/remotes/origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
           git -c credential.helper= -c http.followRedirects=false fetch \
-            --no-tags --depth=1 origin \
-            "+refs/tags/$REQUESTED_TAG:refs/tags/$REQUESTED_TAG"
+            --no-tags origin \
+            "+refs/tags/v*:refs/tags/v*"
           test "$(git cat-file -t "refs/tags/$REQUESTED_TAG")" = tag
           test "$(git rev-list -n 1 "refs/tags/$REQUESTED_TAG")" = "$CONFIRMED_SOURCE_COMMIT"
           git checkout --detach "$CONFIRMED_SOURCE_COMMIT"
