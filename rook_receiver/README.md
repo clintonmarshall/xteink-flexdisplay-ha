@@ -77,9 +77,12 @@ workflow signs it with the permanent production key, verifies the exact
 application ID, version, permissions, exported components, certificate and
 SHA-256, then attaches an immutable APK/checksum/metadata set to a draft
 Forgejo release. Signing material is never committed and never sent to GitHub.
-The workflow remains intentionally unavailable until a dedicated release runner
-is provisioned and the independently verified public certificate SHA-256 is
-committed in a reviewed release change.
+The isolated trusted-release runner image intentionally does not include
+Node.js, so its workflows use a credential-free native Git checkout. That
+checkout rejects inherited Git configuration and credentials, redirects,
+unexpected repository identity, and commit or tag mismatches before any
+release step can run. Promotion, publication, and deployment remain separate
+approval gates.
 
 ## Install and configure
 
