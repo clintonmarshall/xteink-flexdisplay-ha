@@ -181,7 +181,12 @@ class ReleaseMetadataTests(unittest.TestCase):
 
     def test_current_release_metadata_passes_strict_gate(self) -> None:
         version = next(iter(metadata.platform_versions().values()))
-        self.assertEqual(metadata.release_errors(version), [])
+        # This assertion models validation from the immutable release tag.
+        # A later feature-branch HEAD at the already-published version must
+        # remain ineligible for release, even though its checked-in metadata
+        # should still be verified against the released state.
+        with mock.patch.object(metadata, "tag_targets_head", return_value=True):
+            self.assertEqual(metadata.release_errors(version), [])
 
 
 if __name__ == "__main__":
