@@ -29,6 +29,9 @@ REPOSITORY = "clintonmarshall/xteink-flexdisplay-ha"
 REPOSITORY_OWNER = "clintonmarshall"
 TAG_PATTERN = re.compile(r"^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$")
 SHA_PATTERN = re.compile(r"^[0-9a-f]{40}$")
+ATTACHMENT_UUID_PATTERN = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$"
+)
 REQUIRED_PUSH_CONTEXTS = (
     "Validate / bridge (push)",
     "Validate / app (push)",
@@ -142,17 +145,19 @@ class ForgejoClient:
     def patch(self, path: str, payload: dict[str, Any]) -> Any:
         return self.request("PATCH", path, payload)
 
-    def download(self, url: str) -> bytes:
-        expected = urllib.parse.urlsplit(self.api_url)
-        candidate = urllib.parse.urlsplit(url)
-        if (
-            candidate.scheme != expected.scheme
-            or candidate.netloc != expected.netloc
-            or candidate.username
-            or candidate.password
-            or candidate.fragment
-        ):
-            raise ReleaseError("release asset URL left the authoritative Forgejo origin")
+    def download_attachment(self, attachment_uuid: str) -> bytes:
+        if not ATTACHMENT_UUID_PATTERN.fullmatch(attachment_uuid):
+            raise ReleaseError("release attachment UUID is absent or malformed")
+        api = urllib.parse.urlsplit(self.api_url)
+        url = urllib.parse.urlunsplit(
+            (
+                api.scheme,
+                api.netloc,
+                f"/attachments/{urllib.parse.quote(attachment_uuid, safe='')}",
+                "",
+                "",
+            )
+        )
         request = urllib.request.Request(
             url,
             method="GET",
@@ -424,10 +429,21 @@ def verify_companion_assets(
         raise ReleaseError("Companion release assets are missing, duplicated, or unexpected")
     payloads: dict[str, bytes] = {}
     for name, asset in by_name.items():
-        url = str(asset.get("browser_download_url") or "")
-        if not url:
-            raise ReleaseError(f"release asset {name} has no authoritative download URL")
-        payloads[name] = client.download(url)
+        attachment_uuid = str(asset.get("uuid") or "")
+        if not ATTACHMENT_UUID_PATTERN.fullmatch(attachment_uuid):
+            raise ReleaseError(f"release asset {name} has no immutable attachment UUID")
+        if (
+            not isinstance(asset.get("id"), int)
+            or int(asset["id"]) <= 0
+            or asset.get("type") != "attachment"
+            or not isinstance(asset.get("size"), int)
+            or int(asset["size"]) < 0
+        ):
+            raise ReleaseError(f"release asset {name} metadata is malformed")
+        payload = client.download_attachment(attachment_uuid)
+        if len(payload) != asset["size"]:
+            raise ReleaseError(f"release asset {name} size changed during download")
+        payloads[name] = payload
 
     apk_name = f"{basename}.apk"
     apk_sha = hashlib.sha256(payloads[apk_name]).hexdigest()

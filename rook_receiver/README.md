@@ -64,8 +64,8 @@ The debug APKs are written to:
 - `app/build/outputs/apk/kiosk/debug/app-kiosk-debug.apk`
 - `app/build/outputs/apk/companion/debug/app-companion-debug.apk`
 
-The first production Companion candidate is version `0.5.0-companion`
-(version code 5). Its unsigned packaging gate is:
+The current production Companion candidate is version `0.5.0-companion`
+(version code 6). Its unsigned packaging gate is:
 
 ```bash
 ./gradlew --no-daemon testCompanionReleaseUnitTest \
@@ -206,7 +206,7 @@ microphone, audio, touch, always-on colour display class, device class, and
 screen resolution through explicit Bridge headers. Older receivers still work;
 the Bridge falls back to the original comma-separated capabilities where it can.
 
-The separate `0.5.0-companion` (version code 5) release candidate adds the
+The separate `0.5.0-companion` (version code 6) release candidate adds the
 privacy-first phone companion, foreground camera/Assist lifecycle, Dock Mode,
 notification responses, battery telemetry, and the production APK publication
 contract. It is not a published kiosk or Companion release until its signed APK

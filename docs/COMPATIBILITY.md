@@ -7,10 +7,10 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.47.0 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.47.1 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
-| Android phone companion | 0.5.0-companion (version code 5; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
+| Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
 | Colour/LVGL receiver contract | v1 | Bridge and Studio contract available; JC3636 receiver firmware is separately versioned and is not packaged by the Platform release |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
@@ -50,6 +50,12 @@ contracts, and profiles using unsupported widgets fail closed instead of being
 treated as a similar device. JC3636 receiver firmware is owned and released
 separately and is not included in this software-only Platform release.
 
+Platform 0.47.1 changes only the protected Forgejo release path and advances
+the behaviorally unchanged Companion candidate to version code 6. Bridge,
+Studio, Home Assistant integration and packaged device firmware remain
+compatible with 0.47.0; signed draft assets are now re-read through their
+authenticated immutable attachment UUIDs before canary or publication.
+
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen
 resolution. Older receivers remain compatible: the Bridge falls back to
@@ -57,12 +63,13 @@ inferring touch, colour, audio, microphone, and always-on state from the
 existing comma-separated `X-FlexDisplay-Capabilities` header where possible,
 and reports unsupported or unknown capability fields as false/unknown.
 
-The phone flavor derives `0.5.0-companion` from the shared Android source
-version. It is an unpublished release candidate until a protected Forgejo job
-signs one immutable APK, that exact checksum passes the Galaxy canary, and the
-unchanged draft is promoted. The production signing/publication contract is
-Companion-only; the Echo Spot and Echo Show rows describe source and runtime
-compatibility and do not claim a production-signed kiosk APK channel.
+The phone flavor derives `0.5.0-companion` (version code 6) from the shared
+Android source version. It is an unpublished release candidate until a
+protected Forgejo job signs one immutable APK, that exact checksum passes the
+Galaxy canary, and the unchanged draft is published. The production
+signing/publication contract is Companion-only; the Echo Spot and Echo Show
+rows describe source and runtime compatibility and do not claim a
+production-signed kiosk APK channel.
 
 Home Assistant OpenDisplay uploads use BLE. Assign OpenDisplay as the device's
 persistent mode for on-demand uploads; temporary Quick Menu sessions retain a

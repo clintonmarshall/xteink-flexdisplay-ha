@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.47.1
+
+- Repair authenticated verification of signed Companion assets while their
+  authoritative Forgejo release is still a draft.
+- Require immutable attachment UUID, ID, type, byte-size, exact-name and
+  byte-for-byte checks before the draft can proceed to canary or publication.
+- Advance the behaviorally unchanged Companion candidate to version code 6;
+  keep Bridge behavior, Studio, integration and packaged device firmware
+  unchanged. This release requires no firmware flash or OTA rollout.
+
 ## 0.47.0
 
 - Add the foreground-only Android phone Companion profile with rectangular

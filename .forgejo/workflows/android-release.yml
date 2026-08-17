@@ -377,6 +377,7 @@ jobs:
 
           refresh_assets() {
             curl --config "$auth_config" --fail-with-body --silent --show-error \
+              --proxy '' --noproxy '*' --proto '=http,https' --max-redirs 0 \
               "$api_release/assets" > "$auth_tmp/assets.json"
           }
           existing_asset() {
@@ -391,21 +392,43 @@ jobs:
           if len(matches) > 1:
               raise SystemExit('Duplicate release asset names are forbidden')
           if matches:
-              print(matches[0].get('browser_download_url', ''))
+              asset = matches[0]
+              asset_id = asset.get('id')
+              asset_uuid = asset.get('uuid')
+              asset_size = asset.get('size')
+              if (
+                  not isinstance(asset_id, int)
+                  or asset_id <= 0
+                  or not isinstance(asset_uuid, str)
+                  or not isinstance(asset_size, int)
+                  or asset_size < 0
+                  or asset.get('type') != 'attachment'
+              ):
+                  raise SystemExit('Forgejo returned malformed release attachment metadata')
+              print(f'{asset_uuid}\t{asset_id}\t{asset_size}')
           PY
           }
           verify_remote_asset() {
             local local_asset=$1
             local asset_name=$2
+            local asset_record
+            local asset_uuid
+            local asset_id
+            local remote_size
+            local local_size
             local remote_url
             refresh_assets
-            remote_url="$(existing_asset "$asset_name")"
-            test -n "$remote_url"
-            case "$remote_url" in
-              "$forgejo_server"/*) ;;
-              *) echo "Refusing unexpected asset URL: $remote_url" >&2; return 1 ;;
-            esac
-            curl --config "$auth_config" --location --fail-with-body --silent --show-error \
+            asset_record="$(existing_asset "$asset_name")"
+            test -n "$asset_record"
+            IFS=$'\t' read -r asset_uuid asset_id remote_size <<< "$asset_record"
+            [[ "$asset_uuid" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]]
+            [[ "$asset_id" =~ ^[1-9][0-9]*$ ]]
+            [[ "$remote_size" =~ ^[0-9]+$ ]]
+            local_size="$(stat -c '%s' "$local_asset")"
+            test "$remote_size" = "$local_size"
+            remote_url="$forgejo_server/attachments/$asset_uuid"
+            curl --config "$auth_config" --fail-with-body --silent --show-error \
+              --proxy '' --noproxy '*' --proto '=http,https' --max-redirs 0 \
               "$remote_url" > "$auth_tmp/downloaded"
             cmp -s "$local_asset" "$auth_tmp/downloaded"
             rm -f -- "$auth_tmp/downloaded"
@@ -413,12 +436,12 @@ jobs:
           upload_or_verify() {
             local local_asset=$1
             local asset_name
-            local remote_url
+            local asset_record
             local encoded_name
             asset_name="$(basename "$local_asset")"
             refresh_assets
-            remote_url="$(existing_asset "$asset_name")"
-            if [[ -n "$remote_url" ]]; then
+            asset_record="$(existing_asset "$asset_name")"
+            if [[ -n "$asset_record" ]]; then
               verify_remote_asset "$local_asset" "$asset_name"
               return
             fi
@@ -431,6 +454,7 @@ jobs:
             refresh_assets
             test -z "$(existing_asset "$asset_name")"
             curl --config "$auth_config" --fail-with-body --silent --show-error \
+              --proxy '' --noproxy '*' --proto '=http,https' --max-redirs 0 \
               --request POST --form "attachment=@$local_asset" \
               "$api_release/assets?name=$encoded_name" > /dev/null
             verify_remote_asset "$local_asset" "$asset_name"
@@ -443,6 +467,24 @@ jobs:
           verify_remote_asset "$metadata" "$(basename "$metadata")"
           verify_remote_asset "$checksum" "$(basename "$checksum")"
           verify_remote_asset "$apk" "$(basename "$apk")"
+          refresh_assets
+          ASSETS_JSON="$auth_tmp/assets.json" \
+          EXPECTED_METADATA="$(basename "$metadata")" \
+          EXPECTED_CHECKSUM="$(basename "$checksum")" \
+          EXPECTED_APK="$(basename "$apk")" \
+          python3 -I - <<'PY'
+          import json
+          import os
+          assets = json.load(open(os.environ['ASSETS_JSON'], encoding='utf-8'))
+          expected = {
+              os.environ['EXPECTED_METADATA'],
+              os.environ['EXPECTED_CHECKSUM'],
+              os.environ['EXPECTED_APK'],
+          }
+          names = [asset.get('name') for asset in assets]
+          if len(names) != 3 or set(names) != expected:
+              raise SystemExit('Draft release assets are missing, duplicated, or unexpected')
+          PY
 
           rm -f -- "$metadata" "$checksum" "$apk"
           rmdir "$dist"

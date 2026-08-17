@@ -1,5 +1,5 @@
 name: FlexDisplay Bridge
-version: "0.47.0"
+version: "0.47.1"
 slug: flexdisplay_bridge
 description: Render dashboards and manage XTEINK, Note4, Echo Spot, and Echo Show FlexDisplay devices
 url: https://github.com/clintonmarshall/xteink-flexdisplay-ha

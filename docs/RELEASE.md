@@ -159,7 +159,8 @@ draft; it never moves a tag or replaces a release.
 
 The publication stage has its own confirmation and authority. It rechecks the
 same controls, requires the exact draft ID, and, when the Companion changed,
-downloads the three draft assets back from Forgejo and verifies their exact
+downloads the three draft assets through their authenticated immutable Forgejo
+attachment UUIDs and verifies their exact
 names, APK SHA-256 sidecar, source tag/commit metadata, package version, and
 reviewed signer fingerprint. Only then does it publish that same draft without
 rebuilding or replacing an asset. Forgejo's automatic workflow token is not

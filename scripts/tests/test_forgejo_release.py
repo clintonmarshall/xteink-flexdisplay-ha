@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import hashlib
 import importlib.util
+import json
 from pathlib import Path
 import unittest
 from unittest import mock
@@ -51,6 +53,23 @@ class FakeReadClient:
 
 
 class ForgejoReleaseTests(unittest.TestCase):
+    def test_attachment_client_uses_fixed_same_origin_uuid_route(self) -> None:
+        attachment_uuid = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        response = mock.MagicMock()
+        response.__enter__.return_value.read.return_value = b"draft asset"
+        client = release.ForgejoClient("http://forgejo.test/api/v1", "test-token")
+        client.opener.open = mock.Mock(return_value=response)
+
+        self.assertEqual(client.download_attachment(attachment_uuid), b"draft asset")
+        request = client.opener.open.call_args.args[0]
+        self.assertEqual(
+            request.full_url,
+            f"http://forgejo.test/attachments/{attachment_uuid}",
+        )
+        self.assertEqual(request.get_method(), "GET")
+        with self.assertRaisesRegex(release.ReleaseError, "UUID"):
+            client.download_attachment("../release-draft")
+
     def test_release_identity_is_strict_stable_semver_and_full_sha(self) -> None:
         self.assertEqual(release.validate_identity("v0.47.0", "a" * 40), "0.47.0")
         for tag in ("0.47.0", "v0.47", "v01.2.3", "v1.2.3-rc.1"):
@@ -121,6 +140,101 @@ class ForgejoReleaseTests(unittest.TestCase):
                     Client(), tag, commit, f"promote-{tag}-at-{commit}"
                 ),
                 47,
+            )
+
+    def test_publication_downloads_exact_draft_attachment_uuids(self) -> None:
+        tag = "v0.47.1"
+        commit = "e" * 40
+        contract = json.loads(
+            (ROOT / "rook_receiver/release/companion-release.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        basename = contract["artifact_basename"]
+        apk_name = f"{basename}.apk"
+        checksum_name = f"{basename}.apk.sha256"
+        metadata_name = f"{basename}.metadata.json"
+        apk = b"signed companion apk"
+        apk_sha = hashlib.sha256(apk).hexdigest()
+        signer = (
+            ROOT / "rook_receiver/release/companion-release-cert.sha256"
+        ).read_text(encoding="utf-8").strip()
+        payloads = {
+            apk_name: apk,
+            checksum_name: f"{apk_sha}  {apk_name}\n".encode(),
+            metadata_name: json.dumps(
+                {
+                    "schema_version": 1,
+                    "artifact": apk_name,
+                    "application_id": contract["application_id"],
+                    "version_name": contract["version_name"],
+                    "version_code": contract["version_code"],
+                    "source_tag": tag,
+                    "source_commit": commit,
+                    "apk_sha256": apk_sha,
+                    "signer_sha256": signer,
+                }
+            ).encode(),
+        }
+        uuids = {
+            apk_name: "11111111-1111-4111-8111-111111111111",
+            checksum_name: "22222222-2222-4222-8222-222222222222",
+            metadata_name: "33333333-3333-4333-8333-333333333333",
+        }
+        assets = [
+            {
+                "id": index,
+                "uuid": uuids[name],
+                "name": name,
+                "size": len(payload),
+                "type": "attachment",
+                "browser_download_url": "https://invalid.example/draft-route",
+            }
+            for index, (name, payload) in enumerate(payloads.items(), start=1)
+        ]
+        client = mock.Mock()
+        client.download_attachment.side_effect = {
+            uuid: payloads[name] for name, uuid in uuids.items()
+        }.get
+        with mock.patch.object(release, "companion_changed", return_value=True):
+            release.verify_companion_assets(
+                client, {"assets": assets}, tag, commit
+            )
+        self.assertEqual(
+            {call.args[0] for call in client.download_attachment.call_args_list},
+            set(uuids.values()),
+        )
+
+    def test_publication_rejects_browser_only_draft_assets(self) -> None:
+        contract = json.loads(
+            (ROOT / "rook_receiver/release/companion-release.json").read_text(
+                encoding="utf-8"
+            )
+        )
+        basename = contract["artifact_basename"]
+        assets = [
+            {
+                "id": index,
+                "name": name,
+                "size": 1,
+                "type": "attachment",
+                "browser_download_url": "https://invalid.example/draft-route",
+            }
+            for index, name in enumerate(
+                (
+                    f"{basename}.apk",
+                    f"{basename}.apk.sha256",
+                    f"{basename}.metadata.json",
+                ),
+                start=1,
+            )
+        ]
+        with (
+            mock.patch.object(release, "companion_changed", return_value=True),
+            self.assertRaisesRegex(release.ReleaseError, "immutable attachment UUID"),
+        ):
+            release.verify_companion_assets(
+                mock.Mock(), {"assets": assets}, "v0.47.1", "f" * 40
             )
 
 

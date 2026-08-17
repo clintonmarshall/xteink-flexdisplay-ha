@@ -179,6 +179,18 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
         self.assertIn("just in time", release_docs)
         self.assertIn("remove the secrets and runner registration", release_docs)
 
+    def test_draft_assets_are_verified_through_authenticated_uuid_routes(self) -> None:
+        upload = self.workflow.index("- name: Upload or reconcile exact draft assets")
+        workflow = self.workflow[upload:]
+        self.assertIn("asset.get('uuid')", workflow)
+        self.assertIn('remote_url="$forgejo_server/attachments/$asset_uuid"', workflow)
+        self.assertIn("asset.get('type') != 'attachment'", workflow)
+        self.assertIn('test "$remote_size" = "$local_size"', workflow)
+        self.assertIn("--noproxy '*'", workflow)
+        self.assertIn("--max-redirs 0", workflow)
+        self.assertNotIn("browser_download_url", workflow)
+        self.assertNotIn("--location", workflow)
+
 
 if __name__ == "__main__":
     unittest.main()
