@@ -91,6 +91,42 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
             self.workflow,
         )
 
+    def test_release_runner_installs_the_pinned_android_toolchain(self) -> None:
+        checkout = self.workflow.index("- name: Check out the exact release tag")
+        install = self.workflow.index("- name: Install pinned Android release toolchain")
+        metadata = self.workflow.index("- name: Verify reviewed release source")
+        self.assertLess(checkout, install)
+        self.assertLess(install, metadata)
+        self.assertIn(
+            "3fab261d5219d582321db0c5670b3bbafd563096bce3f6277eb358807fc15f6e",
+            self.workflow[install:metadata],
+        )
+        self.assertIn("'platforms;android-33' 'build-tools;30.0.3'", self.workflow)
+        self.assertIn("ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk", self.workflow)
+
+    def test_release_checkout_uses_native_git_without_node_or_credentials(self) -> None:
+        self.assertNotIn("uses:", self.workflow)
+        self.assertIn("git init .", self.workflow)
+        self.assertIn("GIT_CONFIG_GLOBAL: /dev/null", self.workflow)
+        self.assertIn("GIT_CONFIG_SYSTEM: /dev/null", self.workflow)
+        self.assertIn(
+            "-c credential.helper= -c http.followRedirects=false", self.workflow
+        )
+        self.assertIn(
+            "+refs/heads/main:refs/remotes/origin/main", self.workflow
+        )
+        self.assertIn(
+            '"+refs/tags/v*:refs/tags/v*"',
+            self.workflow,
+        )
+        self.assertNotIn("--depth=1", self.workflow)
+        self.assertIn(
+            'test "$(git rev-parse refs/remotes/origin/main)" = '
+            '"$CONFIRMED_SOURCE_COMMIT"',
+            self.workflow,
+        )
+        self.assertIn('test -z "$FORGEJO_TOKEN$GITHUB_TOKEN"', self.workflow)
+
     def test_status_and_exact_main_checks_are_fail_closed(self) -> None:
         self.assertIn('payload.get("sha") != expected_sha', self.workflow)
         self.assertIn('payload.get("state") != "success"', self.workflow)
@@ -142,6 +178,18 @@ class AndroidReleaseWorkflowContractTests(unittest.TestCase):
         self.assertNotIn("environment: android-release", self.workflow)
         self.assertIn("just in time", release_docs)
         self.assertIn("remove the secrets and runner registration", release_docs)
+
+    def test_draft_assets_are_verified_through_authenticated_uuid_routes(self) -> None:
+        upload = self.workflow.index("- name: Upload or reconcile exact draft assets")
+        workflow = self.workflow[upload:]
+        self.assertIn("asset.get('uuid')", workflow)
+        self.assertIn('remote_url="$forgejo_server/attachments/$asset_uuid"', workflow)
+        self.assertIn("asset.get('type') != 'attachment'", workflow)
+        self.assertIn('test "$remote_size" = "$local_size"', workflow)
+        self.assertIn("--noproxy '*'", workflow)
+        self.assertIn("--max-redirs 0", workflow)
+        self.assertNotIn("browser_download_url", workflow)
+        self.assertNotIn("--location", workflow)
 
 
 if __name__ == "__main__":

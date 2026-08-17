@@ -64,8 +64,8 @@ The debug APKs are written to:
 - `app/build/outputs/apk/kiosk/debug/app-kiosk-debug.apk`
 - `app/build/outputs/apk/companion/debug/app-companion-debug.apk`
 
-The first production Companion candidate is version `0.5.0-companion`
-(version code 5). Its unsigned packaging gate is:
+The current production Companion candidate is version `0.5.0-companion`
+(version code 6). Its unsigned packaging gate is:
 
 ```bash
 ./gradlew --no-daemon testCompanionReleaseUnitTest \
@@ -77,9 +77,16 @@ workflow signs it with the permanent production key, verifies the exact
 application ID, version, permissions, exported components, certificate and
 SHA-256, then attaches an immutable APK/checksum/metadata set to a draft
 Forgejo release. Signing material is never committed and never sent to GitHub.
-The workflow remains intentionally unavailable until a dedicated release runner
-is provisioned and the independently verified public certificate SHA-256 is
-committed in a reviewed release change.
+The isolated trusted-release runner image intentionally does not include
+Node.js, so its workflows use a credential-free native Git checkout. That
+checkout rejects inherited Git configuration and credentials, redirects,
+unexpected repository identity, and commit or tag mismatches before any
+release step can run. Promotion, publication, and deployment remain separate
+approval gates.
+
+Edits to release infrastructure require the full exact-head product matrix,
+including this receiver's debug checks and unsigned Companion release package,
+before that commit can be promoted.
 
 ## Install and configure
 
@@ -199,7 +206,7 @@ microphone, audio, touch, always-on colour display class, device class, and
 screen resolution through explicit Bridge headers. Older receivers still work;
 the Bridge falls back to the original comma-separated capabilities where it can.
 
-The separate `0.5.0-companion` (version code 5) release candidate adds the
+The separate `0.5.0-companion` (version code 6) release candidate adds the
 privacy-first phone companion, foreground camera/Assist lifecycle, Dock Mode,
 notification responses, battery telemetry, and the production APK publication
 contract. It is not a published kiosk or Companion release until its signed APK

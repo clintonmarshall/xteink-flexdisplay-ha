@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.47.1
+
+- Repair authenticated verification of signed Companion assets while their
+  authoritative Forgejo release is still a draft.
+- Require immutable attachment UUID, ID, type, byte-size, exact-name and
+  byte-for-byte checks before the draft can proceed to canary or publication.
+- Advance the behaviorally unchanged Companion candidate to version code 6;
+  keep Bridge behavior, Studio, integration and packaged device firmware
+  unchanged. This release requires no firmware flash or OTA rollout.
+
+## 0.47.0
+
+- Add the foreground-only Android phone Companion profile with rectangular
+  rendering, normal launcher lifecycle, local Dock Mode, and privacy-first
+  camera and microphone controls.
+- Add Home Assistant notification, response-event, camera, media-player,
+  battery, readiness, foreground, Dock, and privacy-policy entities for trusted
+  Android receivers.
+- Add authenticated Android fleet controls, explicit hardware-capability
+  telemetry, one-shot notification responses and camera snapshots, receiver
+  token pinning, foreground-session binding, bounded media handling, and
+  fail-closed sensitive management reads.
+- Prepare the independently versioned `0.5.0-companion` Android release
+  candidate and its Forgejo-only signing, canary, and publication contract.
+- Add a guarded colour/LVGL receiver contract, a built-in 360 x 360 round
+  JC3636 profile, bounded declarative manifests, device-bound receiver
+  authentication, and capability-aware Studio previews and controls.
+- Keep older Android receivers compatible through conservative capability
+  fallbacks, and reject unknown or incompatible LVGL receivers and profiles
+  instead of guessing capabilities or silently changing their layout.
+- Keep the packaged X3/X4 and Note 4 firmware artifacts unchanged; this is a
+  software-only release and requires no firmware flash or OTA rollout.
+
 ## 0.46.0
 
 - Add a read-only Bridge & Connections workspace that reports sanitized Home

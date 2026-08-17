@@ -107,6 +107,9 @@ jobs:
       integration: ${{ steps.paths.outputs.integration }}
       integration_source: ${{ steps.paths.outputs.integration_source }}
       android: ${{ steps.paths.outputs.android }}
+      android_release: ${{ steps.paths.outputs.android_release }}
+      release: ${{ steps.paths.outputs.release }}
+      release_infra: ${{ steps.paths.outputs.release_infra }}
     steps:
       - name: Check out exact candidate and base without credentials
         env:
@@ -166,7 +169,13 @@ jobs:
           changed() {
             grep -Eq "$1" /tmp/flexdisplay-changed-files
           }
-          if changed '^(flexdisplay_bridge/|repository\.yaml$)'; then
+          if changed '^(\.forgejo/workflows/(android-release|promote-release-tag|publish-release|validate-exact)\.yml$|scripts/(check_android_release_metadata|check_release_metadata|forgejo_release|verify_android_release)\.py$)'; then
+            release_infra=true
+          else
+            release_infra=false
+          fi
+          if changed '^(flexdisplay_bridge/|repository\.yaml$)' || \
+             [ "$release_infra" = "true" ]; then
             app=true
           else
             app=false
@@ -177,12 +186,28 @@ jobs:
             integration_source=false
           fi
           if [ "$integration_source" = "true" ] || \
-             changed '^scripts/check_hacs_local\.py$'; then
+             changed '^scripts/check_hacs_local\.py$' || \
+             [ "$release_infra" = "true" ]; then
             integration=true
           else
             integration=false
           fi
-          if changed '^rook_receiver/'; then
+          if changed '^flexdisplay_bridge/config\.yaml$' && \
+             changed '^flexdisplay_bridge/pyproject\.toml$' && \
+             changed '^flexdisplay_bridge/flexdisplay_bridge/__init__\.py$' && \
+             changed '^custom_components/flexdisplay/manifest\.json$'; then
+            release=true
+          else
+            release=false
+          fi
+          if changed '^\.forgejo/workflows/android-release\.yml$'; then
+            android_release=true
+          else
+            android_release=false
+          fi
+          if changed '^rook_receiver/' || [ "$release" = "true" ] || \
+             [ "$android_release" = "true" ] || \
+             [ "$release_infra" = "true" ]; then
             android=true
           else
             android=false
@@ -192,6 +217,9 @@ jobs:
             echo "integration=$integration"
             echo "integration_source=$integration_source"
             echo "android=$android"
+            echo "android_release=$android_release"
+            echo "release=$release"
+            echo "release_infra=$release_infra"
           } >> "$FORGEJO_OUTPUT"
 
   bridge:
@@ -717,6 +745,35 @@ jobs:
             testKioskDebugUnitTest testCompanionDebugUnitTest \
             assembleKioskDebug assembleCompanionDebug \
             lintKioskDebug lintCompanionDebug
+      - name: Validate release Android package on the exact release head
+        if: ${{ needs.changes.outputs.release == 'true' || needs.changes.outputs.android_release == 'true' || needs.changes.outputs.release_infra == 'true' }}
+        working-directory: rook_receiver
+        env:
+          ANDROID_HOME: /tmp/flexdisplay-android-sdk
+          ANDROID_SDK_ROOT: /tmp/flexdisplay-android-sdk
+          FORGEJO_TOKEN: ""
+          GITEA_TOKEN: ""
+          GITHUB_TOKEN: ""
+          ACTIONS_ID_TOKEN_REQUEST_TOKEN: ""
+          ACTIONS_RUNTIME_TOKEN: ""
+          ACTIONS_CACHE_URL: ""
+          ACTIONS_RUNTIME_URL: ""
+          ACTIONS_RESULTS_URL: ""
+          ACTIONS_ID_TOKEN_REQUEST_URL: ""
+          http_proxy: ""
+          https_proxy: ""
+          HTTP_PROXY: ""
+          HTTPS_PROXY: ""
+          ALL_PROXY: ""
+          all_proxy: ""
+        run: |
+          set -eu
+          test -z "$FORGEJO_TOKEN$GITEA_TOKEN$GITHUB_TOKEN$ACTIONS_ID_TOKEN_REQUEST_TOKEN$ACTIONS_RUNTIME_TOKEN"
+          unset http_proxy https_proxy HTTP_PROXY HTTPS_PROXY ALL_PROXY all_proxy
+          ./gradlew --no-daemon \
+            testCompanionReleaseUnitTest \
+            lintCompanionRelease \
+            assembleCompanionRelease
 
   required:
     if: ${{ always() }}

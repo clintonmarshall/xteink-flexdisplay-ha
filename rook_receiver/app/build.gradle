@@ -15,7 +15,7 @@ android {
         // Android receiver versions are independent from the Bridge platform.
         // versionCode must increase for every published Companion APK signed
         // by the permanent FlexDisplay Companion release key.
-        versionCode 5
+        versionCode 6
         versionName "0.5.0"
     }
 
