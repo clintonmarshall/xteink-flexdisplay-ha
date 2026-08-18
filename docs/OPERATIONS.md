@@ -91,9 +91,11 @@ reset, or command actions for them.
 X4 Pro firmware remains owned by the external authoritative Forgejo repository
 `clintonmarshall/xteink-flexdisplay`; this platform owns only the Bridge,
 Studio, MQTT, and Home Assistant capability contract. The external admission
-record is `firmware/docs/flex/X4_PRO_HARDWARE_ADMISSION.md` on branch
-`codex/x4pro-hardware-admission-current`. That branch is pending review and is
-not a published compatibility claim. Its pinned upstream evidence is FreeInk commit
+record is `firmware/docs/flex/X4_PRO_HARDWARE_ADMISSION.md` on protected
+`main` at exact commit `de032ebac1f68f743c43ac076cc1ff3e24576092`, merged
+through firmware pull request #10. This is reviewed source and admission
+evidence, not a published firmware release or a Platform compatibility
+manifest. Its pinned upstream evidence is FreeInk commit
 `61f0b2b5c5bb2cb6f84a26fca77535313658d39d`, documented there at
 `docs/xteink-x4pro-support.md`. Do not copy the firmware source or board
 definitions into this repository.
