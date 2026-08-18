@@ -7,7 +7,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.47.1 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.48.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
@@ -67,6 +67,14 @@ the behaviorally unchanged Companion candidate to version code 6. Bridge,
 Studio, Home Assistant integration and packaged device firmware remain
 compatible with 0.47.0; signed draft assets are now re-read through their
 authenticated immutable attachment UUIDs before canary or publication.
+
+Platform 0.48.0 adds revision-scoped X4 Pro capabilities to the Bridge,
+Studio, MQTT and Home Assistant integration. Only an exact S3 report with the
+admitted board ID, MCU family, 16 MiB flash, 8 MiB PSRAM and explicit capability
+evidence receives the matching management surface; incomplete, incompatible or
+non-S3 reports remain read-only. The release does not package or authorize X4
+Pro firmware or an install action. Existing X3/X4, Note 4 and Android receiver
+versions remain compatible and their packaged artifacts are unchanged.
 
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen

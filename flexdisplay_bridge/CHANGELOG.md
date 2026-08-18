@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.48.0
+
+- Add a fail-closed X4 Pro capability contract that requires the exact board,
+  S3 hardware revision, MCU, flash, PSRAM and reported capability evidence
+  before exposing revision-scoped management controls.
+- Add the dedicated 480 x 800 X4 Pro Studio profile while preventing X4 Pro
+  devices from inheriting legacy X4 firmware, OTA, physical-button or power
+  capabilities when their identity evidence is incomplete or incompatible.
+- Reconcile hardware, input, frontlight, audio, power and firmware-artifact
+  capabilities across the Bridge, MQTT and Home Assistant entities, including
+  dynamic removal of controls when a device no longer reports them.
+- Document the external X4 Pro firmware ownership and admission record, and
+  harden release-tag metadata tests without changing the publication workflow.
+- Keep Android receivers and packaged X3/X4 and Note 4 firmware artifacts
+  unchanged. This software-only release requires no firmware flash or OTA
+  rollout and does not publish or authorize an X4 Pro firmware artifact.
+
 ## 0.47.1
 
 - Repair authenticated verification of signed Companion assets while their
