@@ -14,18 +14,10 @@ Both flavors use the same Bridge screen protocol and device records as the
 XTEINK displays while declaring their Android, colour, touch, audio, and
 device-specific capabilities.
 
-The Bridge selects rectangular colour rendering from the receiver model, so no
-APK change is required for the **Warm household** page layout. Older Bridges
-continue to deliver their established monochrome dashboard PNGs. E-paper and
-LVGL receivers do not receive this bitmap layout.
-
 ## Features
 
 - 480 × 480 circular-safe Spot dashboards rendered by Dashboard Studio
 - 960 × 480 landscape Show 5 dashboards rendered by Dashboard Studio
-- warm-colour 1200 × 675 phone and 960 × 480 Show 5 household dashboards
-  featuring the configured home artwork, garage/motion status, local time, and
-  five live Home Assistant comfort and energy readings
 - automatic Bridge registration and periodic telemetry
 - cached-image and empty-unchanged transfer support
 - swipe left/right for previous/next page and tap empty space to refresh
