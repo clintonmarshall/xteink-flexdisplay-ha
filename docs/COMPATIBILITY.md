@@ -7,7 +7,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.48.0 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.49.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
@@ -75,6 +75,15 @@ evidence receives the matching management surface; incomplete, incompatible or
 non-S3 reports remain read-only. The release does not package or authorize X4
 Pro firmware or an install action. Existing X3/X4, Note 4 and Android receiver
 versions remain compatible and their packaged artifacts are unchanged.
+
+Platform 0.49.0 adds the Bridge-rendered **Warm household** profile for the
+existing rectangular Android Companion and Echo Show 5 receiver contracts. It
+uses each receiver's established RGB PNG delivery path and native 1200 × 675
+or 960 × 480 dimensions, so there is no protocol, minimum receiver version,
+or Android source-version change. Older Bridges continue to render their
+existing dashboards, while e-paper and LVGL receivers retain their existing
+paths and reject this Android-only layout. Packaged X3/X4 and Note 4 firmware
+artifacts are unchanged; this software-only release requires no flash or OTA.
 
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen

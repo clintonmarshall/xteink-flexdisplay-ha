@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.49.0
+
+- Add the Bridge-rendered **Warm household** profile for the rectangular
+  Android Companion and Echo Show 5, with native 1200 × 675 and 960 × 480
+  RGB output.
+- Present the shared sanitized home illustration with a fixed seven-entity
+  household view for garage state, motion, local date and time, indoor
+  temperature, humidity, site power, solar power, and battery charge.
+- Keep the profile fail-closed outside the established rectangular Android
+  render path; e-paper and LVGL layouts retain their existing validation and
+  delivery behavior.
+- Keep Android receiver source and versions, the Home Assistant integration
+  protocol, and packaged X3/X4 and Note 4 firmware artifacts unchanged. This
+  software-only release requires no firmware flash, OTA rollout, or APK
+  publication.
+
 ## 0.48.0
 
 - Add a fail-closed X4 Pro capability contract that requires the exact board,
