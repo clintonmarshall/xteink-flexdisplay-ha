@@ -25,7 +25,9 @@ ICONS = {
     "auto", "home", "temperature", "humidity", "battery", "power", "solar",
     "wifi", "storage", "clock", "weather", "rain", "light", "lock", "alert",
 }
-LAYOUTS = {"auto", "single", "rows", "columns", "grid", "house_pulse"}
+LAYOUTS = {
+    "auto", "single", "rows", "columns", "grid", "house_pulse", "warm_household",
+}
 BADGE_ASSET_PATTERN = re.compile(r"^[a-f0-9]{24}$")
 
 

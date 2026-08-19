@@ -19,7 +19,15 @@ from .config import (
 )
 
 PROFILE_PATTERN = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$")
-LAYOUTS = {"auto", "single", "rows", "columns", "grid", "house_pulse"}
+LAYOUTS = {
+    "auto",
+    "single",
+    "rows",
+    "columns",
+    "grid",
+    "house_pulse",
+    "warm_household",
+}
 TILE_STYLES = {"value", "gauge", "progress", "history", "qr", "image", "name_card"}
 TILE_SOURCES = {"home_assistant", "static"}
 IMAGE_FITS = {"cover", "contain"}
@@ -172,8 +180,12 @@ def parse_profile(name: str, payload: dict[str, Any]) -> DashboardProfileConfig:
         if layout not in LAYOUTS:
             raise DashboardValidationError(f"Page {page_index + 1} has an unsupported layout")
         raw_entities = raw_page.get("entities") or []
-        if not isinstance(raw_entities, list) or len(raw_entities) > 4:
-            raise DashboardValidationError(f"Page {page_index + 1} may contain at most four tiles")
+        maximum_tiles = 7 if layout == "warm_household" else 4
+        if not isinstance(raw_entities, list) or len(raw_entities) > maximum_tiles:
+            label = "seven" if maximum_tiles == 7 else "four"
+            raise DashboardValidationError(
+                f"Page {page_index + 1} may contain at most {label} tiles"
+            )
 
         entities: list[EntityConfig] = []
         for tile_index, raw_entity in enumerate(raw_entities):

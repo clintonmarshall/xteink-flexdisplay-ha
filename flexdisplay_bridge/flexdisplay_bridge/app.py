@@ -5552,6 +5552,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                     "columns",
                     "grid",
                     "house_pulse",
+                    "warm_household",
                 ],
                 "lvgl_layouts": [
                     layout

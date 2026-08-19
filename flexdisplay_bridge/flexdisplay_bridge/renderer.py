@@ -32,6 +32,25 @@ def _font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.I
     return ImageFont.load_default()
 
 
+def _serif_font(
+    size: int,
+    bold: bool = False,
+) -> ImageFont.FreeTypeFont | ImageFont.ImageFont:
+    candidates = [
+        "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf" if bold
+        else "/usr/share/fonts/truetype/dejavu/DejaVuSerif.ttf",
+        "/usr/share/fonts/dejavu/DejaVuSerif-Bold.ttf" if bold
+        else "/usr/share/fonts/dejavu/DejaVuSerif.ttf",
+        "/System/Library/Fonts/Supplemental/Georgia Bold.ttf" if bold
+        else "/System/Library/Fonts/Supplemental/Georgia.ttf",
+        "/System/Library/Fonts/NewYork.ttf",
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return ImageFont.truetype(candidate, size)
+    return _font(size, bold)
+
+
 def _fit(
     draw: ImageDraw.ImageDraw,
     text: str,
@@ -45,6 +64,21 @@ def _fit(
         if draw.textbbox((0, 0), text, font=selected)[2] <= maximum_width:
             return selected
     return _font(minimum_size, bold)
+
+
+def _fit_serif(
+    draw: ImageDraw.ImageDraw,
+    text: str,
+    maximum_width: int,
+    start_size: int,
+    bold: bool = False,
+    minimum_size: int = 13,
+):
+    for size in range(start_size, minimum_size - 1, -1):
+        selected = _serif_font(size, bold)
+        if draw.textbbox((0, 0), text, font=selected)[2] <= maximum_width:
+            return selected
+    return _serif_font(minimum_size, bold)
 
 
 def _wrap_label(
@@ -97,6 +131,21 @@ def _is_round_display(device: dict[str, Any]) -> bool:
     return model in {"ROOK", "ECHOSPOT", "ECHOSPOT2017", "AMAZONECHOSPOT"} or (
         str(device.get("display_shape") or "").lower() == "round"
     )
+
+
+def _is_rectangular_android_display(device: dict[str, Any]) -> bool:
+    model = "".join(
+        character
+        for character in str(device.get("model") or "").upper()
+        if character.isalnum()
+    )
+    return model in {
+        "ANDROID",
+        "ANDROIDCOMPANION",
+        "CHECKERS",
+        "ECHOSHOW5",
+        "ECHOSHOW51STGEN",
+    }
 
 
 def _render_round_dashboard(
@@ -1063,6 +1112,289 @@ def _elapsed_label(changed: datetime | None) -> str:
     return f"{hours // 24}d"
 
 
+_WARM_HOUSEHOLD_ASSET = Path(__file__).with_name("assets") / "warm_household_home.png"
+_WARM_IVORY = (249, 245, 235)
+_WARM_INK = (10, 31, 55)
+_WARM_GREEN = (70, 91, 56)
+_WARM_GREEN_LIGHT = (230, 234, 220)
+_WARM_TERRACOTTA = (166, 79, 34)
+_WARM_AMBER = (185, 119, 19)
+_WARM_RULE = (214, 200, 176)
+_WARM_MUTED = (77, 83, 82)
+
+
+def _warm_entity(
+    entities: list[EntityState],
+    *terms: str,
+    exclude: tuple[str, ...] = (),
+) -> EntityState | None:
+    for entity in entities:
+        identity = f"{entity.entity_id} {entity.label}".casefold()
+        if all(term.casefold() in identity for term in terms) and not any(
+            term.casefold() in identity for term in exclude
+        ):
+            return entity
+    return None
+
+
+def _warm_value(entity: EntityState | None) -> str:
+    if entity is None or not entity.available or entity.state.casefold() in {
+        "unknown",
+        "unavailable",
+    }:
+        return "--"
+    value = str(entity.state).strip()
+    unit = str(entity.unit or "").strip()
+    if not unit or unit in value:
+        return value
+    spacer = "" if unit in {"%", "°C", "°F"} else " "
+    return f"{value}{spacer}{unit}"
+
+
+def _draw_colored_icon(
+    image: Image.Image,
+    kind: str,
+    box: tuple[int, int, int, int],
+    color: tuple[int, int, int],
+    value: str = "",
+) -> None:
+    mask = Image.new("L", image.size, 255)
+    mask_draw = ImageDraw.Draw(mask)
+    _draw_icon(mask_draw, kind, box, value)
+    ink = Image.new("RGB", image.size, color)
+    image.paste(ink, mask=ImageOps.invert(mask))
+
+
+def _paste_rounded_house(
+    image: Image.Image,
+    box: tuple[int, int, int, int],
+) -> None:
+    left, top, right, bottom = box
+    size = (max(1, right - left), max(1, bottom - top))
+    if not _WARM_HOUSEHOLD_ASSET.is_file():
+        return
+    with Image.open(_WARM_HOUSEHOLD_ASSET) as source:
+        house = ImageOps.fit(
+            source.convert("RGB"),
+            size,
+            method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.52),
+        )
+    radius = max(12, min(size) // 18)
+    mask = Image.new("L", size, 0)
+    ImageDraw.Draw(mask).rounded_rectangle((0, 0, size[0] - 1, size[1] - 1), radius=radius, fill=255)
+    image.paste(house, (left, top), mask)
+
+
+def _draw_warm_metric(
+    image: Image.Image,
+    draw: ImageDraw.ImageDraw,
+    box: tuple[int, int, int, int],
+    *,
+    label: str,
+    entity: EntityState | None,
+    icon: str,
+    accent: tuple[int, int, int],
+    compact: bool,
+) -> None:
+    left, top, right, bottom = box
+    icon_size = max(28, min(44 if not compact else 34, bottom - top - 30))
+    icon_top = top + (bottom - top - icon_size) // 2
+    _draw_colored_icon(
+        image,
+        icon,
+        (left + 7, icon_top, left + 7 + icon_size, icon_top + icon_size),
+        accent,
+        _warm_value(entity),
+    )
+    text_left = left + icon_size + (17 if not compact else 12)
+    label_font = _font(17 if not compact else 13)
+    value_font = _serif_font(31 if not compact else 22, True)
+    draw.text((text_left, top + (19 if not compact else 11)), label, fill=_WARM_INK, font=label_font)
+    value = _warm_value(entity)
+    value_font = _fit_serif(
+        draw,
+        value,
+        right - text_left - 8,
+        value_font.size,
+        True,
+        15,
+    )
+    draw.text((text_left, top + (48 if not compact else 32)), value, fill=accent, font=value_font)
+
+
+def _render_warm_household(
+    *,
+    title: str,
+    device: dict[str, Any],
+    width: int,
+    height: int,
+    entities: Iterable[EntityState],
+    page_index: int,
+    page_count: int,
+    ha_error: str,
+) -> bytes:
+    """Render the actual-house, warm-colour dashboard for rectangular Android receivers."""
+    image = Image.new("RGB", (width, height), _WARM_IVORY)
+    draw = ImageDraw.Draw(image)
+    values = list(entities)
+    garage = _warm_entity(values, "garage", exclude=("motion",))
+    motion = _warm_entity(values, "garage", "motion") or _warm_entity(values, "motion")
+    temperature = _warm_entity(values, "temperature") or _warm_entity(values, "inside")
+    humidity = _warm_entity(values, "humidity")
+    site_power = _warm_entity(values, "site", "power") or _warm_entity(values, "power", exclude=("solar",))
+    solar = _warm_entity(values, "solar")
+    battery = _warm_entity(values, "battery") or _warm_entity(values, "charge")
+
+    garage_state = str(garage.state if garage else "unknown").strip().casefold()
+    garage_available = bool(
+        garage and garage.available and garage_state not in {"unknown", "unavailable"}
+    )
+    garage_open = garage_state in {"on", "open", "opening", "active", "true", "1"}
+    headline = (
+        "Garage open" if garage_open else "Garage closed"
+    ) if garage_available else "Garage unknown"
+    motion_state = str(motion.state if motion else "unknown").strip().casefold()
+    motion_available = bool(
+        motion and motion.available and motion_state not in {"unknown", "unavailable"}
+    )
+    motion_active = motion_state in {"on", "active", "detected", "true", "1"}
+    motion_text = (
+        "Motion detected" if motion_active else "No motion"
+    ) if motion_available else "Motion unknown"
+    status_color = _WARM_TERRACOTTA if garage_open or motion_active else _WARM_GREEN
+    now = datetime.now().astimezone()
+    compact = width < 1100 or height < 560
+    pad = 18 if compact else 28
+    footer_height = 54 if compact else 62
+    metrics_height = 96 if compact else 126
+    metric_top = height - footer_height - metrics_height - (11 if compact else 18)
+    hero_bottom = metric_top - (12 if compact else 18)
+    house_width = int(width * (0.315 if compact else 0.44))
+    house_box = (pad, pad, house_width, hero_bottom)
+    _paste_rounded_house(image, house_box)
+
+    content_left = house_width + (27 if compact else 42)
+    content_right = width - pad
+    headline_font = _serif_font(43 if compact else 68, True)
+    headline_font = _fit_serif(
+        draw,
+        headline,
+        content_right - content_left,
+        headline_font.size,
+        True,
+        28,
+    )
+    draw.text((content_left, pad + (2 if compact else 6)), headline, fill=(18, 46, 28), font=headline_font)
+
+    status_y = pad + headline_font.size + (8 if compact else 13)
+    status_icon = 34 if compact else 44
+    draw.ellipse(
+        (content_left, status_y, content_left + status_icon, status_y + status_icon),
+        fill=status_color,
+    )
+    if motion_active:
+        draw.line(
+            (content_left + 10, status_y + status_icon // 2, content_left + status_icon - 10, status_y + status_icon // 2),
+            fill=_WARM_IVORY,
+            width=max(3, status_icon // 8),
+        )
+    else:
+        draw.line(
+            (
+                content_left + status_icon // 4,
+                status_y + status_icon // 2,
+                content_left + status_icon * 5 // 12,
+                status_y + status_icon * 2 // 3,
+                content_left + status_icon * 3 // 4,
+                status_y + status_icon // 3,
+            ),
+            fill=_WARM_IVORY,
+            width=max(3, status_icon // 9),
+            joint="curve",
+        )
+    motion_font = _font(27 if compact else 34, True)
+    draw.text((content_left + status_icon + 13, status_y + 1), motion_text, fill=status_color, font=motion_font)
+
+    rule_y = status_y + status_icon + (13 if compact else 18)
+    draw.line((content_left, rule_y, content_right, rule_y), fill=_WARM_RULE, width=2)
+    time_font = _serif_font(70 if compact else 96, True)
+    time_text = now.strftime("%-I:%M")
+    time_y = rule_y + (5 if compact else 9)
+    draw.text((content_left, time_y), time_text, fill=_WARM_INK, font=time_font)
+    time_width = draw.textbbox((content_left, time_y), time_text, font=time_font)[2] - content_left
+    am_font = _serif_font(27 if compact else 34, True)
+    draw.text((content_left + time_width + 10, time_y + time_font.size // 2), now.strftime("%p"), fill=_WARM_INK, font=am_font)
+
+    date_x = content_right - (190 if compact else 225)
+    date_y = time_y + (8 if compact else 7)
+    draw.line((date_x - 20, time_y + 7, date_x - 20, hero_bottom - 4), fill=_WARM_RULE, width=2)
+    date_font = _font(20 if compact else 25, True)
+    date_small = _font(17 if compact else 21)
+    draw.text((date_x, date_y), now.strftime("%A"), fill=_WARM_TERRACOTTA, font=date_font)
+    draw.text((date_x, date_y + date_font.size + 3), now.strftime("%-d %B %Y"), fill=_WARM_INK, font=date_small)
+    draw.text((date_x, date_y + date_font.size + date_small.size + 10), "Melbourne", fill=_WARM_INK, font=date_small)
+
+    draw.line((pad, metric_top - 8, width - pad, metric_top - 8), fill=_WARM_RULE, width=2)
+    metrics = (
+        ("Indoor", temperature, "temperature", _WARM_GREEN),
+        ("Humidity", humidity, "humidity", _WARM_GREEN),
+        ("Site power", site_power, "power", _WARM_INK),
+        ("Solar", solar, "solar", _WARM_AMBER),
+        ("Battery", battery, "battery", _WARM_GREEN),
+    )
+    slot_width = (width - 2 * pad) // len(metrics)
+    for index, (label, entity, icon, accent) in enumerate(metrics):
+        left = pad + index * slot_width
+        right = width - pad if index == len(metrics) - 1 else left + slot_width
+        if index:
+            draw.line((left, metric_top + 8, left, metric_top + metrics_height - 8), fill=_WARM_RULE, width=1)
+        _draw_warm_metric(
+            image,
+            draw,
+            (left + (3 if index else 0), metric_top, right, metric_top + metrics_height),
+            label=label,
+            entity=entity,
+            icon=icon,
+            accent=accent,
+            compact=compact,
+        )
+
+    footer_top = height - footer_height
+    draw.rounded_rectangle(
+        (pad, footer_top + 5, width - pad, height - 10),
+        radius=14 if compact else 18,
+        fill=_WARM_GREEN,
+    )
+    footer_text = "SWIPE FOR DETAILS" if page_count > 1 else "HOME AT A GLANCE"
+    footer_font = _font(18 if compact else 24, True)
+    footer_width = draw.textbbox((0, 0), footer_text, font=footer_font)[2]
+    draw.text(
+        ((width - footer_width) // 2, footer_top + (14 if compact else 15)),
+        footer_text,
+        fill=(255, 253, 246),
+        font=footer_font,
+    )
+    page_text = f"{page_index + 1} / {max(1, page_count)}"
+    page_font = _font(13 if compact else 16, True)
+    draw.text((width - pad - 58, footer_top + (17 if compact else 20)), page_text, fill=(238, 241, 229), font=page_font)
+
+    if ha_error:
+        error_text = "HOME ASSISTANT OFFLINE"
+        error_font = _font(13 if compact else 16, True)
+        error_width = draw.textbbox((0, 0), error_text, font=error_font)[2]
+        draw.rounded_rectangle(
+            (width - pad - error_width - 18, pad, width - pad, pad + error_font.size + 12),
+            radius=8,
+            fill=_WARM_TERRACOTTA,
+        )
+        draw.text((width - pad - error_width - 9, pad + 5), error_text, fill=(255, 250, 242), font=error_font)
+
+    output = BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
 def _draw_house_pulse_garage(
     draw: ImageDraw.ImageDraw,
     box: tuple[int, int, int, int],
@@ -1251,6 +1583,20 @@ class DashboardRenderer:
         height = max(240, min(1600, height))
         if _is_round_display(device):
             return _render_round_dashboard(
+                title=title,
+                device=device,
+                width=width,
+                height=height,
+                entities=entities,
+                page_index=page_index,
+                page_count=page_count,
+                ha_error=ha_error,
+            )
+        if _is_rectangular_android_display(device) and layout in {
+            "house_pulse",
+            "warm_household",
+        }:
+            return _render_warm_household(
                 title=title,
                 device=device,
                 width=width,

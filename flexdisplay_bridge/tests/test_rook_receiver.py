@@ -864,13 +864,20 @@ def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:
                     "pages": [
                         {
                             "title": "HOUSE",
+                            "layout": "warm_household",
                             "entities": [
                                 {
-                                    "entity_id": "static.state",
+                                    "entity_id": "static.garage",
                                     "label": "Garage",
                                     "source": "static",
-                                    "value": "Closed",
-                                }
+                                    "value": "off",
+                                },
+                                {"entity_id": "static.garage_motion", "label": "Garage motion", "source": "static", "value": "off"},
+                                {"entity_id": "static.temperature", "label": "Indoor temperature", "source": "static", "value": "21.5", "unit": "°C"},
+                                {"entity_id": "static.humidity", "label": "Humidity", "source": "static", "value": "48", "unit": "%"},
+                                {"entity_id": "static.site_power", "label": "Site power", "source": "static", "value": "1.8", "unit": "kW"},
+                                {"entity_id": "static.solar", "label": "Solar", "source": "static", "value": "2.6", "unit": "kW"},
+                                {"entity_id": "static.battery", "label": "Battery", "source": "static", "value": "76", "unit": "%"},
                             ],
                         }
                     ],
@@ -880,6 +887,7 @@ def test_studio_has_echo_spot_preview(tmp_path: Path) -> None:
         assert checkers_preview.status_code == 200
         with Image.open(io.BytesIO(checkers_preview.content)) as image:
             assert image.size == (960, 480)
+            assert image.mode == "RGB"
 
 
 def test_config_defaults_checkers_dimensions(tmp_path: Path) -> None:

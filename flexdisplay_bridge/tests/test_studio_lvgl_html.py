@@ -66,7 +66,8 @@ def test_studio_serializes_only_bounded_lvgl_screen_controls() -> None:
     assert 'tile.control_style === "read_only"' in studio
     assert 'tile.tap_action = {type: "none"};' in studio
     assert 'state.profile.pages.length >= 12' in studio
-    assert 'currentPage().entities.length >= 4' in studio
+    assert 'page?.layout === "warm_household" ? 7 : 4' in studio
+    assert 'currentPage().entities.length >= maxTilesForPage(currentPage())' in studio
 
 
 def test_studio_includes_receiver_supported_round_status_and_controls_starter() -> None:
@@ -100,7 +101,7 @@ def test_studio_limits_lvgl_v1_to_receiver_supported_visuals() -> None:
     assert '<div class="field-grid tile-sizing" ${showLvgl ? "hidden" : ""}>' in studio
     assert 'lvgl_layouts: ["auto", "single", "rows", "columns", "grid"]' in studio
     assert "!lvglLayouts.has(option.value)" in studio
-    assert '"energy", "house_pulse", "name_card", "qr_code"' in studio
+    assert '"energy", "house_pulse", "warm_household", "name_card", "qr_code"' in studio
     assert 'class="tile-icon-field" ${isImage || showLvgl ? "hidden" : ""}' in studio
     assert "does not consume dashboard icons" in studio
     assert "Not supported by LVGL receiver v1:" in studio
@@ -113,6 +114,9 @@ def test_studio_limits_lvgl_v1_to_receiver_supported_visuals() -> None:
         '"history", "qr", "name_card", "image"]'
     ) in studio
     assert '<option value="house_pulse">House Pulse</option>' in studio
+    assert '<option value="warm_household">Warm household</option>' in studio
+    assert 'title: "HOME", layout: "warm_household"' in studio
+    assert 'entity_id:"sensor.wall_e_charge"' in studio
     assert '${options(["auto","home","temperature","humidity","battery","power","solar","wifi","storage","clock","weather","rain","light","lock","alert"], tile.icon || "auto", titleCase)}' in studio
     assert "full colour for LVGL" not in studio
     assert "keeps colour for LVGL" not in studio

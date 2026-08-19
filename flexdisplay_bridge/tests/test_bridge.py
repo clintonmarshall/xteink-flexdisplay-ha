@@ -10,6 +10,7 @@ from dataclasses import replace
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from flexdisplay_bridge.app import (
     _advanced_health_metrics,
@@ -41,6 +42,7 @@ from flexdisplay_bridge.dashboards import (
     build_dashboard_pages,
     select_active_pages,
 )
+from flexdisplay_bridge.dashboard_store import DashboardValidationError, parse_profile
 from flexdisplay_bridge.home_assistant import EntityState, HomeAssistantClient
 from flexdisplay_bridge.mqtt_service import MqttService
 from flexdisplay_bridge.photo_frame import PhotoFrameMediaStore
@@ -216,6 +218,57 @@ def test_note4_house_pulse_renderer_and_bmp_delivery(tmp_path: Path) -> None:
         with Image.open(io.BytesIO(response.content)) as image:
             assert image.size == (400, 300)
             assert image.mode == "1"
+
+
+def test_rectangular_android_warm_household_is_full_colour() -> None:
+    entities = (
+        EntityState("binary_sensor.garage", "Garage", "off", "", True),
+        EntityState("binary_sensor.garage_motion", "Garage motion", "off", "", True),
+        EntityState("sensor.daikin_inside_temperature", "Indoor", "21.5", "°C", True),
+        EntityState("sensor.movie_room_ir_remote_humidity", "Humidity", "48", "%", True),
+        EntityState("sensor.wall_e_site_power", "Site power", "1.8", "kW", True),
+        EntityState("sensor.wall_e_solar_power", "Solar", "2.6", "kW", True),
+        EntityState("sensor.wall_e_charge", "Battery", "76", "%", True),
+    )
+    renderer = DashboardRenderer()
+
+    for model, size in (("ANDROID", (1200, 675)), ("CHECKERS", (960, 480))):
+        rendered = renderer.render(
+            title="HOME",
+            device={"device_id": f"{model}-PREVIEW", "model": model},
+            width=size[0],
+            height=size[1],
+            entities=entities,
+            layout="warm_household",
+            page_count=2,
+        )
+        with Image.open(io.BytesIO(rendered)) as image:
+            assert image.size == size
+            assert image.mode == "RGB"
+            assert len(image.getcolors(maxcolors=1_000_000) or ()) > 1_000
+
+
+def test_warm_household_allows_only_its_seven_semantic_tiles() -> None:
+    def payload(layout: str, count: int) -> dict[str, object]:
+        return {
+            "pages": [
+                {
+                    "title": "HOME",
+                    "layout": layout,
+                    "entities": [
+                        {"entity_id": f"sensor.value_{index}", "label": f"Value {index}"}
+                        for index in range(count)
+                    ],
+                }
+            ]
+        }
+
+    profile = parse_profile("warm", payload("warm_household", 7))
+    assert len(profile.pages[0].entities) == 7
+    with pytest.raises(DashboardValidationError, match="at most seven tiles"):
+        parse_profile("warm", payload("warm_household", 8))
+    with pytest.raises(DashboardValidationError, match="at most four tiles"):
+        parse_profile("grid", payload("grid", 5))
 
 
 def test_awake_sleep_plan_stays_awake_between_checkins(tmp_path: Path) -> None:

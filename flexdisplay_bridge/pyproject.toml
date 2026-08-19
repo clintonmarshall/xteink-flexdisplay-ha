@@ -31,7 +31,7 @@ flexdisplay-ha-bridge = "flexdisplay_bridge.main:main"
 include = ["flexdisplay_bridge*"]
 
 [tool.setuptools.package-data]
-flexdisplay_bridge = ["static/*.html"]
+flexdisplay_bridge = ["static/*.html", "assets/*.png"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

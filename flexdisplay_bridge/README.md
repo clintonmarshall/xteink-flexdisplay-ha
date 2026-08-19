@@ -162,6 +162,14 @@ daytime energy, running appliances, weather alerts, and standalone ID passes.
 Replace Home Assistant-based examples with entities from your system before
 saving.
 
+The **Warm household** template is purpose-built for the rectangular Android
+Companion (1200 × 675) and Echo Show 5 (960 × 480). It renders a shared RGB
+home illustration with garage and motion status, local date/time, indoor
+temperature, humidity, site power, solar power, and battery charge. Its seven
+tiles are a fixed semantic set rather than a generic grid; all other bitmap
+layouts retain the four-tile limit. On a non-Android target the layout is not
+offered as an LVGL page and is rejected by the LVGL delivery contract.
+
 Image tiles can use a Home Assistant `camera.*` or `image.*` entity, or a
 direct HTTP(S) URL reachable from the Bridge App. Choose **Crop to fill** for
 edge-to-edge camera and artwork tiles, or **Fit whole image** when no part of

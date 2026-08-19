@@ -1118,6 +1118,7 @@
             <option value="columns">Two side-by-side</option>
             <option value="grid">Four-tile grid</option>
             <option value="house_pulse">House Pulse</option>
+            <option value="warm_household">Warm household</option>
           </select>
         </label>
       </div>
@@ -1169,6 +1170,7 @@
               <option value="qr_code">QR code page</option>
               <option id="roundControlsTemplateOption" value="round_controls">Round touch controls</option>
               <option value="house_pulse">House Pulse</option>
+              <option value="warm_household">Warm household</option>
             </select>
           </label>
         </div>
@@ -2084,7 +2086,7 @@
       lvgl_styles: ["gauge", "progress", "value"],
     };
     const DASHBOARD_TILE_STYLES = ["value", "gauge", "progress", "history", "qr", "name_card", "image"];
-    const LVGL_UNSUPPORTED_PAGE_TEMPLATES = new Set(["energy", "house_pulse", "name_card", "qr_code"]);
+    const LVGL_UNSUPPORTED_PAGE_TEMPLATES = new Set(["energy", "house_pulse", "warm_household", "name_card", "qr_code"]);
     const channelIdFromName = (value) => String(value || "").trim().toLowerCase().replace(/[^a-z0-9_-]+/g, "_").replace(/^_+|_+$/g, "").slice(0, 32);
     const uniqueId = (prefix = "item") => globalThis.crypto?.randomUUID
       ? `${prefix}-${crypto.randomUUID()}`
@@ -5588,6 +5590,10 @@
       });
     }
 
+    function maxTilesForPage(page) {
+      return page?.layout === "warm_household" ? 7 : 4;
+    }
+
     function renderInspector() {
       const page = currentPage();
       $("#inspectorTitle").textContent = page.title;
@@ -5610,8 +5616,9 @@
       $("#movePageDown").disabled = state.pageIndex === state.profile.pages.length - 1;
       $("#deletePage").disabled = state.profile.pages.length === 1;
       $("#addPage").disabled = state.profile.pages.length >= 12;
-      $("#addTile").disabled = page.entities.length >= 4;
-      $("#addStaticTile").disabled = page.entities.length >= 4;
+      const maximumTiles = maxTilesForPage(page);
+      $("#addTile").disabled = page.entities.length >= maximumTiles;
+      $("#addStaticTile").disabled = page.entities.length >= maximumTiles;
       const showLvgl = isLvglModel();
       const lvglLayouts = new Set(capabilityValues("lvgl_layouts", FALLBACK_CAPABILITIES.lvgl_layouts));
       for (const option of $("#pageLayout").options) {
@@ -5620,7 +5627,7 @@
         option.disabled = unsupported;
       }
       $("#addQrTile").hidden = showLvgl;
-      $("#addQrTile").disabled = showLvgl || page.entities.length >= 4;
+      $("#addQrTile").disabled = showLvgl || page.entities.length >= maximumTiles;
       for (const value of LVGL_UNSUPPORTED_PAGE_TEMPLATES) {
         const option = $(`#pageTemplate option[value="${value}"]`);
         if (!option) continue;
@@ -6694,6 +6701,19 @@
             {entity_id:"binary_sensor.garage_motion", label:"Garage motion", unit:"", icon:"home", style:"value", minimum:0, maximum:100},
           ],
         },
+        warm_household: {
+          title: "HOME", layout: "warm_household",
+          activation: defaultActivation(),
+          entities: [
+            {entity_id:"binary_sensor.garage", label:"Garage", unit:"", icon:"home", style:"value", minimum:0, maximum:100},
+            {entity_id:"binary_sensor.garage_motion", label:"Garage motion", unit:"", icon:"home", style:"value", minimum:0, maximum:100},
+            {entity_id:"sensor.daikin_inside_temperature", label:"Indoor", unit:"°C", icon:"temperature", style:"value", minimum:0, maximum:45},
+            {entity_id:"sensor.movie_room_ir_remote_humidity", label:"Humidity", unit:"%", icon:"humidity", style:"value", minimum:0, maximum:100},
+            {entity_id:"sensor.wall_e_site_power", label:"Site power", unit:"kW", icon:"power", style:"value", minimum:0, maximum:20},
+            {entity_id:"sensor.wall_e_solar_power", label:"Solar", unit:"kW", icon:"solar", style:"value", minimum:0, maximum:20},
+            {entity_id:"sensor.wall_e_charge", label:"Battery", unit:"%", icon:"battery", style:"value", minimum:0, maximum:100},
+          ],
+        },
         name_card: {
           title: "ID PASS", layout: "rows",
           activation: defaultActivation(),
@@ -6746,7 +6766,7 @@
     }
     const titleCase = (value) => value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
     const styleLabel = (value) => ({value:"Icon + value", gauge:"Gauge", progress:"Progress bar", history:"24-hour history", qr:"QR code", name_card:"Name card / ID pass", image:"Image"})[value] || titleCase(value);
-    const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid", house_pulse:"House Pulse"})[value] || "Automatic";
+    const layoutLabel = (value) => ({auto:"Automatic", single:"Single spotlight", rows:"Stacked", columns:"Side-by-side", grid:"Grid", house_pulse:"House Pulse", warm_household:"Warm household"})[value] || "Automatic";
     const options = (values, selected, labeler) => values.map((value) =>
       `<option value="${value}" ${value === selected ? "selected" : ""}>${escapeHtml(labeler(value))}</option>`
     ).join("");
@@ -6826,7 +6846,7 @@
       changed(); renderPages(); renderInspector();
     });
     function addTile(source = "home_assistant", style = "value") {
-      if (currentPage().entities.length >= 4) return;
+      if (currentPage().entities.length >= maxTilesForPage(currentPage())) return;
       if (isLvglModel() && !capabilityValues("lvgl_styles", FALLBACK_CAPABILITIES.lvgl_styles).includes(style)) {
         return toast("That visual is not supported by LVGL receiver v1.", true);
       }

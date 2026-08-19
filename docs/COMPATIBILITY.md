@@ -83,6 +83,13 @@ inferring touch, colour, audio, microphone, and always-on state from the
 existing comma-separated `X-FlexDisplay-Capabilities` header where possible,
 and reports unsupported or unknown capability fields as false/unknown.
 
+Rectangular Android receivers accept the Bridge-rendered **Warm household**
+RGB PNG at their existing screen dimensions: 1200 × 675 for Companion and
+960 × 480 for Echo Show 5. This is a Bridge renderer/profile capability and
+does not require a new Android receiver version. Older Bridges continue to
+serve monochrome bitmap dashboards; e-paper and LVGL receivers retain their
+existing render and validation paths.
+
 The phone flavor derives `0.5.0-companion` (version code 6) from the shared
 Android source version. It is an unpublished release candidate until a
 protected Forgejo job signs one immutable APK, that exact checksum passes the
