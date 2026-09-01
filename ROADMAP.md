@@ -1,223 +1,105 @@
-# FlexDisplay Roadmap
+# FlexDisplay roadmap
 
-This roadmap keeps the platform enhancements in a deliberate order. A release
-may move only after the previous phase is usable on both XTEINK X3 and X4.
+This roadmap starts from the current coordinated release instead of retaining
+completed work as if it were still queued. Exact release and distribution
+state is generated from `release-manifest.json` into
+[`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md). The changelog remains the
+complete version-by-version history.
 
-## v0.32 — Edge fleet policy control
+Roadmap status describes repository work only. It does not establish a Home
+Assistant deployment, Android installation, firmware rollout, device check-in,
+or physical result.
 
-Status: implemented and publishing.
-Delivery: Bridge/HACS/Firmware/FlexHub `0.32.0`.
+## Current baseline — Platform 0.49.0
 
-- Revisioned fleet policy profiles with durable device acknowledgement.
-- Native FlexHub fleet health, policy, scope, default-app, dashboard, and
-  Photo Frame controls.
-- Matching App-only MQTT and optional custom-integration entities.
-- Shared X3/X4 acknowledgement support without splitting the firmware image.
+Status: released source; see the generated release status for each publication
+and deployment boundary.
 
-## v0.31 — Refined platform and upstream refresh
+The current platform includes:
 
-Status: released.
-Delivery: Bridge/HACS/Firmware/FlexHub `0.31.0`.
+- Dashboard Studio, previews, reusable content, Quick Cards, photo frames,
+  mixed-content channels, screen history, health, groups, policies, audit and
+  support tooling.
+- Capability-aware Bridge, MQTT and Home Assistant surfaces for X3/X4, Note 4,
+  Android and admitted LVGL receiver contracts. Unknown or incompatible
+  families remain read-only.
+- Packaged X3/X4 OpenDisplay firmware, guarded canary-first OTA controls and
+  explicit recovery gates.
+- Android receiver contracts for the original Echo Spot, Echo Show 5 and the
+  foreground-only phone Companion, including rectangular colour profiles.
+- FlexHub status and policy integration while keeping the hub a thin local
+  gateway rather than a second fleet controller.
+- Forgejo-authoritative validation, protected release workflows and a
+  downstream GitHub compatibility boundary.
 
-- Separate device firmware, Home Assistant, always-on Hub, and Factory Kit
-  ownership while retaining one coordinated platform version and manifest.
-- CrossPoint 1.5 Reader and FreeInk hardware-stack refresh for both X3 and X4.
-- OpenDisplay 2.20-compatible zlib and ordered PIPE transfers with bounded
-  recovery for abandoned transfers.
-- Current TRMNL/Terminus request and response metadata without permitting stock
-  TRMNL firmware to replace FlexDisplay firmware.
-- Clean-fleet provisioning and common X3/X4 OTA metadata from one verified
-  firmware binary.
+## Next — Release truth and provenance
 
-## v0.15 — Visual Dashboard Studio
+Status: implemented in this source; review and merge remain separate gates.
 
-Status: released and deployed.
-Delivery: Bridge/HACS `0.11.1`; existing device firmware `0.14.0` is compatible.
+- Keep one checked-in coordinated release manifest for platform, Android,
+  distribution and packaged-artifact state.
+- Generate the human-readable release snapshot from that manifest and reject
+  stale generated documentation in CI.
+- Validate packaged bytes against the manifest, Home Assistant App defaults and
+  Bridge runtime defaults.
+- Fail closed when firmware-bearing releases lack immutable source, recovery,
+  checksum and USB-canary evidence.
+- Reconcile the separate Factory Kit manifest against this platform record in
+  its owning release repository.
 
-- Home Assistant App web editor with live X3 and X4 previews.
-- Persisted dashboard profiles that survive App restarts and upgrades.
-- One-tile, stacked, side-by-side, and four-tile layouts.
-- Home Assistant entity catalogue and per-tile labels, units, and icons.
-- Value, gauge, progress, 24-hour history, and QR-code visuals.
-- Direct profile assignment with a queued device refresh.
+## Next — Protocol security and compatibility
 
-## v0.16 — State-aware pages
+Status: planned.
 
-Status: released and deployed.
-Delivery: Bridge/HACS `0.12.0`; existing device firmware `0.14.0` is compatible.
+- Port the dormant TRMNL BYOS response-conformance parser onto current firmware
+  and test current TRMNL, stock Terminus and legacy response fixtures.
+- Vendor one reviewed immutable OpenDisplay protocol definition and generate or
+  validate C++, Python and frontend constants from it.
+- Design per-device ownership, credential rotation, authenticated commands and
+  replay resistance before widening OpenDisplay control.
+- Document conservative fallback behaviour for every protocol and receiver
+  version change.
 
-- Conditional alert pages driven by Home Assistant entity state.
-- Priority and expiry rules that restore the normal playlist automatically.
-- Scheduled morning, daytime, evening, and overnight page sets.
-- Doorbell, alarm, energy, appliance, and weather-alert templates.
+## Next — Reliability and hardware evidence
 
-## v0.16.1 — Dashboard image tiles
+Status: planned; each device mutation retains its own confirmation gate.
 
-Status: released and deployed.
-Delivery: Bridge/HACS `0.13.0`; existing device firmware `0.14.0` is compatible.
+- Refresh the CrossPoint power, memory and download correctness review, then
+  canary only the changes that match admitted X3/X4 hardware.
+- Replace blocking FlexHub fleet refresh work with bounded asynchronous
+  behaviour and require a meaningful memory/endpoint soak before wider rollout.
+- Complete Note 4 clean builds, physical display/input/audio/power/sleep tests,
+  recovery evidence and an independently versioned release path.
+- Keep X4 Pro and future families external and read-only until stable identity,
+  capability, hardware, transport, recovery and compatibility evidence is
+  complete.
 
-- Home Assistant camera and image entity selection in Dashboard Studio.
-- Direct HTTP(S) image sources for content outside Home Assistant.
-- Crop-to-fill and fit-whole-image controls with exact X3/X4 1-bit previews.
-- Bounded downloads and strict separation of Home Assistant credentials.
+## Next — Platform simplification
 
-## v0.17 — Configurable physical-button actions
+Status: planned.
 
-Status: released and deployed.
-Delivery: Bridge/HACS/Firmware `0.17.0`.
+- Split the Bridge monolith into routers and services by device, content,
+  fleet, firmware, receiver and diagnostics concern.
+- Split Dashboard Studio into native modules before considering a new frontend
+  build framework.
+- Define one generated capability and entity schema for Bridge, Studio, MQTT,
+  the Home Assistant integration and documentation.
+- Centre operator tools on one journey: create content, assign targets,
+  preview, publish and observe. Keep firmware and protocol diagnostics in an
+  explicit Operations area.
+- Support two clear installation paths: MQTT discovery as the simplest default
+  and HACS for richer native behaviour, with overlap detection and migration
+  guidance.
 
-- Per-device short-, double-, and long-press mappings.
-- Home Assistant service, scene, script, and automation targets.
-- Mode-aware actions while preserving page navigation and recovery gestures.
+## Later candidates
 
-## v0.18 — Photo Frame media pipeline
+These remain useful but should not displace release truth, security,
+reliability and simplification work:
 
-Status: released and deployed.
-Delivery: Bridge/HACS/Firmware `0.18.0`.
-
-- JPEG, PNG, WebP, and BMP upload and conversion.
-- E-ink crop, rotation, resize, and dithering previews.
-- Albums, shuffle, schedules, captions, and Home Assistant media sources.
-
-## v0.19 — Fleet recovery and OTA observability
-
-Status: released and deployed.
-Delivery: Bridge/HACS/Firmware `0.19.0`.
-
-- Cancel queued or already-delivered firmware commands safely.
-- Retry failed updates with bounded attempts and configurable backoff.
-- Reset a blocked rollout while preserving a bounded audit history.
-- Reconcile a USB-recovered device automatically after its next check-in.
-- Report preflight, download, validation, flash, reboot, and failure progress.
-- Mirror and verify release firmware on the local Bridge before device delivery.
-
-## v0.20 — Device health and screen history
-
-Status: released and deployed.
-Delivery: Bridge/HACS `0.20.0`; existing shared firmware `0.19.0` is compatible.
-
-- HACS-optional App-only installation using complete MQTT Discovery.
-- Duplicate-safe `hacs`, `mqtt`, and temporary `both` migration modes.
-- Fleet Health workspace with battery, SD, Home Assistant, Wi-Fi, power,
-  firmware, page, and next-wake status.
-- Last rendered screen, bounded recent screen history, and exact one-shot
-  screen resend.
-- Automatic stale-update release with preserved device and rollout evidence.
-
-Remaining health work is carried forward: reset/crash reasons, Wi-Fi trend
-history, battery runtime prediction, and configurable maintenance windows.
-
-## v0.21 — Six-device Fleet Canvas
-
-Status: queued.
-
-- 2 × 3, 1 × 6, and custom X3/X4 arrangements.
-- Server-side image tiling and synchronized queued refresh.
-- Canvas health, partial-update recovery, and mixed-model calibration.
-
-## v0.22 — Security and release channels
-
-Status: queued.
-
-- Per-device credentials and signed firmware manifests.
-- Stable, beta, and development release channels.
-- Boot health checks and automatic rollback.
-
-## v0.23 — Transfer optimization
-
-Status: released and deployed.
-Delivery: Bridge/Firmware `0.23.0`.
-
-- Zero-byte unchanged-screen responses only when the device confirms that the
-  matching image is physically cached.
-- PNG Photo Frame transport with automatic BMP conversion on X3/X4.
-- Backwards-compatible full-image delivery for firmware before `0.23.0`.
-- Home Assistant diagnostics for transfer format, delivered bytes, bytes
-  saved, and percentage saved.
-
-## v0.24 — Advanced fleet health
-
-Status: implemented, pending release and canary deployment.
-Delivery: Bridge/Firmware `0.24.0`.
-
-- Device boot identifiers and reset reasons for power, software, panic,
-  watchdog, deep-sleep, brownout, external, and unknown resets.
-- Bounded check-in, reset, battery, Wi-Fi, SD, memory, and uptime history.
-- Battery drain/runtime estimates, Wi-Fi trend, missed-check-in detection,
-  repeated SD failure counters, and problem-reset diagnostics.
-- Fleet Health battery and Wi-Fi sparklines plus complete MQTT Discovery
-  diagnostic and problem entities.
-- Optional timezone-aware overnight OTA maintenance windows with a
-  configurable USB-powered override.
-- Automatic repair of stale OTA acknowledgement evidence.
-
-## v0.33 — Fleet Management and FlexHub control
-
-Status: implemented, pending release deployment.
-Delivery: Bridge App and FlexHub `0.33.0`; X3/X4 firmware `0.32.0` remains compatible.
-
-- Dedicated Fleet Management workspace alongside Dashboard Studio.
-- Reusable custom power and wake policy builder, plus built-in Battery Saver,
-  Balanced, and USB Kiosk profiles.
-- Policy, scope, default application, dashboard, album, and delivery controls.
-- Selected-device policy targeting with desired/reported revision and
-  acknowledgement status for every X3/X4.
-- Confirmed, canary-first OTA plans for all devices, X3, X4, or a selected set.
-- Automatic bounded continuation after successful canary and device reboot
-  acknowledgement, with progress, blocker, retry, cancellation, and reset UI.
-- Persistent FlexHub connection and a Studio health workspace for network,
-  storage, receiver fleet, and Meshtastic/MQTT status.
-- Home Assistant MQTT discovery for the SenseCAP FlexHub.
-- Scrollable 24-device managed-display list on the SenseCAP touchscreen.
-- FlexHub status schema 4 with Wi-Fi, memory, uptime, Meshtastic node, and
-  Meshtastic MQTT diagnostics.
-
-## v0.34 — Mixed Content and on-device Quick Menu
-
-Status: implemented and locally validated, pending canary deployment.
-Delivery: Bridge App and shared X3/X4 firmware `0.34.0`; existing dashboards,
-Reader, OpenDisplay, Photo Frame, TRMNL, fleet policy, and OTA paths are retained.
-
-- Reusable Mixed Content channels combine the dashboard profile already
-  assigned to each device with Message, Quote, and RSS/Atom pages.
-- Message screens support large text, normal/important/critical emphasis,
-  footers, and optional QR links.
-- Quote screens support built-in offline quotes or a custom collection, with a
-  stable quote for each day or explicit random selection.
-- News screens support digest, headline, and summary layouts, bounded downloads,
-  caching, stale-on-error delivery, attribution, and Australian source presets.
-- Dashboard Studio can create, reorder, preview, assign, unassign, and refresh
-  content channels without requiring YAML or SD-card files.
-- Holding Confirm in Home Assistant mode opens the device Quick Menu; short
-  Confirm refreshes, directional buttons retain page navigation, and long
-  Confirm is reserved in the Studio action mapper.
-- The device and Bridge negotiate mixed-content support and exchange page title,
-  type, position, and selection metadata for later fleet diagnostics.
-
-## v0.35 — Meshtastic Console and alert routing
-
-Status: implemented and locally validated, pending SenseCAP canary deployment.
-Delivery: Bridge App, HACS integration, and FlexHub platform `0.35.0`; shared
-X3/X4 firmware `0.34.1` remains compatible and does not require a reflash.
-
-- Live, filtered Meshtastic inbox with direct/broadcast, channel, sender,
-  timestamp, RSSI, SNR, direction, packet, and delivery-state detail.
-- Broadcast and direct-message composer with node/channel selection, exact
-  220-byte UTF-8 validation, optional direct acknowledgement, rate limiting,
-  and honest queued/sent/acknowledged/failed states.
-- Bounded on-hub message history and Bridge-side cursors prevent unbounded RAM
-  growth and duplicate Home Assistant events.
-- Persistent quick replies and incoming prefix rules; a rule such as `ALERT:`
-  can create a large message screen for a selected X3/X4 scope.
-- Direct receiver scan, delivery, retry, and cancel controls in the same Studio
-  workspace.
-- Native Home Assistant send action, event bus event, event entity, last-message
-  sensors, and resettable unread counter.
-- Equivalent App-only MQTT Discovery message sensors, event, broadcast control,
-  and unread-reset control.
-- FlexHub PIN protection, bounded request bodies and history, safe node IDs,
-  redirect rejection, and transmit throttling at the browser, Bridge, and hub
-  boundaries.
-- Reboot/session-aware read cursors suppress retained-history replays; the
-  bounded plaintext hub history is disclosed, and LoRa fleet commands remain
-  disabled unless explicitly enabled for locally favourited nodes.
+- Multi-device Fleet Canvas layouts and synchronized refresh.
+- Stable, beta and development firmware channels after signed-manifest and
+  rollback foundations exist.
+- Additional LVGL or e-paper families only through the documented architecture
+  admission process.
+- Battery prediction and richer fleet trend analysis after telemetry quality
+  and retention semantics are defined.

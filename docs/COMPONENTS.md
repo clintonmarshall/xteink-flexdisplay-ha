@@ -13,3 +13,8 @@
 Keep Bridge, Studio and the Home Assistant integration in this monorepo. Split
 a component only when it has an independent owner, CI pipeline and release
 lifecycle, not merely because it has a separate product name.
+
+The external repositories retain source and build ownership for their
+artifacts. This platform's `release-manifest.json` records the exact bytes it
+packages and their immutable provenance; it does not transfer firmware
+ownership into this repository.

@@ -35,11 +35,14 @@ publish releases directly from a developer checkout. See
 `docs/ARCHITECTURE.md`, `docs/OPERATIONS.md`, and `docs/RELEASE.md` for the
 durable workflow.
 
-Release promotion, Forgejo publication, downstream GitHub publication, and
-Home Assistant deployment are currently blocked until their reviewed Runner
-workflows, isolation, and fixed-purpose credential paths are complete and
-verified. The checked-in release workflows intentionally fail closed and are
-not evidence that publication or deployment is available.
+The current coordinated source, publication, artifact, and deployment
+boundaries are recorded in `release-manifest.json` and rendered for people in
+[`docs/RELEASE_STATUS.md`](docs/RELEASE_STATUS.md). The manifest deliberately
+keeps a published Forgejo release, downstream GitHub compatibility release,
+Home Assistant deployment, Android publication, firmware rollout, and physical
+device behaviour as separate states. It is a checked-in evidence snapshot, not
+a substitute for rechecking live systems before an operational claim or
+change.
 
 This is the Home Assistant component of the wider FlexDisplay Platform:
 

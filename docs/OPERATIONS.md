@@ -161,10 +161,12 @@ and the 480 × 800 logical preview does not establish firmware compatibility.
 
 ## Releases
 
-Follow `docs/RELEASE.md`. Publishing and deployment run only through reviewed
-trusted Forgejo Runner workflows from a protected immutable tag at the exact
-tested commit. If that path is absent or unverified, the release is blocked;
-there is no manual fallback. After the Forgejo release succeeds, confirm its
+Follow `docs/RELEASE.md`. Update `release-manifest.json` first, regenerate
+`docs/RELEASE_STATUS.md`, and keep every distribution boundary honest when its
+evidence is absent or unverified. Publishing and deployment run only through
+reviewed trusted Forgejo Runner workflows from a protected immutable tag at the
+exact tested commit. If that path is absent or unverified, the release is
+blocked; there is no manual fallback. After the Forgejo release succeeds, confirm its
 controlled mirror copied the same tag and commit. A reviewed authenticated
 post-publication handoff may then trigger the downstream GitHub compatibility
 release workflow. A bare GitHub tag is insufficient for HACS, and a manual or

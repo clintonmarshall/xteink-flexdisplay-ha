@@ -44,3 +44,11 @@ The Bridge, Studio, and integration share one platform version because Studio
 is shipped inside the Bridge and the integration calls the Bridge API. The
 Echo Spot receiver, FlexHub firmware, and X3/X4 firmware use independent
 versions recorded in `docs/COMPATIBILITY.md`.
+
+`release-manifest.json` is the coordinated release source of truth. Runtime
+package markers, the compatibility matrix, Android source metadata, packaged
+artifact defaults, and generated `docs/RELEASE_STATUS.md` must agree with it.
+The distribution entries remain separate because a commit, protected tag,
+Forgejo release, GitHub compatibility release, Home Assistant deployment,
+Android installation, firmware rollout and physical result are different
+states with different evidence.

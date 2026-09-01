@@ -6,10 +6,14 @@
 2. Confirm all intended feature pull requests are merged in Forgejo.
 3. Record the exact full commit SHA intended for release and every included
    pull request. Do not substitute a later commit without repeating validation.
-4. Choose the semantic version and update
-   `flexdisplay_bridge/CHANGELOG.md`.
-5. Update the four platform version markers listed in `AGENTS.md` and the
-   FlexDisplay platform row in `docs/COMPATIBILITY.md`.
+4. Update `release-manifest.json` first. Record the semantic platform version,
+   intended immutable tag and exact candidate commit, release classification,
+   Android source metadata, distribution states, and every packaged artifact.
+   Use `unverified` for a boundary that has not been checked; do not infer a
+   deployment or publication from source state.
+5. Update `flexdisplay_bridge/CHANGELOG.md`, the four runtime platform version
+   markers listed in `AGENTS.md`, and the FlexDisplay platform row in
+   `docs/COMPATIBILITY.md` to mirror the manifest.
 6. For every protocol or minimum-version change, update the compatibility
    matrix with the new minimum and the fallback behavior for older clients.
 7. If the Android receiver changes, make `versionName` match both receiver rows
@@ -24,15 +28,21 @@
    tag.
 10. Classify the release explicitly as either software-only (the packaged
    device-firmware bytes are unchanged) or firmware-bearing.
-11. For changed packaged firmware, record the authoritative source repository,
-   exact immutable commit or tag, byte size, SHA-256, durable known-good
-   recovery artifact, and coordinated release-manifest commit. A filename or
-   version string is not provenance.
+11. Run `python3 scripts/render_release_status.py` and review the resulting
+   `docs/RELEASE_STATUS.md`. Never edit the generated status document directly.
+12. For changed packaged firmware, replace its partial manifest provenance
+   with the authoritative source repository, exact immutable commit or tag,
+   byte size, SHA-256, durable known-good recovery artifact and checksum, and
+   USB-canary evidence reference. The release validator rejects changed
+   firmware unless the release is classified `firmware-bearing` and every
+   changed artifact has complete verified provenance. A filename or version
+   string is not provenance.
 
 ## 2. Verify
 
 ```bash
 python3 scripts/check_android_release_metadata.py
+python3 scripts/render_release_status.py --check
 python3 scripts/check_release_metadata.py --release X.Y.Z
 python3 -m unittest discover -s scripts/tests -v
 python3 -m compileall -q flexdisplay_bridge/flexdisplay_bridge \

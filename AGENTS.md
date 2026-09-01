@@ -115,13 +115,15 @@ and release are blocked.
   `rook_receiver/release/companion-release.json` synchronized, and strictly
   increase `versionCode` for every production-signed Companion APK. This does
   not establish a signed kiosk publication channel.
-- A changed packaged firmware binary must record its authoritative source
-  repository, exact immutable commit or tag, byte size, SHA-256, durable
-  known-good recovery artifact, USB-canary evidence, and coordinated
-  release-manifest commit. Until a checked-in manifest schema and validator are
-  implemented, record this as manually reviewed release evidence and keep
-  publication blocked if any field cannot be verified. Do not infer provenance
-  from a filename or version string.
+- `release-manifest.json` is the canonical coordinated release record. Its
+  schema and validator bind the platform version, Android source metadata,
+  distribution boundaries, packaged artifact bytes, runtime defaults, and
+  generated `docs/RELEASE_STATUS.md` snapshot. A changed packaged firmware
+  binary must record its authoritative source repository, exact immutable
+  commit or tag, byte size, SHA-256, durable known-good recovery artifact and
+  checksum, and USB-canary evidence reference. The release gate must reject
+  changed firmware unless that provenance is complete and verified. Do not
+  infer provenance from a filename or version string.
 - Only a release task may bump versions, update the changelog, merge the
   release, create a `vX.Y.Z` tag, or publish release assets.
 - Sign Companion release assets only on the protected Forgejo publication

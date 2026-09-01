@@ -48,9 +48,16 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
             "check_android_release_metadata",
             "check_release_metadata",
             "forgejo_release",
+            "render_release_status",
             "verify_android_release",
         ):
             self.assertIn(script, self.workflow)
+        for path in (
+            "release-manifest\\.json",
+            "RELEASE_STATUS\\.md",
+            "release-manifest\\.schema\\.json",
+        ):
+            self.assertIn(path, self.workflow)
         self.assertIn('[ "$release_infra" = "true" ]', self.workflow)
         self.assertIn('echo "release_infra=$release_infra"', self.workflow)
 

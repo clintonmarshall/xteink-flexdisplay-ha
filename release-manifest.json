@@ -1,0 +1,92 @@
+{
+  "$schema": "docs/release-manifest.schema.json",
+  "schema_version": 1,
+  "recorded_at": "2026-09-01",
+  "platform": {
+    "version": "0.49.0",
+    "release_tag": "v0.49.0",
+    "release_commit": "e0bf71c133d88bebf5d5b23d2868c1412f680a6c",
+    "released_at": "2026-08-19T14:36:15+10:00",
+    "classification": "software-only"
+  },
+  "android": {
+    "source_version": "0.5.0",
+    "version_code": 6,
+    "companion_version": "0.5.0-companion"
+  },
+  "distribution": {
+    "forgejo_release": {
+      "state": "published",
+      "evidence": "Authoritative Forgejo tag v0.49.0 and release at e0bf71c133d88bebf5d5b23d2868c1412f680a6c"
+    },
+    "github_compatibility_release": {
+      "state": "published",
+      "evidence": "https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/tag/v0.49.0"
+    },
+    "home_assistant_deployment": {
+      "state": "unverified",
+      "evidence": null
+    },
+    "android_companion": {
+      "state": "unpublished",
+      "evidence": "Source release candidate only; no production-signed Companion APK is recorded"
+    },
+    "device_firmware_rollout": {
+      "state": "unverified",
+      "evidence": null
+    },
+    "physical_device_behavior": {
+      "state": "unverified",
+      "evidence": null
+    }
+  },
+  "packaged_artifacts": [
+    {
+      "id": "x3_x4_firmware",
+      "label": "X3/X4 packaged firmware",
+      "path": "flexdisplay_bridge/firmware/firmware.bin",
+      "config_prefix": "firmware",
+      "version": "1.5.0-flexdisplay.0.39.0",
+      "size": 5976336,
+      "sha256": "eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7",
+      "provenance": {
+        "status": "partial",
+        "source_repository": "clintonmarshall/xteink-flexdisplay",
+        "source_revision": "25545971633bc5dfbe5d5699c6bf44283c9ab3b9",
+        "recovery_artifact_reference": null,
+        "recovery_artifact_sha256": null,
+        "usb_canary_evidence_reference": null,
+        "unverified_fields": [
+          "artifact-to-source build record",
+          "durable recovery artifact reference",
+          "durable recovery artifact SHA-256",
+          "USB canary evidence reference"
+        ]
+      }
+    },
+    {
+      "id": "note4_firmware",
+      "label": "Note 4 packaged firmware",
+      "path": "flexdisplay_bridge/firmware/note4.bin",
+      "config_prefix": "note4_firmware",
+      "version": "1.2.2-voice-remote",
+      "size": 2730112,
+      "sha256": "1619c9788c050038d28e0f927b19d830ce7de18694ae1b407a639bcbd013ef18",
+      "provenance": {
+        "status": "partial",
+        "source_repository": "clintonmarshall/flexdisplay-note4",
+        "source_revision": null,
+        "recovery_artifact_reference": null,
+        "recovery_artifact_sha256": null,
+        "usb_canary_evidence_reference": null,
+        "unverified_fields": [
+          "source revision",
+          "artifact-to-source build record",
+          "durable recovery artifact reference",
+          "durable recovery artifact SHA-256",
+          "USB canary evidence reference"
+        ]
+      }
+    }
+  ]
+}
