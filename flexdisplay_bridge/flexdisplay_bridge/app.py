@@ -22,6 +22,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from PIL import Image
 
 from . import __version__
+from .api.flexhub import FlexHubRouterDependencies, create_flexhub_router
 from .button_actions import (
     BUTTONS as CONFIGURABLE_BUTTONS,
 )
@@ -107,7 +108,6 @@ from .lvgl_manifest import (
 )
 from .meshtastic_console import (
     MeshtasticConsoleStore,
-    MeshtasticConsoleValidationError,
 )
 from .mqtt_service import MqttService
 from .photo_frame import (
@@ -322,10 +322,6 @@ FIRMWARE_PROGRESS_STAGES = {
     "failed",
     "cancelled",
 }
-
-
-def _flexhub_proxy_status(error: FlexHubClientError) -> int:
-    return error.status_code if error.status_code in {409, 413, 429, 503} else 502
 
 
 def _valid_external_usb_evidence(device_id: str, evidence: Any) -> bool:
@@ -4277,132 +4273,6 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "X-FlexDisplay-Camera-Facing": str(metadata["facing"]),
             },
         )
-
-    @app.get("/api/v1/flexhub")
-    def flexhub_status(request: Request, refresh: bool = False) -> dict[str, Any]:
-        authorize(request)
-        summary = (
-            flexhub.poll() if refresh and flexhub.configured else flexhub.summary()
-        )
-        mqtt.publish_flexhub(summary)
-        return summary
-
-    @app.put("/api/v1/flexhub/settings")
-    def configure_flexhub(payload: dict[str, Any], request: Request) -> dict[str, Any]:
-        authorize(request)
-        try:
-            flexhub.configure(
-                str(payload.get("url") or ""),
-                str(payload.get("access_pin") or ""),
-            )
-        except FlexHubClientError as err:
-            raise HTTPException(status_code=400, detail=str(err)) from err
-        summary = flexhub.poll() if flexhub.configured else flexhub.summary()
-        mqtt.publish_flexhub(summary)
-        return summary
-
-    @app.post("/api/v1/flexhub/refresh")
-    def refresh_flexhub(request: Request) -> dict[str, Any]:
-        authorize(request)
-        summary = flexhub.poll()
-        mqtt.publish_flexhub(summary)
-        return summary
-
-    @app.get("/api/v1/flexhub/meshtastic/messages")
-    def flexhub_meshtastic_messages(
-        request: Request,
-        after: int = 0,
-        limit: int = 30,
-        session_id: int | None = None,
-        query: str = "",
-        direction: str = "",
-        channel: int | None = None,
-        node: str = "",
-    ) -> dict[str, Any]:
-        authorize(request)
-        try:
-            result, observed = flexhub.fetch_messages(
-                after=after,
-                limit=limit,
-                session_id=session_id,
-                query=query,
-                direction=direction,
-                channel=channel,
-                node=node,
-            )
-        except FlexHubClientError as err:
-            status = (
-                400 if str(err).startswith("Meshtastic") else _flexhub_proxy_status(err)
-            )
-            raise HTTPException(status_code=status, detail=str(err)) from err
-        processed = process_meshtastic_messages(observed)
-        return {
-            **result,
-            "bridge": {
-                "new_messages": len(processed),
-                "console": flexhub.summary()["meshtastic_console"],
-            },
-        }
-
-    @app.get("/api/v1/flexhub/meshtastic/nodes")
-    def flexhub_meshtastic_nodes(request: Request) -> dict[str, Any]:
-        authorize(request)
-        try:
-            return flexhub.meshtastic_nodes()
-        except FlexHubClientError as err:
-            raise HTTPException(
-                status_code=_flexhub_proxy_status(err), detail=str(err)
-            ) from err
-
-    @app.post("/api/v1/flexhub/meshtastic/messages")
-    def send_flexhub_meshtastic_message(
-        payload: dict[str, Any], request: Request
-    ) -> dict[str, Any]:
-        authorize(request)
-        try:
-            normalized = FlexHubClient.normalize_meshtastic_message(payload)
-        except FlexHubClientError as err:
-            raise HTTPException(status_code=400, detail=str(err)) from err
-        try:
-            result = flexhub.send_meshtastic_message(normalized)
-        except FlexHubClientError as err:
-            raise HTTPException(
-                status_code=_flexhub_proxy_status(err), detail=str(err)
-            ) from err
-        return result
-
-    @app.post("/api/v1/flexhub/actions/{action}")
-    def run_flexhub_action(action: str, request: Request) -> dict[str, Any]:
-        authorize(request)
-        try:
-            return flexhub.action(action)
-        except FlexHubClientError as err:
-            status = (
-                400
-                if str(err) == "Unsupported FlexHub action"
-                else _flexhub_proxy_status(err)
-            )
-            raise HTTPException(status_code=status, detail=str(err)) from err
-
-    @app.get("/api/v1/flexhub/meshtastic/settings")
-    def flexhub_meshtastic_settings(request: Request) -> dict[str, Any]:
-        authorize(request)
-        return meshtastic_console.payload()
-
-    @app.put("/api/v1/flexhub/meshtastic/settings")
-    def save_flexhub_meshtastic_settings(
-        payload: dict[str, Any], request: Request
-    ) -> dict[str, Any]:
-        authorize(request)
-        try:
-            return meshtastic_console.replace(payload)
-        except MeshtasticConsoleValidationError as err:
-            raise HTTPException(status_code=400, detail=str(err)) from err
-
-    @app.post("/api/v1/flexhub/meshtastic/read")
-    def mark_flexhub_meshtastic_read(request: Request) -> dict[str, Any]:
-        authorize(request)
-        return {"meshtastic_console": flexhub.mark_meshtastic_read()}
 
     @app.get("/api/v1/firmware/current.bin", name="firmware_binary")
     def firmware_binary() -> FileResponse:
@@ -8972,6 +8842,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             uncompressed_bytes=one_bit_bytes,
         )
 
+    app.include_router(
+        create_flexhub_router(
+            FlexHubRouterDependencies(
+                flexhub=flexhub,
+                mqtt=mqtt,
+                meshtastic_console=meshtastic_console,
+                authorize=authorize,
+                process_messages=process_meshtastic_messages,
+            )
+        )
+    )
     return app
 
 

@@ -52,3 +52,21 @@ The distribution entries remain separate because a commit, protected tag,
 Forgejo release, GitHub compatibility release, Home Assistant deployment,
 Android installation, firmware rollout and physical result are different
 states with different evidence.
+
+## Bridge module boundaries
+
+`flexdisplay_bridge.app.create_app()` is the composition root. It owns service
+construction, lifecycle tasks, shared authorization and compatibility state;
+HTTP concerns move behind router factories under `flexdisplay_bridge.api`.
+Router dependencies are passed explicitly rather than imported from a global
+application instance, while the existing `app.state` service aliases remain a
+supported inspection and test seam.
+
+Phase 1 extracts the complete FlexHub and Meshtastic HTTP surface into
+`flexdisplay_bridge.api.flexhub`. Its public paths, authorization boundary,
+response contracts and external FlexHub ownership remain unchanged. Later
+phases can move devices, Android receivers, Studio/content, fleet, firmware and
+diagnostics in bounded slices using the same composition pattern. A concern is
+only considered extracted when its route inventory and behavior tests move
+with it; creating pass-through wrapper modules does not count as
+modularisation.
