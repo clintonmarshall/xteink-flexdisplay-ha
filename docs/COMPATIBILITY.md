@@ -14,11 +14,19 @@ belong in inventory or release evidence, never in this table.
 | Colour/LVGL receiver contract | v1 | Bridge and Studio contract available; JC3636 receiver firmware is separately versioned and is not packaged by the Platform release |
 | X3/X4 packaged firmware | 1.5.0-flexdisplay.0.39.0 | Official Home Assistant OpenDisplay discovery and image upload; X3/X4 USB, BLE upload, persistent receiver, refresh and reconnect canaries passed |
 | X4 Pro external firmware | Not released | Family identity/admission contract is merged on protected `main` in external Forgejo repository `clintonmarshall/xteink-flexdisplay` at exact commit `de032ebac1f68f743c43ac076cc1ff3e24576092`, path `firmware/docs/flex/X4_PRO_HARDWARE_ADMISSION.md`. The correctly bound hardware is S3 with 16 MiB flash and 8 MiB PSRAM and uses artifact family `x4pro_s3`, but this platform release contains no compatible manifest or artifact and advertises no install action. Any non-S3 or incomplete report remains read-only. |
+| TOP52810M-D01 stock BLE candidate | Not admitted | Architecture-only 128 x 296 black/white/red compact tag. One `MS136F6 V1.0` unit has physical protocol evidence, but portable fleet identity and Home Assistant proxy transport remain admission gates. It is not OpenDisplay and exposes no upload, firmware, provisioning, policy, reset or command action. |
 | Note 4 packaged firmware | 1.2.2-voice-remote | Distributed from the Bridge package |
 | Home Assistant | No minimum declared | Bridge App and integration; each release must record the exact tested Home Assistant Core version in its release evidence |
 
 Protocol changes must document both the minimum compatible device version and
 the fallback behavior for older devices.
+
+The TOP52810M-D01 architecture candidate is documented in
+[`TOP52810_STOCK_BLE_ARCHITECTURE.md`](TOP52810_STOCK_BLE_ARCHITECTURE.md).
+Its verified stock protocol is deliberately separate from OpenDisplay. Older
+platforms and unknown revisions must treat it as an unknown read-only device;
+the compatibility row is not release admission or authorization to connect or
+write.
 
 Only device families represented in this matrix and admitted through the
 architecture process are supported release targets. A newly observed family

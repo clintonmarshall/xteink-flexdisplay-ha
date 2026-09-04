@@ -8,6 +8,7 @@
 | Android receiver | `rook_receiver/` | Receiver | Echo Spot 480 × 480 and Echo Show 5 960 × 480 Android kiosk, touch, alerts and telemetry |
 | FlexHub | External `xteink-flexhub` repository | Firmware | Always-on relay and local fleet transport |
 | X3/X4 firmware | External `xteink-flexdisplay` repository | Firmware | Embedded e-paper runtime |
+| TOP52810 stock BLE candidate | Vendor stock firmware; protocol adapter architecture in this platform | External device | Compact 128 x 296 black/white/red tag; read-only until identity and transport admission |
 | Factory/release kit | External `xteink-flexdisplay-release` repository | Release train | Coordinated images and provisioning artifacts |
 
 Keep Bridge, Studio and the Home Assistant integration in this monorepo. Split
@@ -18,3 +19,7 @@ The external repositories retain source and build ownership for their
 artifacts. This platform's `release-manifest.json` records the exact bytes it
 packages and their immutable provenance; it does not transfer firmware
 ownership into this repository.
+
+The TOP52810 candidate does not use or extend the X3/X4 OpenDisplay transport.
+See [`TOP52810_STOCK_BLE_ARCHITECTURE.md`](TOP52810_STOCK_BLE_ARCHITECTURE.md)
+for its proposed component split and admission gates.

@@ -20,6 +20,7 @@ flowchart LR
     A --> B[FlexDisplay Bridge and Studio]
     B --> X[X3 and X4]
     B --> N[Note 4]
+    B -. architecture candidate .-> T[TOP52810 stock BLE tag]
     B --> S[Echo Spot receiver]
     B --> F[FlexHub API]
 ```
@@ -70,3 +71,14 @@ diagnostics in bounded slices using the same composition pattern. A concern is
 only considered extracted when its route inventory and behavior tests move
 with it; creating pass-through wrapper modules does not count as
 modularisation.
+
+## Compact stock BLE tags
+
+The TOP52810M-D01 stock-firmware candidate is a distinct compact e-paper tag
+family, not an OpenDisplay receiver. Its proposed ownership, stable-identity
+gate, black/white/red rendering limitations, periodic BLE delivery contract,
+security boundary and recovery behavior are defined in
+[`TOP52810_STOCK_BLE_ARCHITECTURE.md`](TOP52810_STOCK_BLE_ARCHITECTURE.md).
+Until those admission gates are complete, the family remains external and
+read-only and receives no upload, firmware, provisioning, policy or reset
+surface.
