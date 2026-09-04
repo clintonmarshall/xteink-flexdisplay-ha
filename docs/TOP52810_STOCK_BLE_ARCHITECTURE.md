@@ -236,8 +236,10 @@ actions or establish compatibility for another unit.
    reproduces the physically verified 128 x 296 black/white/red plane hashes
    and complete 44-write plan hashes. It has no Bluetooth or device-I/O path
    and does not admit the family for upload.
-4. **Compact rendering:** add a built-in preview/profile with unsafe-region
-   metadata and deterministic black/white/red output.
+4. **Compact rendering (complete offline):** the built-in Studio profile and
+   native 128 x 296 renderer expose unsafe-region metadata, deterministic
+   black/white/red output and the expected physical stock-overlay preview.
+   Receiver and upload routes remain explicitly unavailable.
 5. **One-tag transport canary:** implement Home Assistant-owned BLE delivery,
    durable Bridge job states, exact response checks and one named hardware
    canary. This phase requires a fresh device-write confirmation.

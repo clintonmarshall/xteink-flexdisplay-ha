@@ -1045,7 +1045,7 @@
         <div class="sidebar-footer">
           <div class="section-head"><h2>Display hardware</h2><span class="rule-badge">LVGL</span></div>
           <button id="openDisplayProfiles" style="width:100%">Open Profile Builder</button>
-          <p class="small muted" style="margin:10px 0 0">Add bounded colour/LVGL display profiles to Studio. Built-in X3, X4, and JC3636 hardware remains protected.</p>
+          <p class="small muted" style="margin:10px 0 0">Add bounded colour/LVGL display profiles to Studio. Built-in X3, X4, JC3636, and compact stock-BLE hardware remains protected.</p>
         </div>
       </div>
           </aside>
@@ -1064,6 +1064,7 @@
             <button data-model="X3">X3</button>
             <button data-model="X4" class="active">X4</button>
             <button data-model="X4_PRO">X4 Pro</button>
+            <button data-model="top52810m_d01_stock">TOP 2.9</button>
             <button data-model="JC3636">JC3636</button>
             <button data-model="N4">N4</button>
             <button data-model="ROOK">Spot</button>
@@ -1096,6 +1097,7 @@
         <span id="canvasDimensions">Canvas 480 × 800</span>
         <span>Changes preview automatically</span>
       </div>
+      <div id="previewConstraint" class="helper-callout" hidden><strong>Stock firmware limitation:</strong> the five visible hatch bands are forced into the black plane. Keep black or white detail out of those areas; solid red masks them.</div>
           </main>
 
           <aside class="inspector">
@@ -2074,6 +2076,7 @@
       X3: {id:"X3", display_name:"XTEINK X3", width:528, height:792, shape:"rect", technology:"eink", touch:false, lvgl:false},
       X4: {id:"X4", display_name:"XTEINK X4", width:480, height:800, shape:"rect", technology:"eink", touch:false, lvgl:false},
       JC3636: {id:"JC3636", display_name:"JC3636W518EN", width:360, height:360, shape:"round", technology:"color", touch:true, lvgl:true},
+      top52810m_d01_stock: {id:"top52810m_d01_stock", display_name:"TOP52810M-D01 (stock BLE)", width:128, height:296, shape:"rect", technology:"eink", color_depth:2, pixel_format:"BWR1", touch:false, lvgl:false, arbitrary_full_canvas:false, transport:"stock_ble"},
       N4: {id:"N4", display_name:"Zectrix Note 4", width:400, height:300, shape:"rect", technology:"eink", touch:false, lvgl:false},
       ROOK: {id:"ROOK", display_name:"Echo Spot", width:480, height:480, shape:"round", technology:"color", touch:true, lvgl:false},
       CHECKERS: {id:"CHECKERS", display_name:"Echo Show 5", width:960, height:480, shape:"rect", technology:"color", touch:true, lvgl:false},
@@ -2199,6 +2202,10 @@
       ["JC3636W518EN", "JC3636"],
       ["GUITIONJC3636W518", "JC3636"],
       ["TAICHIPI", "JC3636"],
+      ["TOP52810M", "top52810m_d01_stock"],
+      ["TOP52810MD01", "top52810m_d01_stock"],
+      ["TOP52810MD01STOCK", "top52810m_d01_stock"],
+      ["MS136F6V10", "top52810m_d01_stock"],
       ["N4", "N4"],
       ["NOTE4", "N4"],
       ["ZECTRIXNOTE4", "N4"],
@@ -2257,7 +2264,11 @@
 
     function isColourModel(model = state.model) {
       const spec = modelSpec(model);
-      return spec.technology === "color" || Number(spec.color_depth || 1) > 1 || Boolean(spec.lvgl);
+      return spec.technology === "color" || Boolean(spec.lvgl);
+    }
+
+    function isTop52810Model(model = state.model) {
+      return modelSpec(model).id === "top52810m_d01_stock";
     }
 
     function isLvglModel(model = state.model) {
@@ -2270,8 +2281,8 @@
     }
 
     function renderModelSelector() {
-      const order = {X3: 0, X4: 1, JC3636: 2, N4: 3, ROOK: 4, CHECKERS: 5};
-      const shortLabels = {ROOK: "Spot", CHECKERS: "Show 5"};
+      const order = {X3: 0, X4: 1, top52810m_d01_stock: 2, JC3636: 3, N4: 4, ROOK: 5, CHECKERS: 6};
+      const shortLabels = {top52810m_d01_stock: "TOP 2.9", ROOK: "Spot", CHECKERS: "Show 5"};
       const models = Object.values(state.models).sort((left, right) =>
         (order[left.id] ?? 99) - (order[right.id] ?? 99) || left.id.localeCompare(right.id)
       );
@@ -2808,11 +2819,16 @@
         ? "Custom colour profile"
         : "New custom profile";
       const colour = values.technology === "color";
-      $("#displayProfileKindBadge").textContent = colour
+      const compactBwr = values.pixel_format === "BWR1";
+      $("#displayProfileKindBadge").textContent = compactBwr
+        ? "E-paper · black/white/red"
+        : colour
         ? `Colour · ${values.lvgl ? "LVGL" : "bitmap"}`
         : "E-paper · bitmap";
       $("#displayProfileKindBadge").classList.toggle("builtin", builtin);
-      $("#displayProfileContract").textContent = colour
+      $("#displayProfileContract").textContent = compactBwr
+        ? "Stock BLE preview · five black-plane hatch bands"
+        : colour
         ? `Colour display · ${values.lvgl ? "LVGL UI" : "static bitmap"}`
         : "Monochrome e-paper · static bitmap";
       syncDisplayTouchController();
@@ -6474,9 +6490,12 @@
       $("#canvasDimensions").textContent = `Canvas ${spec.width} × ${spec.height}`;
       $("#previewTechnology").textContent = spec.lvgl
         ? "Live LVGL v1 preview · value, control, and gauge cards"
+        : isTop52810Model(selectedModel)
+        ? "Compact stock-BLE e-paper preview · physical hatch bands shown"
         : isColourModel(selectedModel)
         ? "Live colour receiver preview"
         : "Live e-ink preview";
+      $("#previewConstraint").hidden = !isTop52810Model(selectedModel);
       if (state.profile) renderInspector();
       renderHeaderStatus();
       schedulePreview();

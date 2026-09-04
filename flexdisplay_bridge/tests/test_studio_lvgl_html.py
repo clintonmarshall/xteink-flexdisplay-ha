@@ -48,6 +48,22 @@ def test_studio_exposes_round_jc3636_preview_model() -> None:
     assert studio.count(".device-frame.round {") == 1
 
 
+def test_studio_exposes_honest_top52810_stock_preview() -> None:
+    studio = _studio()
+
+    assert 'data-model="top52810m_d01_stock"' in studio
+    assert 'display_name:"TOP52810M-D01 (stock BLE)"' in studio
+    assert 'pixel_format:"BWR1"' in studio
+    assert 'arbitrary_full_canvas:false' in studio
+    assert '["TOP52810MD01", "top52810m_d01_stock"]' in studio
+    assert 'function isTop52810Model(model = state.model)' in studio
+    assert "Compact stock-BLE e-paper preview · physical hatch bands shown" in studio
+    assert 'id="previewConstraint"' in studio
+    assert "the five visible hatch bands are forced into the black plane" in studio
+    assert '$("#previewConstraint").hidden = !isTop52810Model(selectedModel);' in studio
+    assert '"Stock BLE preview · five black-plane hatch bands"' in studio
+
+
 def test_studio_serializes_only_bounded_lvgl_screen_controls() -> None:
     studio = _studio()
 

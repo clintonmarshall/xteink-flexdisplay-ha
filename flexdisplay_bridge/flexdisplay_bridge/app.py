@@ -126,6 +126,7 @@ from .rook_interactions import (
 )
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
+from .top52810_renderer import render_compact_preview
 from .voice_assistant import (
     MAX_AUDIO_BYTES,
     HomeAssistantVoiceClient,
@@ -6132,7 +6133,28 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             if model == "CHECKERS"
             else (480, 800)
         )
-        if requested_display is not None and requested_display.is_color:
+        top52810_preview = bool(
+            requested_display
+            and requested_display.id == "top52810m_d01_stock"
+        )
+        if top52810_preview:
+            try:
+                width = int(payload.get("width") or default_width)
+                height = int(payload.get("height") or default_height)
+            except (TypeError, ValueError) as err:
+                raise HTTPException(
+                    status_code=400, detail="Preview dimensions must be integers"
+                ) from err
+            if (
+                isinstance(payload.get("width"), bool)
+                or isinstance(payload.get("height"), bool)
+                or (width, height) != requested_display.resolution
+            ):
+                raise HTTPException(
+                    status_code=409,
+                    detail="TOP52810 preview dimensions must be exactly 128 x 296",
+                )
+        elif requested_display is not None and requested_display.is_color:
             if display_profile_error:
                 raise HTTPException(status_code=503, detail=display_profile_error)
             try:
@@ -6197,7 +6219,16 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         )
         page = pages[page_index]
         preview_renderer = "bitmap"
-        if requested_display is not None and requested_display.is_color:
+        if top52810_preview:
+            image = render_compact_preview(
+                title=page.title,
+                entities=page.entities,
+                page_index=page_index,
+                page_count=len(pages),
+                ha_error=ha_error,
+            )
+            preview_renderer = "top52810-stock-preview"
+        elif requested_display is not None and requested_display.is_color:
             try:
                 preview_manifest = build_lvgl_manifest(
                     draft,
@@ -6238,6 +6269,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             headers={
                 "X-FlexDisplay-Preview-HA-Error": "true" if ha_error else "false",
                 "X-FlexDisplay-Preview-Renderer": preview_renderer,
+                "X-FlexDisplay-Preview-Constraint": (
+                    "stock-firmware-black-plane-overlay"
+                    if top52810_preview
+                    else "none"
+                ),
             },
         )
 
@@ -7334,6 +7370,17 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         height = _integer(x_flexdisplay_height, 800, 128, 2048)
         capabilities = _capabilities(x_flexdisplay_capabilities)
         reported_display_profile = display_profiles.resolve(x_flexdisplay_model)
+        if (
+            reported_display_profile is not None
+            and reported_display_profile.id == "top52810m_d01_stock"
+        ):
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    "TOP52810 stock BLE is available for Studio preview only; "
+                    "no receiver or upload transport is admitted"
+                ),
+            )
         jc36_namespace_intent = device_id.upper().startswith("JC36-")
         explicit_lvgl_request = (
             LVGL_UI_CAPABILITY in capabilities

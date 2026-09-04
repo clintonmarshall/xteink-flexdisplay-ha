@@ -30,6 +30,18 @@ class DisplayProfileStateError(RuntimeError):
 
 
 @dataclass(frozen=True, slots=True)
+class DisplayUnsafeRegion:
+    """Physical panel area where a renderer cannot promise arbitrary pixels."""
+
+    x: int
+    y: int
+    width: int
+    height: int
+    affected_colors: tuple[str, ...]
+    reason: str
+
+
+@dataclass(frozen=True, slots=True)
 class DisplayProfile:
     """Versioned physical and renderer capabilities for one display family."""
 
@@ -50,6 +62,10 @@ class DisplayProfile:
     flash_bytes: int = 0
     psram_bytes: int = 0
     aliases: tuple[str, ...] = ()
+    palette: tuple[str, ...] = ()
+    arbitrary_full_canvas: bool = True
+    unsafe_regions: tuple[DisplayUnsafeRegion, ...] = ()
+    transport: str = ""
     builtin: bool = False
     version: int = DISPLAY_PROFILE_SCHEMA_VERSION
 
@@ -147,9 +163,48 @@ JC3636_PROFILE = DisplayProfile(
     builtin=True,
 )
 
+TOP52810_UNSAFE_REGIONS = tuple(
+    DisplayUnsafeRegion(
+        x=40,
+        y=y,
+        width=80,
+        height=10,
+        affected_colors=("black", "white"),
+        reason="stock_firmware_black_plane_overlay",
+    )
+    for y in (153, 173, 193, 213, 233)
+)
+
+TOP52810_PROFILE = DisplayProfile(
+    id="top52810m_d01_stock",
+    display_name="TOP52810M-D01 (stock BLE)",
+    model="TOP52810M-D01",
+    technology="eink",
+    width=128,
+    height=296,
+    shape="rect",
+    pixel_format="BWR1",
+    color_depth=2,
+    touch=False,
+    lvgl=False,
+    mcu="NS52810 QCAA0",
+    aliases=("top52810m-d01", "top52810m d01", "ms136f6 v1.0"),
+    palette=("black", "white", "red"),
+    arbitrary_full_canvas=False,
+    unsafe_regions=TOP52810_UNSAFE_REGIONS,
+    transport="stock_ble",
+    builtin=True,
+)
+
 BUILTIN_DISPLAY_PROFILES: dict[str, DisplayProfile] = {
     profile.id: profile
-    for profile in (X3_PROFILE, X4_PROFILE, X4_PRO_PROFILE, JC3636_PROFILE)
+    for profile in (
+        X3_PROFILE,
+        X4_PROFILE,
+        X4_PRO_PROFILE,
+        JC3636_PROFILE,
+        TOP52810_PROFILE,
+    )
 }
 
 # Known non-LVGL families must not be redefined as custom colour receivers.
@@ -173,6 +228,10 @@ RESERVED_NON_LVGL_IDENTIFIERS = frozenset(
         "echoshow5",
         "echoshow52019",
         "amazonechoshow5",
+        "top52810m",
+        "top52810md01",
+        "top52810md01stock",
+        "ms136f6v10",
     }
 )
 
@@ -236,6 +295,20 @@ def profile_payload(profile: DisplayProfile) -> dict[str, Any]:
         "flash_bytes": profile.flash_bytes,
         "psram_bytes": profile.psram_bytes,
         "aliases": list(profile.aliases),
+        "palette": list(profile.palette),
+        "arbitrary_full_canvas": profile.arbitrary_full_canvas,
+        "unsafe_regions": [
+            {
+                "x": region.x,
+                "y": region.y,
+                "width": region.width,
+                "height": region.height,
+                "affected_colors": list(region.affected_colors),
+                "reason": region.reason,
+            }
+            for region in profile.unsafe_regions
+        ],
+        "transport": profile.transport,
         "builtin": profile.builtin,
     }
 
