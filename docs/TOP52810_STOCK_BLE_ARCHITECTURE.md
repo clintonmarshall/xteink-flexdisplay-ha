@@ -232,8 +232,10 @@ actions or establish compatibility for another unit.
 2. **Portable identity experiment (complete for the canary):** identity remained
    stable across separate days, battery cycles and four ESPHome proxy sources
    on the intended Home Assistant controller.
-3. **Pure codec tests:** add golden 128 x 296 plane and 44-frame fixtures from
-   non-sensitive, physically verified evidence.
+3. **Pure codec tests (complete offline):** the transport-neutral codec now
+   reproduces the physically verified 128 x 296 black/white/red plane hashes
+   and complete 44-write plan hashes. It has no Bluetooth or device-I/O path
+   and does not admit the family for upload.
 4. **Compact rendering:** add a built-in preview/profile with unsafe-region
    metadata and deterministic black/white/red output.
 5. **One-tag transport canary:** implement Home Assistant-owned BLE delivery,
