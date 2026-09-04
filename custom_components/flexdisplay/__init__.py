@@ -26,6 +26,7 @@ from .top52810_ble import Top52810BleManager
 
 DATA_COORDINATORS = "coordinators"
 DATA_TOP52810_MANAGERS = "top52810_managers"
+CONFIG_SCHEMA = cv.config_entry_only_config_schema(DOMAIN)
 
 
 def _meshtastic_text(value: object) -> str:
