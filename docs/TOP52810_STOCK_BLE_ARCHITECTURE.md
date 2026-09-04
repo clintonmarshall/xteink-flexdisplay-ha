@@ -242,7 +242,14 @@ actions or establish compatibility for another unit.
    Receiver and upload routes remain explicitly unavailable.
 5. **One-tag transport canary:** implement Home Assistant-owned BLE delivery,
    durable Bridge job states, exact response checks and one named hardware
-   canary. This phase requires a fresh device-write confirmation.
+   canary. The command-gated adapter is implemented but remains unreleased and
+   undeployed. Its read-only preview produces an immutable plan hash; a
+   separate authenticated queue request must repeat that exact hash before the
+   Home Assistant integration can claim it during the admitted tag's normal
+   advertisement window. It performs one attempt, records
+   `refresh_started`, and ends at `physically_unverified` until the panel is
+   checked. The physical canary still requires a fresh device-write
+   confirmation.
 6. **Family admission:** update the released compatibility matrix only after
    the identity, security, renderer, transport, physical image and recovery
    gates pass. Firmware and administrative controls remain absent.

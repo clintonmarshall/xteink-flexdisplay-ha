@@ -126,7 +126,11 @@ from .rook_interactions import (
 )
 from .screen_history import ScreenHistoryError, ScreenHistoryStore
 from .store import DeviceStore
-from .top52810_renderer import render_compact_preview
+from .top52810_codec import PIXEL_COUNT as TOP52810_PIXEL_COUNT
+from .top52810_codec import PixelColor as Top52810Color
+from .top52810_codec import build_transfer_plan, encode_pixels
+from .top52810_jobs import Top52810JobStore
+from .top52810_renderer import render_compact_preview, render_diagnostic_pixels
 from .voice_assistant import (
     MAX_AUDIO_BYTES,
     HomeAssistantVoiceClient,
@@ -2315,6 +2319,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         settings.state_path.with_name("screen-history"),
         settings.screen_history.limit,
     )
+    top52810_jobs = Top52810JobStore(
+        settings.state_path.with_name("flexdisplay-top52810-jobs.json")
+    )
     ha = HomeAssistantClient(settings.home_assistant)
     voice_assistant = HomeAssistantVoiceClient(settings.home_assistant)
     renderer = DashboardRenderer()
@@ -3251,6 +3258,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     app.state.flexhub = flexhub
     app.state.meshtastic_console = meshtastic_console
     app.state.screen_history = screen_history
+    app.state.top52810_jobs = top52810_jobs
     app.state.mqtt = mqtt
     app.state.rook = rook
     app.state.voice_assistant = voice_assistant
@@ -3418,6 +3426,135 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "error": _public_flexhub_error(flexhub_health.get("error")),
             },
         }
+
+    def top52810_plan(payload: dict[str, Any]) -> tuple[tuple[Top52810Color, ...], Any]:
+        """Build a bounded, deterministic canary plan without device I/O."""
+        pattern = str(payload.get("pattern") or "diagnostic").strip().lower()
+        if pattern == "diagnostic":
+            pixels = render_diagnostic_pixels()
+        elif pattern in {"white", "black", "red"}:
+            color = {
+                "white": Top52810Color.WHITE,
+                "black": Top52810Color.BLACK,
+                "red": Top52810Color.RED,
+            }[pattern]
+            pixels = (color,) * TOP52810_PIXEL_COUNT
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Canary pattern must be diagnostic, white, black, or red",
+            )
+        try:
+            sid = int(str(payload.get("sid") or "A1B2C3"), 16)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail="SID must be six hexadecimal digits") from err
+        if not 0 <= sid <= 0xFFFFFF or len(str(payload.get("sid") or "A1B2C3")) != 6:
+            raise HTTPException(status_code=400, detail="SID must be six hexadecimal digits")
+        encoded = encode_pixels(pixels)
+        return pixels, build_transfer_plan(sid, encoded.black_wire, encoded.red_wire)
+
+    def top52810_plan_summary(payload: dict[str, Any]) -> dict[str, Any]:
+        pixels, plan = top52810_plan(payload)
+        return {
+            "family": "TOP52810M-D01",
+            "board": "MS136F6 V1.0",
+            "pattern": str(payload.get("pattern") or "diagnostic").strip().lower(),
+            "sid": f"{plan.sid:06X}",
+            "rendered_sha256": hashlib.sha256(bytes(map(int, pixels))).hexdigest(),
+            "plan_sha256": plan.sha256,
+            "write_count": len(plan.frames),
+            "device_io": False,
+            "status": "preview_only",
+        }
+
+    @app.post("/api/v1/stock-ble/top52810/plans/preview")
+    def preview_top52810_plan(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Return the immutable plan identity without queuing a BLE write."""
+        authorize_sensitive(request)
+        return top52810_plan_summary(payload)
+
+    @app.post("/api/v1/stock-ble/top52810/jobs")
+    def queue_top52810_job(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
+        """Queue one explicitly hash-confirmed canary for an advertisement window."""
+        authorize_sensitive(request)
+        summary = top52810_plan_summary(payload)
+        expected_hash = str(payload.get("expected_plan_sha256") or "").strip().lower()
+        if not hmac.compare_digest(expected_hash, str(summary["plan_sha256"])):
+            raise HTTPException(
+                status_code=409,
+                detail="Confirmed plan SHA-256 does not match the generated canary plan",
+            )
+        address = str(payload.get("address") or "").strip().upper()
+        expected_name = str(payload.get("expected_name") or "").strip().upper()
+        if not re.fullmatch(r"TRSEPD_[0-9A-F]{4}", expected_name):
+            raise HTTPException(status_code=400, detail="Expected name must match TRSEPD_XXXX")
+        if expected_name[-4:] != address.replace(":", "")[-4:]:
+            raise HTTPException(status_code=409, detail="Tag name suffix does not match its address")
+        _pixels, plan = top52810_plan(payload)
+        try:
+            job = top52810_jobs.queue(
+                address=address,
+                expected_name=expected_name,
+                manufacturer_id=0x1A28,
+                manufacturer_payload_hex="ffffff00000d",
+                service_uuid="00000200-1212-efde-1523-785fef13d123",
+                write_uuid="00000205-1212-efde-1523-785fef13d123",
+                notify_uuid="00000204-1212-efde-1523-785fef13d123",
+                rendered_sha256=str(summary["rendered_sha256"]),
+                plan_sha256=str(summary["plan_sha256"]),
+                sid=str(summary["sid"]),
+                frames=[frame.as_record() for frame in plan.frames],
+                expires_seconds=int(payload.get("expires_seconds") or 900),
+            )
+        except (TypeError, ValueError) as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        return job
+
+    @app.get("/api/v1/stock-ble/top52810/jobs/pending/{address}")
+    def pending_top52810_job(address: str, request: Request) -> dict[str, Any]:
+        authorize_sensitive(request)
+        job = top52810_jobs.pending(address)
+        return {"job": job}
+
+    @app.post("/api/v1/stock-ble/top52810/jobs/{job_id}/claim")
+    def claim_top52810_job(
+        job_id: str, request: Request, payload: dict[str, Any] = Body(...)
+    ) -> dict[str, Any]:
+        authorize_sensitive(request)
+        executor_id = str(payload.get("executor_id") or "").strip()
+        if not executor_id:
+            raise HTTPException(status_code=400, detail="executor_id is required")
+        try:
+            return top52810_jobs.claim(job_id, executor_id)
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Job not found") from err
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+
+    @app.post("/api/v1/stock-ble/top52810/jobs/{job_id}/report")
+    def report_top52810_job(
+        job_id: str, request: Request, payload: dict[str, Any] = Body(...)
+    ) -> dict[str, Any]:
+        authorize_sensitive(request)
+        try:
+            return top52810_jobs.report(
+                job_id,
+                str(payload.get("lease") or ""),
+                str(payload.get("status") or ""),
+                str(payload.get("detail") or ""),
+            )
+        except KeyError as err:
+            raise HTTPException(status_code=404, detail="Job not found") from err
+        except ValueError as err:
+            raise HTTPException(status_code=409, detail=str(err)) from err
+
+    @app.get("/api/v1/stock-ble/top52810/jobs/{job_id}")
+    def get_top52810_job(job_id: str, request: Request) -> dict[str, Any]:
+        authorize_sensitive(request)
+        job = top52810_jobs.get(job_id)
+        if not job:
+            raise HTTPException(status_code=404, detail="Job not found")
+        return job
 
     @app.get("/api/v1/system")
     def system_status(request: Request) -> dict[str, Any]:

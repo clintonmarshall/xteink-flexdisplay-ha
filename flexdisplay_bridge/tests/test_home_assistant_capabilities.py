@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 from types import ModuleType
 
@@ -46,6 +47,19 @@ def _integration_source(name: str) -> str:
         / "flexdisplay"
         / name
     ).read_text(encoding="utf-8")
+
+
+def test_top52810_transport_uses_home_assistant_bluetooth_owner() -> None:
+    manager = _integration_source("top52810_ble.py")
+    manifest = json.loads(_integration_source("manifest.json"))
+    setup = _integration_source("__init__.py")
+
+    assert "bluetooth_adapters" in manifest["dependencies"]
+    assert "bluetooth.async_register_callback" in manager
+    assert "bluetooth.async_ble_device_from_address" in manager
+    assert "BleakScanner" not in manager
+    assert "max_attempts=1" in manager
+    assert "async def async_setup(" in setup
 
 
 def test_legacy_firmware_fallback_is_an_exact_allowlist() -> None:

@@ -22,8 +22,10 @@ from .const import (
     SERVICE_SEND_MESHTASTIC_MESSAGE,
 )
 from .coordinator import FlexDisplayCoordinator
+from .top52810_ble import Top52810BleManager
 
 DATA_COORDINATORS = "coordinators"
+DATA_TOP52810_MANAGERS = "top52810_managers"
 
 
 def _meshtastic_text(value: object) -> str:
@@ -202,6 +204,12 @@ def _register_services(hass: HomeAssistant) -> None:
         )
 
 
+async def async_setup(hass: HomeAssistant, _config: dict) -> bool:
+    """Register actions independently of config-entry loading."""
+    _register_services(hass)
+    return True
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up FlexDisplay from a config entry."""
     client = FlexDisplayApiClient(
@@ -220,6 +228,15 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         entry,
         [Platform(platform) for platform in PLATFORMS],
     )
+    ble_manager = Top52810BleManager(
+        hass,
+        client,
+        f"home-assistant:{entry.entry_id}",
+    )
+    ble_manager.start()
+    hass.data.setdefault(DOMAIN, {}).setdefault(DATA_TOP52810_MANAGERS, {})[
+        entry.entry_id
+    ] = ble_manager
     return True
 
 
@@ -233,8 +250,8 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         return False
     coordinators = hass.data.get(DOMAIN, {}).get(DATA_COORDINATORS, {})
     coordinators.pop(entry.entry_id, None)
-    if not coordinators:
-        hass.services.async_remove(DOMAIN, SERVICE_SEND_MESHTASTIC_MESSAGE)
-        hass.services.async_remove(DOMAIN, SERVICE_CLEAR_MESHTASTIC_UNREAD)
-        hass.services.async_remove(DOMAIN, SERVICE_NOTIFY)
+    managers = hass.data.get(DOMAIN, {}).get(DATA_TOP52810_MANAGERS, {})
+    manager = managers.pop(entry.entry_id, None)
+    if manager:
+        manager.stop()
     return True

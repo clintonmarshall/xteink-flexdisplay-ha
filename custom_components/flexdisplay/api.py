@@ -263,3 +263,36 @@ class FlexDisplayApiClient:
     async def mark_meshtastic_read(self) -> dict[str, Any]:
         """Reset the Bridge-side Meshtastic unread counter."""
         return await self._request("POST", "/api/v1/flexhub/meshtastic/read")
+
+    async def pending_top52810_job(self, address: str) -> dict[str, Any] | None:
+        """Return the newest hash-confirmed job waiting for this BLE address."""
+        payload = await self._request(
+            "GET", f"/api/v1/stock-ble/top52810/jobs/pending/{address}"
+        )
+        job = payload.get("job")
+        return job if isinstance(job, dict) else None
+
+    async def claim_top52810_job(
+        self, job_id: str, executor_id: str
+    ) -> dict[str, Any]:
+        """Atomically bind a pending stock-BLE job to this HA executor."""
+        return await self._request(
+            "POST",
+            f"/api/v1/stock-ble/top52810/jobs/{job_id}/claim",
+            json={"executor_id": executor_id},
+        )
+
+    async def report_top52810_job(
+        self,
+        job_id: str,
+        *,
+        lease: str,
+        status: str,
+        detail: str = "",
+    ) -> dict[str, Any]:
+        """Record the terminal transport result without claiming physical success."""
+        return await self._request(
+            "POST",
+            f"/api/v1/stock-ble/top52810/jobs/{job_id}/report",
+            json={"lease": lease, "status": status, "detail": detail},
+        )

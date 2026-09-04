@@ -127,6 +127,41 @@ def stock_effective_pixels(pixels: Iterable[PixelColor | int]) -> tuple[PixelCol
     )
 
 
+def render_diagnostic_pixels() -> tuple[PixelColor, ...]:
+    """Return the physically verified asymmetric orientation canary."""
+    pixels = [PixelColor.WHITE] * PIXEL_COUNT
+
+    def rectangle(x0: int, y0: int, x1: int, y1: int, color: PixelColor) -> None:
+        for y in range(y0, y1):
+            start = y * WIDTH + x0
+            pixels[start : start + (x1 - x0)] = [color] * (x1 - x0)
+
+    rectangle(0, 0, WIDTH, 4, PixelColor.BLACK)
+    rectangle(0, HEIGHT - 4, WIDTH, HEIGHT, PixelColor.BLACK)
+    rectangle(0, 0, 4, HEIGHT, PixelColor.BLACK)
+    rectangle(WIDTH - 4, 0, WIDTH, HEIGHT, PixelColor.BLACK)
+    rectangle(8, 10, 30, 32, PixelColor.BLACK)
+    rectangle(WIDTH - 30, 10, WIDTH - 8, 32, PixelColor.RED)
+    for dy in range(22):
+        for dx in range(dy + 1):
+            pixels[(HEIGHT - 10 - dy) * WIDTH + 8 + dx] = PixelColor.RED
+    centre_x, centre_y = WIDTH - 20, HEIGHT - 20
+    for dy in range(-11, 12):
+        span = 11 - abs(dy)
+        rectangle(
+            centre_x - span,
+            centre_y + dy,
+            centre_x + span + 1,
+            centre_y + dy + 1,
+            PixelColor.BLACK,
+        )
+    rectangle(8, 52, WIDTH - 8, 60, PixelColor.RED)
+    rectangle(8, 72, WIDTH - 8, 80, PixelColor.BLACK)
+    rectangle(WIDTH // 2 - 2, 92, WIDTH // 2 + 2, 142, PixelColor.BLACK)
+    rectangle(WIDTH // 2 - 25, 115, WIDTH // 2 + 25, 119, PixelColor.RED)
+    return tuple(pixels)
+
+
 def _fit_text(
     draw: ImageDraw.ImageDraw,
     text: str,
