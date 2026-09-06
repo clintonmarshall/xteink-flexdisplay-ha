@@ -7,7 +7,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.49.0 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.0 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
@@ -92,6 +92,21 @@ or Android source-version change. Older Bridges continue to render their
 existing dashboards, while e-paper and LVGL receivers retain their existing
 paths and reject this Android-only layout. Packaged X3/X4 and Note 4 firmware
 artifacts are unchanged; this software-only release requires no flash or OTA.
+
+Platform 0.50.0 adds a guarded stock-BLE canary for TOP52810M-D01 revision
+`MS136F6 V1.0` at 128 x 296 black/red. Admission requires the complete observed
+identity tuple: Bluetooth address `DF:84:6B:DE:F6:ED`, advertised name
+`TRSEPD_F6ED`, manufacturer ID `0x1A28` with payload `ffffff00000d`, service
+`00000200-1212-efde-1523-785fef13d123`, notification characteristic
+`00000204-1212-efde-1523-785fef13d123`, and write characteristic
+`00000205-1212-efde-1523-785fef13d123`. A mismatched or incomplete observation
+stays read-only. Home Assistant Bluetooth/ESPHome proxies own BLE discovery and
+the connection lifecycle; FlexDisplay owns rendering, durable job state,
+bounded transfer policy, and physical-verification status. Older Bridges and
+integrations do not expose this canary but remain compatible with all existing
+device families. Packaged X3/X4 and Note 4 firmware and Android receiver
+versions are unchanged, so this software-only release requires no flash, OTA,
+or Android publication.
 
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen

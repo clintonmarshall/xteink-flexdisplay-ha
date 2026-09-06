@@ -1,5 +1,28 @@
 # Changelog
 
+## 0.50.0
+
+- Add the guarded TOP52810M-D01 stock-BLE canary path for the exact observed
+  `TRSEPD_F6ED` identity, including compact 128 x 296 black/red rendering,
+  deterministic transfer planning, precise acknowledgement handling, durable
+  queued jobs, and one-shot physical-verification state.
+- Keep the new tag family fail-closed behind its exact address, name,
+  manufacturer payload, service, notification, and write-characteristic
+  identity. Unknown or mismatched tags remain read-only and receive no generic
+  firmware, provisioning, reset, policy, or write capabilities.
+- Add Home Assistant Bluetooth ownership for proxy-based discovery and BLE
+  transport while keeping image rendering, job state, retry policy, and fleet
+  truth in FlexDisplay.
+- Add a compact Studio preview for the TOP52810 profile, offline codec goldens,
+  a documented stock-firmware architecture and recovery boundary, and a
+  read-only FlexHub health-soak diagnostic.
+- Extract the FlexHub API concern from the Bridge application and add a
+  generated coordinated release-status record without changing the external
+  API contract.
+- Keep Android receiver versions and packaged X3/X4 and Note 4 firmware bytes
+  unchanged. This software-only release requires no firmware flash, OTA, or
+  Android publication.
+
 ## 0.49.0
 
 - Add the Bridge-rendered **Warm household** profile for the rectangular

@@ -1,12 +1,12 @@
 {
   "$schema": "docs/release-manifest.schema.json",
   "schema_version": 1,
-  "recorded_at": "2026-09-01",
+  "recorded_at": "2026-09-06",
   "platform": {
-    "version": "0.49.0",
-    "release_tag": "v0.49.0",
-    "release_commit": "e0bf71c133d88bebf5d5b23d2868c1412f680a6c",
-    "released_at": "2026-08-19T14:36:15+10:00",
+    "version": "0.50.0",
+    "release_tag": "v0.50.0",
+    "release_commit": "1199d018112b0d8378a74ca1e8fc008363f10b19",
+    "released_at": null,
     "classification": "software-only"
   },
   "android": {
@@ -16,12 +16,12 @@
   },
   "distribution": {
     "forgejo_release": {
-      "state": "published",
-      "evidence": "Authoritative Forgejo tag v0.49.0 and release at e0bf71c133d88bebf5d5b23d2868c1412f680a6c"
+      "state": "unpublished",
+      "evidence": "Release candidate only; protected Forgejo tag and release have not been created"
     },
     "github_compatibility_release": {
-      "state": "published",
-      "evidence": "https://github.com/clintonmarshall/xteink-flexdisplay-ha/releases/tag/v0.49.0"
+      "state": "unpublished",
+      "evidence": "Downstream compatibility release is permitted only after authoritative Forgejo publication"
     },
     "home_assistant_deployment": {
       "state": "unverified",
@@ -32,8 +32,8 @@
       "evidence": "Source release candidate only; no production-signed Companion APK is recorded"
     },
     "device_firmware_rollout": {
-      "state": "unverified",
-      "evidence": null
+      "state": "not-deployed",
+      "evidence": "Software-only release; packaged X3/X4 and Note 4 firmware bytes are unchanged and no firmware rollout is scheduled"
     },
     "physical_device_behavior": {
       "state": "unverified",
