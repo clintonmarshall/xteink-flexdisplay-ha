@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.50.1
+
+- Add protected, tag-scoped DumbHA stages for installing the exact Home
+  Assistant integration and restarting Core as separately confirmed actions.
+- Back up and validate the integration before an atomic install, then stop
+  before restart; automatically restore the displaced files if the staged
+  configuration check fails.
+- Record a one-way Core restart state so an ambiguous timeout cannot trigger a
+  blind second restart, and refuse stale, mismatched, or overlapping stages.
+- Keep Bridge, integration protocol, Android receiver versions, and packaged
+  X3/X4 and Note 4 firmware bytes unchanged. This software-only release
+  requires no firmware flash, OTA, or Android publication.
+
 ## 0.50.0
 
 - Add the guarded TOP52810M-D01 stock-BLE canary path for the exact observed
