@@ -345,15 +345,16 @@ Forgejo `bridge`, `app`, `integration`, `android`, and `required` push
 contexts. The administrator must still verify the tag-protection rule before
 publication because the workflow token cannot inspect that rule.
 
-The receiver refuses to deploy unless App automatic updates are already
+The Bridge operation refuses to deploy unless App automatic updates are already
 disabled. It records but never changes that setting. Disabling automatic
 updates remains a separate, explicitly approved Home Assistant mutation. The
 receiver runs `ha core check`, refreshes App metadata, proves the store's
 latest Bridge version exactly equals the tag, creates and verifies a partial
 backup containing the installed Bridge version, and updates only App slug
 `629898c9_flexdisplay_bridge` from the expected compatibility distribution
-source. It cannot install an arbitrary version, restart Home Assistant Core,
-restore a backup, update the integration, or touch device firmware.
+source. That operation cannot install an arbitrary version, restart Home
+Assistant Core, restore a backup, update the integration, or touch device
+firmware.
 
 After the App update, the runner requires the tagged version at `/healthz`,
 Home Assistant HTTP access, MQTT connectivity when enabled, FlexHub
@@ -362,6 +363,36 @@ existing device check-in record and non-regressing `last_seen` timestamp. It
 reports the backup identifier for a separately authorised rollback. A failed
 post-deployment check stops the job; it does not automatically restore,
 restart, publish, or roll forward.
+
+### Integration staging and Core restart workflows
+
+`.forgejo/workflows/deploy-integration.yml` and
+`.forgejo/workflows/restart-core.yml` are two separate manual stages for the
+same fixed `DumbHA` target and isolated deployment runner. They use the same
+tag, exact-green-commit, runner-variable, pinned-host-key, and exact tagged
+receiver checks as the Bridge workflow. Their confirmation phrases are
+deliberately different: staging authorization never authorizes a Core restart.
+
+The integration stage builds a deterministic archive containing only
+`custom_components/flexdisplay` from the protected tag. The receiver rejects
+unexpected paths and non-file entries, verifies the archive SHA-256 and exact
+installed version, runs `ha core check`, makes an owner-only filesystem copy,
+creates and verifies a partial Home Assistant-folder backup without the
+database, atomically swaps the integration, and runs `ha core check` again. If
+that post-stage check fails before restart, it restores the displaced files
+and revalidates them. A successful stage records the archive, receiver,
+previous version, rollback directory, backup identifier, and restart state,
+then stops with Core still running the previously loaded integration.
+
+The Core-restart stage accepts only that exact pending record. Immediately
+before requesting the restart it changes the record from `not_started` to
+`requested`, so a timeout or ambiguous result cannot be blindly retried. It
+then restarts Home Assistant Core once, waits for the same Core version to
+return to `started`, reruns `ha core check`, and marks the record `verified`.
+A second restart request, a different receiver, a mismatched integration, or a
+new stage while an earlier restart is pending is refused. A failure after the
+restart request is an investigation boundary; restoration or another restart
+requires fresh authorization.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.

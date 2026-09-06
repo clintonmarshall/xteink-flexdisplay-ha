@@ -1,0 +1,170 @@
+name: Stage FlexDisplay integration on DumbHA
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published protected annotated Platform tag (vX.Y.Z)
+        required: true
+        type: string
+      source_commit:
+        description: Exact green origin/main commit resolved by the tag
+        required: true
+        type: string
+      expected_bridge_version:
+        description: Bridge version already verified on DumbHA
+        required: true
+        type: string
+      expected_current_integration_version:
+        description: Integration version recorded immediately before staging
+        required: true
+        type: string
+      confirmation:
+        description: Type stage-flexdisplay-integration-on-dumbha after final approval
+        required: true
+        type: string
+
+concurrency:
+  group: flexdisplay-integration-dumbha-${{ inputs.tag }}
+  cancel-in-progress: false
+
+jobs:
+  integration:
+    if: ${{ forgejo.actor == forgejo.repository_owner }}
+    runs-on: dumbha-flexdisplay-production
+    env:
+      REQUESTED_TAG: ${{ inputs.tag }}
+      CONFIRMED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      EXPECTED_BRIDGE_VERSION: ${{ inputs.expected_bridge_version }}
+      EXPECTED_CURRENT_INTEGRATION_VERSION: ${{ inputs.expected_current_integration_version }}
+      DEPLOYMENT_CONFIRMATION: ${{ inputs.confirmation }}
+      FORGEJO_API_URL: ${{ forgejo.api_url }}
+      FORGEJO_REPOSITORY: ${{ forgejo.repository }}
+    steps:
+      - name: Verify exact Forgejo release and validation status
+        shell: bash
+        env:
+          RELEASE_API_TOKEN: ${{ forgejo.token }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CONFIRMED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BRIDGE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$EXPECTED_CURRENT_INTEGRATION_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$DEPLOYMENT_CONFIRMATION" = "stage-flexdisplay-integration-on-dumbha"
+          test -n "$RELEASE_API_TOKEN"
+
+          preflight_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-integration-preflight.XXXXXX")"
+          auth_config="$preflight_tmp/curl.conf"
+          cleanup_preflight() {
+            local exit_code=$?
+            set +e
+            if [[ -f "$auth_config" ]]; then
+              : > "$auth_config"
+              rm -f -- "$auth_config"
+            fi
+            find "$preflight_tmp" -depth -type f -delete 2>/dev/null || true
+            find "$preflight_tmp" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+            return "$exit_code"
+          }
+          trap cleanup_preflight EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$RELEASE_API_TOKEN" > "$auth_config"
+          unset RELEASE_API_TOKEN FORGEJO_TOKEN GITHUB_TOKEN
+
+          curl --config "$auth_config" --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            "$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/commits/$CONFIRMED_SOURCE_COMMIT/status?limit=100" \
+            > "$preflight_tmp/status.json"
+          curl --config "$auth_config" --fail-with-body --silent --show-error \
+            --connect-timeout 10 --max-time 30 \
+            "$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/releases/tags/$REQUESTED_TAG" \
+            > "$preflight_tmp/release.json"
+
+          STATUS_JSON="$preflight_tmp/status.json" \
+          RELEASE_JSON="$preflight_tmp/release.json" \
+          EXPECTED_REPOSITORY="$FORGEJO_REPOSITORY" \
+          EXPECTED_SHA="$CONFIRMED_SOURCE_COMMIT" \
+          EXPECTED_TAG="$REQUESTED_TAG" \
+          REQUIRED_CONTEXTS='Validate / bridge (push),Validate / app (push),Validate / integration (push),Validate / android (push),Validate / required (push)' \
+          python3 -I - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["STATUS_JSON"], encoding="utf-8") as source:
+              status = json.load(source)
+          with open(os.environ["RELEASE_JSON"], encoding="utf-8") as source:
+              release = json.load(source)
+          expected_sha = os.environ["EXPECTED_SHA"]
+          expected_repository = os.environ["EXPECTED_REPOSITORY"]
+          expected_tag = os.environ["EXPECTED_TAG"]
+          if status.get("sha") != expected_sha or status.get("state") != "success":
+              raise SystemExit("exact release commit does not have all-success Forgejo status")
+          repository = status.get("repository")
+          if not isinstance(repository, dict) or repository.get("full_name") != expected_repository:
+              raise SystemExit("Forgejo status response identified an unexpected repository")
+          statuses = status.get("statuses")
+          if not isinstance(statuses, list):
+              raise SystemExit("Forgejo status response contains no contexts")
+          for context in os.environ["REQUIRED_CONTEXTS"].split(","):
+              matches = [item for item in statuses if item.get("context") == context]
+              if len(matches) != 1 or matches[0].get("status") != "success":
+                  raise SystemExit(f"required exact-head context is not successful: {context}")
+          if release.get("tag_name") != expected_tag:
+              raise SystemExit("published release does not match the requested tag")
+          if release.get("target_commitish") != expected_sha:
+              raise SystemExit("published release does not match the requested commit")
+          if release.get("draft") is not False or release.get("prerelease") is not False:
+              raise SystemExit("integration staging requires a published stable Forgejo release")
+          PY
+
+      - name: Check out the exact protected release tag
+        # actions/checkout v6, reviewed 2026-08-13
+        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+
+      - name: Verify tag, source, metadata, and deployment controls
+        shell: bash
+        env:
+          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_DUMBHA_DEPLOYMENT_ENABLED }}
+          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_DUMBHA_RUNNER_ISOLATED }}
+          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_DUMBHA_CREDENTIAL_PATH_APPROVED }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          test "$AUTOMATION_ENABLED" = "true"
+          test "$RUNNER_ISOLATED" = "true"
+          test "$CREDENTIAL_PATH_APPROVED" = "true"
+          test "$DEPLOYMENT_CONFIRMATION" = "stage-flexdisplay-integration-on-dumbha"
+          test "$EXPECTED_BRIDGE_VERSION" = "${REQUESTED_TAG#v}"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git cat-file -t "refs/tags/$REQUESTED_TAG")" = "tag"
+          test "$(git rev-list -n 1 "refs/tags/$REQUESTED_TAG")" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          python3 scripts/check_release_metadata.py --release "${REQUESTED_TAG#v}"
+          python3 scripts/check_android_release_metadata.py
+          bash -n scripts/flexdisplay_bridge_deploy_receiver.sh
+
+      - name: Stage only the integration and stop before Core restart
+        shell: bash
+        env:
+          FLEXDISPLAY_DUMBHA_DEPLOY_KEY: ${{ secrets.FLEXDISPLAY_DUMBHA_DEPLOY_KEY }}
+          FLEXDISPLAY_DUMBHA_KNOWN_HOSTS: ${{ secrets.FLEXDISPLAY_DUMBHA_KNOWN_HOSTS }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          python3 scripts/deploy_integration.py \
+            --tag "$REQUESTED_TAG" \
+            --source-commit "$CONFIRMED_SOURCE_COMMIT" \
+            --expected-bridge-version "$EXPECTED_BRIDGE_VERSION" \
+            --expected-current-integration-version "$EXPECTED_CURRENT_INTEGRATION_VERSION" \
+            --confirmation "$DEPLOYMENT_CONFIRMATION"

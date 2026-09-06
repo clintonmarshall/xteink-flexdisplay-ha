@@ -79,16 +79,19 @@ class BridgeDeploymentWorkflowContractTests(unittest.TestCase):
         self.assertIn("ClearAllForwardings=yes", self.client)
         self.assertIn("EXPECTED_HOST_FINGERPRINT", self.client)
 
-    def test_receiver_is_bridge_only_backup_first_and_no_core_restart(self) -> None:
-        self.assertIn('core check --no-progress --raw-json', self.receiver)
-        self.assertIn('store reload --no-progress --raw-json', self.receiver)
-        self.assertIn('backups new', self.receiver)
-        self.assertIn('--app "$APP_SLUG"', self.receiver)
-        self.assertIn('apps update "$APP_SLUG"', self.receiver)
-        self.assertIn('.data.auto_update', self.receiver)
-        self.assertIn('= "false"', self.receiver)
-        self.assertNotIn("core restart", self.receiver.lower())
-        self.assertNotIn("auto-update", self.receiver.lower())
+    def test_bridge_operation_is_backup_first_and_never_restarts_core(self) -> None:
+        bridge_operation = self.receiver.split("deploy_bridge()", 1)[1].split(
+            'readonly ORIGINAL_COMMAND=', 1
+        )[0]
+        self.assertIn('core check --no-progress --raw-json', bridge_operation)
+        self.assertIn('store reload --no-progress --raw-json', bridge_operation)
+        self.assertIn('backups new', bridge_operation)
+        self.assertIn('--app "$APP_SLUG"', bridge_operation)
+        self.assertIn('apps update "$APP_SLUG"', bridge_operation)
+        self.assertIn('.data.auto_update', bridge_operation)
+        self.assertIn('= "false"', bridge_operation)
+        self.assertNotIn("core restart", bridge_operation.lower())
+        self.assertNotIn("auto-update", bridge_operation.lower())
 
     def test_client_checks_required_live_services_and_preserves_checkins(self) -> None:
         for evidence in (

@@ -39,16 +39,22 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
         )
         for path in (
             "android-release",
+            "deploy-bridge",
+            "deploy-integration",
             "promote-release-tag",
             "publish-release",
+            "restart-core",
             "validate-exact",
         ):
             self.assertIn(path, self.workflow)
         for script in (
             "check_android_release_metadata",
             "check_release_metadata",
+            "deploy_bridge",
+            "deploy_integration",
             "forgejo_release",
             "render_release_status",
+            "restart_core",
             "verify_android_release",
         ):
             self.assertIn(script, self.workflow)
