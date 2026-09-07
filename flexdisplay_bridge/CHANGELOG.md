@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.50.4
+
+- Correct protected Core-restart reconciliation so the failed workflow is
+  verified against the exact previously staged release while the repair
+  workflow remains bound to the current release and commit.
+- Bind reconciliation independently to the installed command-gated receiver
+  and the receiver recorded by the pending integration stage.
+- Permit a new integration stage only after a matching predecessor stage is
+  already verified complete; mismatched or incomplete stages still fail
+  closed.
+- Keep Bridge behavior, device-family behavior, Android receiver versions, and
+  packaged firmware bytes unchanged.
+
 ## 0.50.3
 
 - Accept a successful Home Assistant Core information response that omits its

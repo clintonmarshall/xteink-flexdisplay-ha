@@ -7,7 +7,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.3 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.4 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
@@ -129,6 +129,15 @@ reported state must be `started`. It also adds a separately confirmed,
 non-restarting reconciliation path bound to the exact failed workflow run and
 pending integration-stage record. Bridge, device, Android, and packaged
 firmware behavior are identical to 0.50.2.
+
+Platform 0.50.4 corrects the protected reconciliation lineage for a pending
+integration stage created by an earlier release. The failed restart workflow
+must match that exact staged release and its recorded receiver, while the
+repair workflow and installed command-gated receiver must match the current
+release. A subsequent integration stage is accepted only when its matching
+predecessor is already verified complete; mismatched or incomplete stages
+remain blocked. Bridge, device, Android, and packaged firmware behavior are
+identical to 0.50.3.
 
 Android receiver `0.5.0` adds explicit capability headers for camera,
 microphone, audio, touch, always-on display class, device class, and screen
