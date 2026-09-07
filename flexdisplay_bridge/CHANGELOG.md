@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.50.3
+
+- Accept a successful Home Assistant Core information response that omits its
+  state only when the exact expected Core version matches; when state is
+  present, continue to require it to be `started`.
+- Add a protected, command-gated reconciliation workflow for a restart that was
+  independently observed to complete but whose workflow failed during
+  post-restart verification. Reconciliation is bound to the exact failed run
+  and pending stage record and never issues another restart.
+- Keep Bridge behavior, device-family behavior, Android receiver versions, and
+  packaged firmware bytes unchanged.
+
 ## 0.50.2
 
 - Accept both the current Home Assistant Supervisor `homeassistant` backup
