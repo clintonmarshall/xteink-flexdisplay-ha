@@ -76,6 +76,16 @@ class IntegrationDeploymentWorkflowTests(unittest.TestCase):
             'failed_run.get("status") != "failure"', self.reconcile_workflow
         )
         self.assertIn(
+            'staged_release.get("target_commitish") != failed_run.get("commit_sha")',
+            self.reconcile_workflow,
+        )
+        self.assertNotIn(
+            'failed_run.get("commit_sha") != expected_sha', self.reconcile_workflow
+        )
+        self.assertIn(
+            "--expected-staged-receiver-sha256", self.reconcile_workflow
+        )
+        self.assertIn(
             "not started <= requested <= stopped", self.reconcile_workflow
         )
 
@@ -264,6 +274,93 @@ class IntegrationDeploymentWorkflowTests(unittest.TestCase):
             staged_version="0.50.1",
             restart_state="not_started",
         )
+
+    def test_reconciliation_allows_distinct_current_and_staged_receivers(self) -> None:
+        current_receiver = "b" * 64
+        staged_receiver = "a" * 64
+        status = {
+            "receiver_sha256": current_receiver,
+            "integration": {
+                "version": "0.50.2",
+                "stage": {
+                    "target_version": "0.50.2",
+                    "receiver_sha256": staged_receiver,
+                    "core_restart_performed": False,
+                    "core_restart_state": "requested",
+                },
+            },
+            "app": {
+                "slug": "629898c9_flexdisplay_bridge",
+                "repository": "629898c9",
+                "source_url": "https://github.com/clintonmarshall/xteink-flexdisplay-ha",
+                "version": "0.50.3",
+                "state": "started",
+                "auto_update": False,
+            },
+        }
+        deploy_integration.validate_status(
+            status,
+            bridge_version="0.50.3",
+            integration_version="0.50.2",
+            receiver_sha256=current_receiver,
+            staged_version="0.50.2",
+            restart_state="requested",
+            staged_receiver_sha256=staged_receiver,
+        )
+        with self.assertRaises(DeploymentError):
+            deploy_integration.validate_status(
+                status,
+                bridge_version="0.50.3",
+                integration_version="0.50.2",
+                receiver_sha256=current_receiver,
+                staged_version="0.50.2",
+                restart_state="requested",
+                staged_receiver_sha256="c" * 64,
+            )
+
+    def test_next_stage_allows_only_a_verified_matching_predecessor(self) -> None:
+        receiver = "b" * 64
+        status = {
+            "receiver_sha256": receiver,
+            "integration": {
+                "version": "0.50.2",
+                "stage": {
+                    "target_version": "0.50.2",
+                    "receiver_sha256": "a" * 64,
+                    "core_restart_performed": True,
+                    "core_restart_state": "verified",
+                },
+            },
+            "app": {
+                "slug": "629898c9_flexdisplay_bridge",
+                "repository": "629898c9",
+                "source_url": "https://github.com/clintonmarshall/xteink-flexdisplay-ha",
+                "version": "0.50.3",
+                "state": "started",
+                "auto_update": False,
+            },
+        }
+        deploy_integration.validate_status(
+            status,
+            bridge_version="0.50.3",
+            integration_version="0.50.2",
+            receiver_sha256=receiver,
+        )
+        for key, value in (
+            ("target_version", "0.50.1"),
+            ("core_restart_performed", False),
+            ("core_restart_state", "requested"),
+        ):
+            original = status["integration"]["stage"][key]
+            status["integration"]["stage"][key] = value
+            with self.assertRaises(DeploymentError):
+                deploy_integration.validate_status(
+                    status,
+                    bridge_version="0.50.3",
+                    integration_version="0.50.2",
+                    receiver_sha256=receiver,
+                )
+            status["integration"]["stage"][key] = original
 
 
 if __name__ == "__main__":

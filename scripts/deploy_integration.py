@@ -81,6 +81,7 @@ def validate_status(
     receiver_sha256: str,
     staged_version: str | None = None,
     restart_state: str | None = None,
+    staged_receiver_sha256: str | None = None,
 ) -> dict[str, Any]:
     status = require_mapping(payload, "remote status")
     if status.get("receiver_sha256") != receiver_sha256:
@@ -104,7 +105,8 @@ def validate_status(
         stage = require_mapping(integration.get("stage"), "remote integration stage")
         if stage.get("target_version") != staged_version:
             raise DeploymentError("unexpected staged integration version")
-        if stage.get("receiver_sha256") != receiver_sha256:
+        expected_staged_receiver = staged_receiver_sha256 or receiver_sha256
+        if stage.get("receiver_sha256") != expected_staged_receiver:
             raise DeploymentError("staged integration used a different receiver")
         if stage.get("core_restart_state") != restart_state:
             raise DeploymentError("unexpected Core restart state")
@@ -113,8 +115,14 @@ def validate_status(
             raise DeploymentError("unexpected Core restart completion state")
     else:
         stage = integration.get("stage")
-        if isinstance(stage, dict) and stage.get("core_restart_performed") is False:
-            raise DeploymentError("an earlier integration stage is still pending")
+        if stage is not None:
+            completed_stage = require_mapping(stage, "completed integration stage")
+            if (
+                completed_stage.get("target_version") != integration_version
+                or completed_stage.get("core_restart_performed") is not True
+                or completed_stage.get("core_restart_state") != "verified"
+            ):
+                raise DeploymentError("an earlier integration stage is still pending")
     return status
 
 

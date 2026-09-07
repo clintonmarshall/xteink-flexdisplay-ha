@@ -403,11 +403,15 @@ If a restart was independently observed to stop and return Core but its
 workflow failed only during post-restart verification, use the separately
 confirmed `reconcile-core-restart.yml` workflow. It requires the exact failed
 restart workflow run, pending-record timestamp, staged integration version,
-published repair tag, and current tagged receiver. It runs no restart command;
-it rechecks the matching Core version, `ha core check`, Bridge health, and Home
-Assistant HTTP availability before recording the operator-reviewed
-reconciliation. Never use reconciliation when the restart itself was not
-independently observed.
+staged receiver checksum, published staged release, published repair tag, and
+current tagged receiver. The failed run must resolve to the staged release;
+the repair workflow and receiver must resolve to the current repair release.
+It runs no restart command; it rechecks the matching Core version,
+`ha core check`, Bridge health, and Home Assistant HTTP availability before
+recording the operator-reviewed reconciliation. Never use reconciliation when
+the restart itself was not independently observed. A verified predecessor
+record may then be replaced by the next separately confirmed integration stage;
+an incomplete or mismatched predecessor remains blocking.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.

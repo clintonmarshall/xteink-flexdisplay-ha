@@ -49,6 +49,7 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--failed-run-id", type=int)
     parser.add_argument("--expected-requested-at")
     parser.add_argument("--expected-staged-version")
+    parser.add_argument("--expected-staged-receiver-sha256")
     parser.add_argument(
         "--receiver",
         type=Path,
@@ -71,6 +72,7 @@ def main() -> int:
         arguments.failed_run_id,
         arguments.expected_requested_at,
         arguments.expected_staged_version,
+        arguments.expected_staged_receiver_sha256,
     )
     if reconcile:
         if arguments.failed_run_id is None or arguments.failed_run_id < 1:
@@ -83,6 +85,10 @@ def main() -> int:
             arguments.expected_staged_version, str
         ) or not SEMVER.fullmatch(arguments.expected_staged_version):
             raise DeploymentError("reconciliation requires the staged integration version")
+        if not isinstance(
+            arguments.expected_staged_receiver_sha256, str
+        ) or not SHA256.fullmatch(arguments.expected_staged_receiver_sha256):
+            raise DeploymentError("reconciliation requires the staged receiver checksum")
     elif any(value is not None for value in recovery_values):
         raise DeploymentError("restart mode refuses reconciliation arguments")
     if not arguments.receiver.is_file():
@@ -143,6 +149,9 @@ def main() -> int:
             receiver_sha256=receiver_sha256,
             staged_version=integration_version,
             restart_state="requested" if reconcile else "not_started",
+            staged_receiver_sha256=(
+                arguments.expected_staged_receiver_sha256 if reconcile else None
+            ),
         )
         validate_health(http_json("/healthz"), target_version)
         require_http_200("/", HOME_ASSISTANT_PORT, "Home Assistant")
@@ -164,6 +173,7 @@ def main() -> int:
 
         command = (
             f"reconcile-core {integration_version} {receiver_sha256} "
+            f"{arguments.expected_staged_receiver_sha256} "
             f"{arguments.expected_requested_at} {arguments.failed_run_id}"
             if reconcile
             else f"restart-core {target_version} {receiver_sha256}"
@@ -181,7 +191,10 @@ def main() -> int:
         )
         if result.get("target_version") != integration_version:
             raise DeploymentError("Core restart record has the wrong integration version")
-        if result.get("receiver_sha256") != receiver_sha256:
+        expected_result_receiver = (
+            arguments.expected_staged_receiver_sha256 if reconcile else receiver_sha256
+        )
+        if result.get("receiver_sha256") != expected_result_receiver:
             raise DeploymentError("Core restart record has the wrong receiver checksum")
         if result.get("core_restart_performed") is not True:
             raise DeploymentError("remote command did not confirm the Core restart")
@@ -207,6 +220,9 @@ def main() -> int:
             receiver_sha256=receiver_sha256,
             staged_version=integration_version,
             restart_state="verified",
+            staged_receiver_sha256=(
+                arguments.expected_staged_receiver_sha256 if reconcile else None
+            ),
         )
         validate_health(http_json("/healthz"), target_version)
         require_http_200("/", HOME_ASSISTANT_PORT, "Home Assistant")

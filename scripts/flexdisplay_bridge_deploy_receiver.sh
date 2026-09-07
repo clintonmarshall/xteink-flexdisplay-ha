@@ -324,14 +324,15 @@ restart_core_for_integration() {
 }
 
 reconcile_core_restart() {
-  local target_version=$1 expected_receiver_sha=$2
-  local expected_requested_at=$3 failed_run_id=$4
+  local target_version=$1 expected_receiver_sha=$2 expected_staged_receiver_sha=$3
+  local expected_requested_at=$4 failed_run_id=$5
   local after_file="$temporary_directory/core-reconcile.json"
   local check_file="$temporary_directory/core-reconcile-check.json"
   local installed_core
 
   [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
   [[ "$expected_receiver_sha" =~ ^[0-9a-f]{64}$ ]]
+  [[ "$expected_staged_receiver_sha" =~ ^[0-9a-f]{64}$ ]]
   [[ "$expected_requested_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
   [[ "$failed_run_id" =~ ^[1-9][0-9]*$ ]]
   test "$expected_receiver_sha" = "$SELF_SHA256"
@@ -339,7 +340,7 @@ reconcile_core_restart() {
   test -f "$INTEGRATION_STAGE_RECORD"
   "$JQ" -e \
     --arg target "$target_version" \
-    --arg receiver "$SELF_SHA256" \
+    --arg receiver "$expected_staged_receiver_sha" \
     --arg requested_at "$expected_requested_at" \
     '.target_version == $target and .receiver_sha256 == $receiver and
      .core_restart_performed == false and
@@ -495,12 +496,12 @@ case "$ORIGINAL_COMMAND" in
     restart_core_for_integration "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
     ;;
   reconcile-core\ *)
-    if [[ ! "$ORIGINAL_COMMAND" =~ ^reconcile-core\ ([0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{64})\ ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\ ([1-9][0-9]*)$ ]]; then
+    if [[ ! "$ORIGINAL_COMMAND" =~ ^reconcile-core\ ([0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{64})\ ([0-9a-f]{64})\ ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\ ([1-9][0-9]*)$ ]]; then
       echo "Refusing invalid Core restart reconciliation request" >&2
       exit 64
     fi
     reconcile_core_restart "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" \
-      "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
+      "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}"
     ;;
   *)
     echo "This key permits only reviewed FlexDisplay status, deployment, staging, or Core restart operations" >&2
