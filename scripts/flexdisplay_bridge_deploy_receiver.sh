@@ -214,8 +214,12 @@ stage_integration() {
   backup_slug="$("$JQ" -er '.data.slug | select(type == "string" and length > 0)' "$backup_file")"
   [[ "$backup_slug" =~ ^[A-Za-z0-9_-]+$ ]]
   "$HA_CLI" backups info "$backup_slug" --no-progress --raw-json > "$backup_info_file"
-  "$JQ" -e '.result == "ok" and (.data.folders | index("homeassistant") != null)' \
-    "$backup_info_file" > /dev/null
+  "$JQ" -e '
+    .result == "ok" and
+    (((.data.folders // []) | index("homeassistant") != null) or
+     ((.data.homeassistant // "") |
+      type == "string" and length > 0))
+  ' "$backup_info_file" > /dev/null
 
   test ! -e "$staged"
   test ! -e "$displaced"

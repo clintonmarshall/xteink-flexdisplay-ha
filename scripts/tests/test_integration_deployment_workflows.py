@@ -73,6 +73,12 @@ class IntegrationDeploymentWorkflowTests(unittest.TestCase):
         self.assertIn('.core_restart_state = "requested"', self.receiver)
         self.assertIn('.core_restart_state = "verified"', self.receiver)
 
+    def test_backup_scope_accepts_current_and_legacy_supervisor_shapes(self) -> None:
+        stage = self.receiver.split("restart_core_for_integration()", 1)[0]
+        self.assertIn('(.data.folders // []) | index("homeassistant")', stage)
+        self.assertIn('(.data.homeassistant // "")', stage)
+        self.assertIn('type == "string" and length > 0', stage)
+
     def test_archive_is_deterministic_and_contains_only_integration(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory) / "flexdisplay"

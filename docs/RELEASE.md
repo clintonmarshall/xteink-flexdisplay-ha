@@ -378,7 +378,9 @@ The integration stage builds a deterministic archive containing only
 unexpected paths and non-file entries, verifies the archive SHA-256 and exact
 installed version, runs `ha core check`, makes an owner-only filesystem copy,
 creates and verifies a partial Home Assistant-folder backup without the
-database, atomically swaps the integration, and runs `ha core check` again. If
+database (accepting both the current Supervisor `homeassistant` metadata field
+and the legacy `folders` list), atomically swaps the integration, and runs
+`ha core check` again. If
 that post-stage check fails before restart, it restores the displaced files
 and revalidates them. A successful stage records the archive, receiver,
 previous version, rollback directory, backup identifier, and restart state,
