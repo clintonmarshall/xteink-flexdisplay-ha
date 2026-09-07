@@ -43,6 +43,7 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
             "deploy-integration",
             "promote-release-tag",
             "publish-release",
+            "reconcile-core-restart",
             "restart-core",
             "validate-exact",
         ):

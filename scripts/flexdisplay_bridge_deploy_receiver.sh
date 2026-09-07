@@ -81,6 +81,15 @@ core_version() {
     "$destination"
 }
 
+core_info_is_ready() {
+  local source=$1 expected_version=$2
+  "$JQ" -e --arg version "$expected_version" \
+    '.result == "ok" and
+     .data.version == $version and
+     ((.data | has("state") | not) or .data.state == "started")' \
+    "$source" > /dev/null
+}
+
 integration_version() {
   local manifest=$1
   test -f "$manifest"
@@ -295,16 +304,12 @@ restart_core_for_integration() {
   while (( attempt < 60 )); do
     attempt=$((attempt + 1))
     if "$HA_CLI" core info --no-progress --raw-json > "$after_file" 2>/dev/null &&
-       "$JQ" -e --arg version "$installed_core" \
-         '.result == "ok" and .data.version == $version and .data.state == "started"' \
-         "$after_file" > /dev/null; then
+       core_info_is_ready "$after_file" "$installed_core"; then
       break
     fi
     sleep 5
   done
-  "$JQ" -e --arg version "$installed_core" \
-    '.result == "ok" and .data.version == $version and .data.state == "started"' \
-    "$after_file" > /dev/null
+  core_info_is_ready "$after_file" "$installed_core"
   "$HA_CLI" core check --no-progress --raw-json > "$check_file"
   "$JQ" -e '.result == "ok"' "$check_file" > /dev/null
 
@@ -312,6 +317,54 @@ restart_core_for_integration() {
     '.core_restart_performed = true |
      .core_restart_state = "verified" |
      .home_assistant_core = $core_version' \
+    "$INTEGRATION_STAGE_RECORD" > "$INTEGRATION_STAGE_RECORD.tmp"
+  chmod 600 "$INTEGRATION_STAGE_RECORD.tmp"
+  mv "$INTEGRATION_STAGE_RECORD.tmp" "$INTEGRATION_STAGE_RECORD"
+  "$JQ" -c . "$INTEGRATION_STAGE_RECORD"
+}
+
+reconcile_core_restart() {
+  local target_version=$1 expected_receiver_sha=$2
+  local expected_requested_at=$3 failed_run_id=$4
+  local after_file="$temporary_directory/core-reconcile.json"
+  local check_file="$temporary_directory/core-reconcile-check.json"
+  local installed_core
+
+  [[ "$target_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  [[ "$expected_receiver_sha" =~ ^[0-9a-f]{64}$ ]]
+  [[ "$expected_requested_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]
+  [[ "$failed_run_id" =~ ^[1-9][0-9]*$ ]]
+  test "$expected_receiver_sha" = "$SELF_SHA256"
+  test "$(integration_version "$INTEGRATION_DIR/manifest.json")" = "$target_version"
+  test -f "$INTEGRATION_STAGE_RECORD"
+  "$JQ" -e \
+    --arg target "$target_version" \
+    --arg receiver "$SELF_SHA256" \
+    --arg requested_at "$expected_requested_at" \
+    '.target_version == $target and .receiver_sha256 == $receiver and
+     .core_restart_performed == false and
+     .core_restart_state == "requested" and
+     .core_restart_requested_at == $requested_at' \
+    "$INTEGRATION_STAGE_RECORD" > /dev/null
+
+  installed_core="$(core_version "$after_file")"
+  core_info_is_ready "$after_file" "$installed_core"
+  "$HA_CLI" core check --no-progress --raw-json > "$check_file"
+  "$JQ" -e '.result == "ok"' "$check_file" > /dev/null
+
+  "$JQ" \
+    --arg core_version "$installed_core" \
+    --arg reconciled_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    --arg failed_run_id "$failed_run_id" \
+    '.core_restart_performed = true |
+     .core_restart_state = "verified" |
+     .home_assistant_core = $core_version |
+     .core_restart_reconciled = true |
+     .core_restart_reconciled_at = $reconciled_at |
+     .core_restart_reconciliation = {
+       method:"operator-confirmed-failed-workflow",
+       failed_workflow_run_id:$failed_run_id
+     }' \
     "$INTEGRATION_STAGE_RECORD" > "$INTEGRATION_STAGE_RECORD.tmp"
   chmod 600 "$INTEGRATION_STAGE_RECORD.tmp"
   mv "$INTEGRATION_STAGE_RECORD.tmp" "$INTEGRATION_STAGE_RECORD"
@@ -440,6 +493,14 @@ case "$ORIGINAL_COMMAND" in
       exit 1
     fi
     restart_core_for_integration "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    ;;
+  reconcile-core\ *)
+    if [[ ! "$ORIGINAL_COMMAND" =~ ^reconcile-core\ ([0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{64})\ ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\ ([1-9][0-9]*)$ ]]; then
+      echo "Refusing invalid Core restart reconciliation request" >&2
+      exit 64
+    fi
+    reconcile_core_restart "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" \
+      "${BASH_REMATCH[3]}" "${BASH_REMATCH[4]}"
     ;;
   *)
     echo "This key permits only reviewed FlexDisplay status, deployment, staging, or Core restart operations" >&2

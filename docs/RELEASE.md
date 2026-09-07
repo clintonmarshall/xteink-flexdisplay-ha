@@ -390,11 +390,24 @@ The Core-restart stage accepts only that exact pending record. Immediately
 before requesting the restart it changes the record from `not_started` to
 `requested`, so a timeout or ambiguous result cannot be blindly retried. It
 then restarts Home Assistant Core once, waits for the same Core version to
-return to `started`, reruns `ha core check`, and marks the record `verified`.
+return ready, reruns `ha core check`, and marks the record `verified`. Current
+Supervisor releases may omit `state` from successful `ha core info` responses;
+the receiver accepts that observed shape only when the expected Core version
+matches. If `state` is present, it must be exactly `started`.
 A second restart request, a different receiver, a mismatched integration, or a
 new stage while an earlier restart is pending is refused. A failure after the
 restart request is an investigation boundary; restoration or another restart
 requires fresh authorization.
+
+If a restart was independently observed to stop and return Core but its
+workflow failed only during post-restart verification, use the separately
+confirmed `reconcile-core-restart.yml` workflow. It requires the exact failed
+restart workflow run, pending-record timestamp, staged integration version,
+published repair tag, and current tagged receiver. It runs no restart command;
+it rechecks the matching Core version, `ha core check`, Bridge health, and Home
+Assistant HTTP availability before recording the operator-reviewed
+reconciliation. Never use reconciliation when the restart itself was not
+independently observed.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.
