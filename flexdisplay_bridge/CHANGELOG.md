@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.50.2
+
+- Accept both the current Home Assistant Supervisor `homeassistant` backup
+  metadata field and the legacy `folders` list when verifying the protected
+  integration-stage rollback backup.
+- Keep the integration swap, Home Assistant Core restart, Bridge behavior,
+  device-family behavior, Android receiver versions, and packaged firmware
+  bytes unchanged.
+
 ## 0.50.1
 
 - Add protected, tag-scoped DumbHA stages for installing the exact Home
