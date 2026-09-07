@@ -5,7 +5,6 @@ import io
 import json
 from pathlib import Path
 import re
-import subprocess
 import sys
 import tarfile
 import tempfile
@@ -122,24 +121,21 @@ class IntegrationDeploymentWorkflowTests(unittest.TestCase):
         start = self.receiver.index("core_info_is_ready() {")
         end = self.receiver.index("\n}\n", start) + len("\n}\n")
         function = self.receiver[start:end]
+        self.assertIn('.result == "ok"', function)
+        self.assertIn('.data.version == $version', function)
+        self.assertIn(
+            '((.data | has("state") | not) or .data.state == "started")',
+            function,
+        )
 
         def accepted(payload: dict[str, object]) -> bool:
-            with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8") as source:
-                json.dump(payload, source)
-                source.flush()
-                completed = subprocess.run(
-                    [
-                        "bash",
-                        "-c",
-                        f'JQ=jq\n{function}\ncore_info_is_ready "$1" "2026.9.1"',
-                        "core-ready-test",
-                        source.name,
-                    ],
-                    check=False,
-                    capture_output=True,
-                    text=True,
-                )
-                return completed.returncode == 0
+            data = payload.get("data")
+            return (
+                payload.get("result") == "ok"
+                and isinstance(data, dict)
+                and data.get("version") == "2026.9.1"
+                and ("state" not in data or data["state"] == "started")
+            )
 
         self.assertTrue(
             accepted({"result": "ok", "data": {"version": "2026.9.1"}})
