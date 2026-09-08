@@ -26,6 +26,10 @@ def manager_module(monkeypatch):
     bluetooth.BluetoothScanningMode = SimpleNamespace(ACTIVE="active")
     bluetooth.async_register_callback = Mock(return_value=Mock())
     bluetooth.async_ble_device_from_address = Mock(return_value=object())
+    bluetooth.async_last_service_info = Mock(return_value=None)
+    bluetooth.async_discovered_service_info = Mock(return_value=[])
+    event = ModuleType("homeassistant.helpers.event")
+    event.async_track_time_interval = Mock(return_value=Mock())
     components = ModuleType("homeassistant.components")
     components.bluetooth = bluetooth
     core = ModuleType("homeassistant.core")
@@ -40,6 +44,8 @@ def manager_module(monkeypatch):
         "homeassistant.components": components,
         "homeassistant.components.bluetooth": bluetooth,
         "homeassistant.core": core,
+        "homeassistant.helpers": ModuleType("homeassistant.helpers"),
+        "homeassistant.helpers.event": event,
         "bleak": bleak,
         "bleak_retry_connector": connector,
     }.items():
@@ -52,6 +58,7 @@ def manager_module(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
         spec.loader.exec_module(module)
     module.execute_claimed_job = AsyncMock()
+    module.monotonic = Mock(return_value=100.0)
     return module
 
 
@@ -63,8 +70,11 @@ def test_discovery_does_not_require_advertised_service(manager_module):
     assert args[3] == "active"
     assert kwargs == {"replay": "newest_first"}
     unregister = manager_module.bluetooth.async_register_callback.return_value
+    cancel_timer = manager_module.async_track_time_interval.return_value
+    assert manager_module.async_track_time_interval.call_args.args[2].total_seconds() == 5
     manager.stop()
     unregister.assert_called_once_with()
+    cancel_timer.assert_called_once_with()
 
 
 @pytest.mark.parametrize("fault", [
@@ -88,7 +98,9 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
         address=job["address"], name=job["expected_name"],
         manufacturer_data={0x1A28: bytes.fromhex("ffffff00000d")},
         service_uuids=[],
+        time=100.0,
     )
+    module.bluetooth.async_last_service_info.return_value = info
     if fault == "address":
         info.address = "DF:84:6B:DE:F6:EE"
     elif fault == "name":
@@ -139,3 +151,96 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
         if api.claim_top52810_job.await_count:
             assert api.report_top52810_job.call_args.kwargs["status"] == "failed"
     assert manager._active_addresses == set()
+
+
+@pytest.mark.parametrize("fault", [None, "stale", "missing", "future", "stopped", "expired", "failed_claim"])
+def test_job_queued_after_discovery_without_new_callback(manager_module, fault):
+    """HA suppresses duplicate callbacks; its latest observation still updates."""
+    module = manager_module
+    address = "DF:84:6B:DE:F6:ED"
+    info = SimpleNamespace(address=address, name="TRSEPD_F6ED", time=100.0,
+                           manufacturer_data={0x1A28: bytes.fromhex("ffffff00000d")})
+    job = {"job_id": "top52810-00000002", "address": address,
+           "expected_name": info.name, "manufacturer_id": 0x1A28,
+           "manufacturer_payload_hex": "ffffff00000d", "lease": "test-only-lease",
+           "service_uuid": "service", "write_uuid": "write", "notify_uuid": "notify"}
+    api = SimpleNamespace(pending_top52810_job=AsyncMock(return_value=None),
+                          claim_top52810_job=AsyncMock(return_value=job),
+                          report_top52810_job=AsyncMock())
+    client = SimpleNamespace(mtu_size=247, disconnect=AsyncMock(), services=SimpleNamespace(
+        get_service=Mock(return_value=SimpleNamespace(get_characteristic=Mock(
+            side_effect=lambda uuid: SimpleNamespace(properties=[uuid]))))))
+    module.establish_connection.return_value = client
+    module.bluetooth.async_last_service_info.return_value = info
+    module.bluetooth.async_discovered_service_info.return_value = [info]
+
+    async def run():
+        tasks = []
+
+        def create_task(coro, name):
+            task = asyncio.create_task(coro, name=name)
+            tasks.append(task)
+            return task
+
+        manager = module.Top52810BleManager(SimpleNamespace(async_create_task=create_task), api, "test")
+        manager.start()
+        # Initial discovery predates the authorized job.
+        manager._advertisement(info, None)
+        await asyncio.gather(*tasks)
+        api.pending_top52810_job.assert_awaited_once_with(address)
+        api.claim_top52810_job.assert_not_awaited()
+        tasks.clear()
+        api.pending_top52810_job.return_value = None if fault == "expired" else job
+        if fault == "stale":
+            info.time = 89.0
+        elif fault == "future":
+            info.time = 101.0
+        elif fault == "missing":
+            module.bluetooth.async_last_service_info.return_value = None
+        elif fault == "stopped":
+            manager.stop()
+        elif fault == "failed_claim":
+            api.claim_top52810_job.side_effect = RuntimeError("already claimed or expired")
+        # Timer checks without any new Bluetooth callback; overlap coalesces.
+        manager._check_known_tags(None)
+        manager._check_known_tags(None)
+        manager._advertisement(info, None)
+        await asyncio.gather(*tasks)
+        if fault is None:
+            module.execute_claimed_job.assert_awaited_once_with(client, job)
+            api.claim_top52810_job.assert_awaited_once()
+            # Terminal jobs disappear from the pending endpoint. No retry.
+            api.pending_top52810_job.return_value = None
+            manager._check_known_tags(None)
+            await asyncio.gather(*tasks)
+            module.execute_claimed_job.assert_awaited_once()
+        else:
+            module.establish_connection.assert_not_awaited()
+            module.execute_claimed_job.assert_not_awaited()
+            if fault != "failed_claim":
+                api.claim_top52810_job.assert_not_awaited()
+        manager.stop()
+        assert not manager._active_addresses
+
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("stop", [False, True])
+def test_window_stales_or_unloads_while_pending_request_in_flight(manager_module, stop):
+    module = manager_module
+    info = SimpleNamespace(address="DF:84:6B:DE:F6:ED", time=100.0)
+    api = SimpleNamespace(pending_top52810_job=AsyncMock(), claim_top52810_job=AsyncMock())
+    manager = module.Top52810BleManager(object(), api, "test")
+
+    async def pending(address):
+        if stop:
+            manager.stop()
+        else:
+            info.time = 80.0
+        return {"job_id": "top52810-00000002"}
+
+    api.pending_top52810_job.side_effect = pending
+    module.bluetooth.async_last_service_info.return_value = info
+    asyncio.run(manager._handle_window(info.address, info))
+    api.claim_top52810_job.assert_not_awaited()
+    module.establish_connection.assert_not_awaited()

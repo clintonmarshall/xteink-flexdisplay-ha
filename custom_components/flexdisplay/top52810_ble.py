@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from datetime import timedelta
+from time import monotonic
 from typing import Any
 
 from bleak import BleakClient
@@ -15,6 +17,7 @@ from homeassistant.components.bluetooth import (
     BluetoothScanningMode,
 )
 from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers.event import async_track_time_interval
 
 from .api import FlexDisplayApiClient, FlexDisplayApiError
 from .top52810_transport import (
@@ -26,6 +29,8 @@ from .top52810_transport import (
 
 LOGGER = logging.getLogger(__name__)
 MANUFACTURER_ID = 0x1A28
+JOB_CHECK_INTERVAL = timedelta(seconds=5)
+MAX_ADVERTISEMENT_AGE = 10.0
 
 
 class Top52810BleManager:
@@ -41,10 +46,15 @@ class Top52810BleManager:
         self._api = api
         self._executor_id = executor_id
         self._unregister: Any = None
+        self._cancel_job_check: Any = None
+        self._stopped = False
         self._active_addresses: set[str] = set()
 
     def start(self) -> None:
         """Use HA's scanner; stock advertisements omit the GATT service UUID."""
+        if self._unregister is not None:
+            return
+        self._stopped = False
         self._unregister = bluetooth.async_register_callback(
             self._hass,
             self._advertisement,
@@ -55,16 +65,43 @@ class Top52810BleManager:
             BluetoothScanningMode.ACTIVE,
             replay=BluetoothCallbackReplay.NEWEST_FIRST,
         )
+        # HA deduplicates unchanged advertisements. A job queued after discovery
+        # must not depend on another changed-payload callback to be noticed.
+        self._cancel_job_check = async_track_time_interval(
+            self._hass, self._check_known_tags, JOB_CHECK_INTERVAL
+        )
 
     def stop(self) -> None:
+        self._stopped = True
+        if self._cancel_job_check is not None:
+            self._cancel_job_check()
+            self._cancel_job_check = None
         if self._unregister is not None:
             self._unregister()
             self._unregister = None
 
     @callback
+    def _check_known_tags(self, _now: Any) -> None:
+        """Check jobs for recently heard tags without starting another scanner."""
+        if self._stopped:
+            return
+        for info in bluetooth.async_discovered_service_info(self._hass, connectable=True):
+            if MANUFACTURER_ID in info.manufacturer_data:
+                self._advertisement(info, None)
+
+    def _recent_info(self, address: str) -> Any:
+        info = bluetooth.async_last_service_info(self._hass, address, connectable=True)
+        if info is None or not 0 <= monotonic() - info.time <= MAX_ADVERTISEMENT_AGE:
+            return None
+        return info
+
+    @callback
     def _advertisement(self, service_info: Any, _change: Any) -> None:
         address = str(getattr(service_info, "address", "") or "").upper()
-        if not address or address in self._active_addresses:
+        if self._stopped or not address or address in self._active_addresses:
+            return
+        service_info = self._recent_info(address)
+        if service_info is None:
             return
         self._active_addresses.add(address)
         self._hass.async_create_task(
@@ -79,6 +116,11 @@ class Top52810BleManager:
         try:
             job = await self._api.pending_top52810_job(address)
             if not job:
+                return
+            # Re-read after the HTTP await: old cached data does not establish
+            # a receive window or justify consuming the job's single attempt.
+            service_info = self._recent_info(address)
+            if self._stopped or service_info is None:
                 return
             validate_advertisement(job, service_info)
             claimed = await self._api.claim_top52810_job(

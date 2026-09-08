@@ -194,6 +194,30 @@ only the newest authorized image remains pending. A normal delivery may take
 up to the next receive window plus approximately 6-8 seconds for transfer and
 additional panel settling time.
 
+### Jobs queued after Bluetooth discovery
+
+Home Assistant suppresses callbacks for unchanged advertisement payloads (see
+the [Bluetooth API documentation](https://developers.home-assistant.io/docs/core/bluetooth/api/#clearing-cached-advertisement-history)).
+The HA manager therefore checks its connectable discovery cache every five
+seconds as well as handling discovery callbacks. It reads the latest observation
+for each matching manufacturer, and only checks pending jobs when that
+observation is at most ten seconds old. It checks freshness again after the
+pending-job HTTP request, before claiming the job. This uses HA's existing
+scanners; it neither clears shared advertisement history nor starts a scanner.
+
+Timer and discovery events share the same per-address in-flight guard. The
+Bridge's atomic claim, expiry, exact identity and plan validation, GATT and MTU
+checks, and single connection attempt remain unchanged. Unloading unregisters
+the timer and callback and prevents unclaimed work from starting; an already
+claimed transfer is allowed to finish. Simulated tests cover late queueing
+without another callback, overlapping triggers, stale/missing observations,
+expiry, claim rejection and unload. These are not physical delivery evidence.
+
+The fixed three-minute canary job can expire before the next approximately
+5.5-minute receive window. An expired job with zero attempts is not proof that
+the radio or firmware failed. This change does not extend an authorized job's
+expiry or automatically requeue it.
+
 Use these externally visible states:
 
 - `queued` - a validated render exists;
