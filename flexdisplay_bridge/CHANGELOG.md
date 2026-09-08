@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.50.6
+
+- Fix stock TOP52810 Bluetooth discovery when advertisements omit service
+  UUIDs, as observed through a Home Assistant ESPHome proxy.
+- Preserve exact queued identity validation before connection and GATT
+  service, characteristic and MTU checks before any write.
+- Add simulated manager regression tests for UUID-free advertisements and
+  identity, connection and pre-write failure guards.
+- Keep transfer commands, retry policy, Android versions and packaged device
+  firmware unchanged. Physical tag delivery requires a separate canary test.
+
 ## 0.50.5
 
 - Initialize both the FlexDisplay coordinator entity and Home Assistant image
