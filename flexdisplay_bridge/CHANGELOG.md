@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.50.8
+
+- Add an experimental Home Assistant device page for the admitted TOP52810 F6ED
+  stock-BLE canary, separate from normal receiver and firmware controls.
+- Show Bluetooth-window, last-seen, delivery-status and refresh-acknowledgement
+  sensors from authenticated job summaries and matching BLE observations.
+- Add an explicit hash-checked diagnostic-image button with a fifteen-minute
+  expiry, one transport attempt and atomic active-job duplicate protection.
+- Preserve the distinction between refresh acknowledgement and a visually
+  verified image. No sends occur on discovery, polling or startup.
+- Keep Android versions and all packaged firmware unchanged.
+
 ## 0.50.7
 
 - Pick up stock TOP52810 jobs queued after initial Bluetooth discovery, even

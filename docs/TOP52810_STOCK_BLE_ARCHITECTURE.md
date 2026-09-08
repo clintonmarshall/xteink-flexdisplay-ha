@@ -194,7 +194,7 @@ only the newest authorized image remains pending. A normal delivery may take
 up to the next receive window plus approximately 6-8 seconds for transfer and
 additional panel settling time.
 
-### Home Assistant device page (development, not yet released)
+### Home Assistant device page (Platform 0.50.8)
 
 `GET /api/v1/stock-ble/top52810/devices` is an authenticated read-only
 summary of explicitly queued identities, including terminal jobs. It contains

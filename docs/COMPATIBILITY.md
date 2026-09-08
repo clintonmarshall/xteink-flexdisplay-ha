@@ -1,9 +1,9 @@
 # Compatibility matrix
 
-Development note: the admitted TOP52810 F6ED canary has a separate experimental
+Platform 0.50.8: the admitted TOP52810 F6ED canary has a separate experimental
 HA device page with status sensors and a hash-checked diagnostic-image button.
 This is not general family admission or arbitrary image/firmware upload. See
-the [stock-tag device-page contract](TOP52810_STOCK_BLE_ARCHITECTURE.md#home-assistant-device-page-development-not-yet-released).
+the [stock-tag device-page contract](TOP52810_STOCK_BLE_ARCHITECTURE.md#home-assistant-device-page-platform-0508).
 
 Platform 0.50.7 adds periodic checks for stock TOP52810 jobs queued after
 Bluetooth discovery, using only recent connectable observations. Integrations
@@ -19,7 +19,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.7 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.8 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
