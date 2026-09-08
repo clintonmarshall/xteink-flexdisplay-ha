@@ -228,7 +228,8 @@ def test_transport_rejects_tampered_plan_before_first_write() -> None:
     assert client.writes == []
 
 
-def test_advertisement_requires_complete_identity_tuple() -> None:
+@pytest.mark.parametrize("services", [[], ["00000200-1212-efde-1523-785fef13d123"]])
+def test_advertisement_requires_complete_identity_tuple(services) -> None:
     job = {
         "address": ADDRESS,
         "expected_name": NAME,
@@ -240,7 +241,7 @@ def test_advertisement_requires_complete_identity_tuple() -> None:
         address=ADDRESS,
         name=NAME,
         manufacturer_data={0x1A28: bytes.fromhex("ffffff00000d")},
-        service_uuids=[job["service_uuid"]],
+        service_uuids=services,
     )
     TRANSPORT.validate_advertisement(job, info)
     info.name = "TRSEPD_BEEF"

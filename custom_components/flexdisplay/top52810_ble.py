@@ -26,7 +26,6 @@ from .top52810_transport import (
 
 LOGGER = logging.getLogger(__name__)
 MANUFACTURER_ID = 0x1A28
-SERVICE_UUID = "00000200-1212-efde-1523-785fef13d123"
 
 
 class Top52810BleManager:
@@ -45,13 +44,12 @@ class Top52810BleManager:
         self._active_addresses: set[str] = set()
 
     def start(self) -> None:
-        """Register one passive callback; do not create a competing scanner."""
+        """Use HA's scanner; stock advertisements omit the GATT service UUID."""
         self._unregister = bluetooth.async_register_callback(
             self._hass,
             self._advertisement,
             BluetoothCallbackMatcher(
                 manufacturer_id=MANUFACTURER_ID,
-                service_uuid=SERVICE_UUID,
                 connectable=True,
             ),
             BluetoothScanningMode.ACTIVE,

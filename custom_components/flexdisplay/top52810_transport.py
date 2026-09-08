@@ -35,7 +35,7 @@ class BleClient(Protocol):
 
 
 def validate_advertisement(job: dict[str, Any], service_info: Any) -> None:
-    """Cross-check the controller-scoped address and complete identity tuple."""
+    """Cross-check advertised identity; verify GATT services after connecting."""
     address = str(getattr(service_info, "address", "") or "").upper()
     name = str(getattr(service_info, "name", "") or "").upper()
     if address != str(job.get("address") or "").upper():
@@ -46,9 +46,9 @@ def validate_advertisement(job: dict[str, Any], service_info: Any) -> None:
     observed = bytes(manufacturer.get(int(job.get("manufacturer_id") or -1), b""))
     if observed.hex() != str(job.get("manufacturer_payload_hex") or ""):
         raise Top52810TransportError("manufacturer data does not match the queued target")
-    services = {str(value).lower() for value in (getattr(service_info, "service_uuids", ()) or ())}
-    if str(job.get("service_uuid") or "").lower() not in services:
-        raise Top52810TransportError("required service UUID was not advertised")
+    # Stock firmware advertises name and manufacturer data, not service UUIDs.
+    # The manager must still verify the queued GATT service and characteristics
+    # on the connected device before execute_claimed_job can issue any writes.
 
 
 def validate_claimed_job(job: dict[str, Any]) -> list[tuple[bytes, bytes | None]]:

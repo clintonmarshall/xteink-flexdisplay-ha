@@ -124,6 +124,21 @@ service and characteristic verification remains mandatory before any write.
 Firmware replacement, a changed BLE address or a different physical unit
 requires a new physically confirmed enrollment.
 
+### Advertisement compatibility (2026-09-08)
+
+Home Assistant's Blue proxy observed `TRSEPD_F6ED` at
+`DF:84:6B:DE:F6:ED` with manufacturer ID `0x1A28`, payload
+`ffffff00000d`, and **no advertised service UUIDs**. Requiring the GATT
+service UUID in the discovery matcher prevented the queued canary from being
+claimed (three-minute expiry, zero transfer attempts).
+
+Discovery therefore matches manufacturer ID and connectability, then checks
+the queued exact address, name and manufacturer payload before claiming or
+connecting. The required GATT service, write-with-response and notification
+characteristics, and ATT MTU are still verified after connection and before
+any write. Missing advertised UUIDs are not evidence of missing GATT services.
+This software correction alone is not proof of a successful physical update.
+
 ## Rendering contract
 
 The generic dashboard renderer currently assumes a minimum width of 240
