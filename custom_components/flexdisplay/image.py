@@ -20,8 +20,9 @@ class FlexDisplayCurrentScreen(FlexDisplayEntity, ImageEntity):
     _attr_translation_key = "current_screen"
     _attr_content_type = "image/png"
 
-    def __init__(self, coordinator, device_id: str) -> None:
-        super().__init__(coordinator, device_id)
+    def __init__(self, hass: HomeAssistant, coordinator, device_id: str) -> None:
+        FlexDisplayEntity.__init__(self, coordinator, device_id)
+        ImageEntity.__init__(self, hass)
         self._attr_unique_id = f"{device_id}_current_screen"
 
     @property
@@ -43,11 +44,10 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     """Create current-screen images for registered devices."""
-    del hass
     setup_dynamic_entities(
         entry,
         async_add_entities,
         lambda coordinator, device_id: (
-            FlexDisplayCurrentScreen(coordinator, device_id),
+            FlexDisplayCurrentScreen(hass, coordinator, device_id),
         ),
     )
