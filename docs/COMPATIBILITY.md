@@ -1,5 +1,12 @@
 # Compatibility matrix
 
+Platform 0.50.7 adds periodic checks for stock TOP52810 jobs queued after
+Bluetooth discovery, using only recent connectable observations. Integrations
+before 0.50.7 can miss late jobs when unchanged advertisements are deduplicated.
+Exact target, plan, expiry, GATT/MTU and single-attempt requirements remain.
+This is a software-only change; it does not establish physical proxy delivery
+or extend the canary job deadline. Android and packaged firmware are unchanged.
+
 Update this table in every release that changes a protocol or minimum version.
 This document records released software compatibility, not live infrastructure.
 Live hostnames, IP addresses, credentials, and current deployment observations
@@ -7,7 +14,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.6 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.7 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |

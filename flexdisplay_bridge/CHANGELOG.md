@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.50.7
+
+- Pick up stock TOP52810 jobs queued after initial Bluetooth discovery, even
+  when Home Assistant deduplicates unchanged advertisements.
+- Check recent connectable observations every five seconds, revalidate their
+  freshness before claiming, and coalesce overlapping discovery/timer events.
+- Preserve exact identity, plan, expiry, GATT/MTU and single-attempt guards;
+  cancel the job-check timer on integration unload.
+- Cover late queueing, stale observations, expiry, claim rejection and unload
+  with simulated regression tests. Physical proxy delivery remains unverified.
+- Keep Android versions, packaged firmware and the canary deadline unchanged.
+
 ## 0.50.6
 
 - Fix stock TOP52810 Bluetooth discovery when advertisements omit service
