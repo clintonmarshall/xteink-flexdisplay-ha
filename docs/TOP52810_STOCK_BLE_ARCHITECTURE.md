@@ -194,6 +194,37 @@ only the newest authorized image remains pending. A normal delivery may take
 up to the next receive window plus approximately 6-8 seconds for transfer and
 additional panel settling time.
 
+### Home Assistant device page (development, not yet released)
+
+`GET /api/v1/stock-ble/top52810/devices` is an authenticated read-only
+summary of explicitly queued identities, including terminal jobs. It contains
+no frames or leases, and does not enroll devices from advertisements.
+
+HA creates **TOP52810 F6ED (experimental)** only for the admitted address
+`DF:84:6B:DE:F6:ED`, name `TRSEPD_F6ED`, manufacturer `0x1A28`, payload
+`ffffff00000d`. Other tags remain unadmitted. Stable device/entity identifiers
+are scoped to config entry and address, separate from generic receiver and
+firmware entity factories. The page contains:
+
+- Bluetooth window: `advertising` for matching connectable observations less
+  than ten seconds old; otherwise `waiting_for_window`, not offline.
+- Last seen: last matching observation available to the current HA run.
+- Delivery status: durable job status, including `physically_unverified`.
+- Last refresh acknowledgement: latest acknowledged refresh across jobs,
+  explicitly **not** proof of a correct physical image.
+- Send diagnostic image: an explicit press checks the immutable diagnostic
+  preview hash, then queues one job with a fifteen-minute expiry and the
+  existing one-attempt/identity/GATT guards. Repeated presses cannot supersede
+  an active job; rejection is atomic in the Bridge job store.
+
+No send occurs on startup, discovery, polling or registration. This is not
+arbitrary image upload, automatic rendering or firmware control. Stock overlay
+limitations still apply. API failures make stock entities unavailable without
+blocking existing receiver setup. An older Bridge missing this endpoint needs
+upgrading before the page appears. Unload removes listeners and shuts down the
+stock status coordinator. The preserved Bridge job store recreates the device
+after restart; physical success still requires user inspection.
+
 ### Jobs queued after Bluetooth discovery
 
 Home Assistant suppresses callbacks for unchanged advertisement payloads (see

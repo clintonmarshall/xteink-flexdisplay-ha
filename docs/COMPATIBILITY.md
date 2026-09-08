@@ -1,5 +1,10 @@
 # Compatibility matrix
 
+Development note: the admitted TOP52810 F6ED canary has a separate experimental
+HA device page with status sensors and a hash-checked diagnostic-image button.
+This is not general family admission or arbitrary image/firmware upload. See
+the [stock-tag device-page contract](TOP52810_STOCK_BLE_ARCHITECTURE.md#home-assistant-device-page-development-not-yet-released).
+
 Platform 0.50.7 adds periodic checks for stock TOP52810 jobs queued after
 Bluetooth discovery, using only recent connectable observations. Integrations
 before 0.50.7 can miss late jobs when unchanged advertisements are deduplicated.

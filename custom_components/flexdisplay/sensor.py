@@ -24,6 +24,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.util.dt import parse_datetime
 
 from .coordinator import FlexDisplayCoordinator
+from .top52810_entity import setup_top52810_entities
 from .device_capabilities import (
     firmware_manageable,
     input_event_types,
@@ -758,6 +759,7 @@ async def async_setup_entry(
 ) -> None:
     """Create sensors for devices already registered with the bridge."""
     del hass
+    setup_top52810_entities(entry, async_add_entities)
     setup_dynamic_entities(
         entry,
         async_add_entities,

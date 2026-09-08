@@ -10,6 +10,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .coordinator import FlexDisplayCoordinator
+from .top52810_entity import setup_top52810_entities
 from .device_capabilities import (
     is_android_companion,
     is_android_receiver,
@@ -362,6 +363,7 @@ async def async_setup_entry(
 ) -> None:
     """Create refresh buttons for registered devices."""
     del hass
+    setup_top52810_entities(entry, async_add_entities, buttons=True)
 
     def entities_for_device(
         coordinator: FlexDisplayCoordinator, device_id: str

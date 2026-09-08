@@ -23,6 +23,7 @@ from .const import (
 )
 from .coordinator import FlexDisplayCoordinator
 from .top52810_ble import Top52810BleManager
+from .top52810_entity import Top52810Coordinator
 
 DATA_COORDINATORS = "coordinators"
 DATA_TOP52810_MANAGERS = "top52810_managers"
@@ -221,6 +222,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     coordinator = FlexDisplayCoordinator(hass, client, entry.entry_id)
     await coordinator.async_config_entry_first_refresh()
     entry.runtime_data = coordinator
+    coordinator.top52810 = Top52810Coordinator(hass, client, entry.entry_id)
+    # Optional endpoint: failure must not prevent existing receiver setup.
+    await coordinator.top52810.async_refresh()
     hass.data.setdefault(DOMAIN, {}).setdefault(DATA_COORDINATORS, {})[
         entry.entry_id
     ] = coordinator
@@ -255,4 +259,5 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     manager = managers.pop(entry.entry_id, None)
     if manager:
         manager.stop()
+    await entry.runtime_data.top52810.async_shutdown()
     return True

@@ -42,6 +42,42 @@ def _load_transport() -> ModuleType:
 TRANSPORT = _load_transport()
 
 
+def test_device_summary_persists_and_duplicate_button_send_is_atomic(tmp_path):
+    settings = BridgeConfig(state_path=tmp_path / "state.json", api_key=KEY)
+    app = create_app(settings)
+    with TestClient(app) as client:
+        url = "/api/v1/stock-ble/top52810/devices"
+        assert client.get(url).status_code in {401, 403}
+        assert client.get(url, headers=_headers()).json() == {"devices": []}
+        plan = client.post("/api/v1/stock-ble/top52810/plans/preview", headers=_headers(),
+                           json={"pattern": "diagnostic", "sid": "A1B2C3"}).json()
+        payload = {"pattern": "diagnostic", "sid": "A1B2C3", "address": ADDRESS,
+                   "expected_name": NAME, "expected_plan_sha256": plan["plan_sha256"],
+                   "reject_if_active": True}
+        job = client.post("/api/v1/stock-ble/top52810/jobs", headers=_headers(), json=payload).json()
+        for phase in ("waiting_for_window", "transferring", "refresh_started"):
+            if phase == "transferring":
+                claimed = app.state.top52810_jobs.claim(job["job_id"], "test")
+            if phase == "refresh_started":
+                app.state.top52810_jobs.report(job["job_id"], claimed["lease"], phase)
+            assert client.post("/api/v1/stock-ble/top52810/jobs", headers=_headers(), json=payload).status_code == 400
+            records = client.get(url, headers=_headers()).json()["devices"]
+            assert len(records) == 1
+            assert records[0]["status"] == phase
+            assert records[0]["active"] is True
+            assert "frames" not in records[0] and "lease" not in records[0]
+        app.state.top52810_jobs.report(job["job_id"], claimed["lease"], "physically_unverified")
+        record = client.get(url, headers=_headers()).json()["devices"][0]
+        assert record["last_refresh_ack"]
+        assert record["active"] is False
+        # A subsequent queued job must not erase the previous refresh timestamp.
+        assert client.post("/api/v1/stock-ble/top52810/jobs", headers=_headers(), json=payload).status_code == 200
+        assert client.get(url, headers=_headers()).json()["devices"][0]["last_refresh_ack"] == record["last_refresh_ack"]
+    store = Top52810JobStore(settings.state_path.with_name("flexdisplay-top52810-jobs.json"))
+    assert store.devices()[0]["address"] == ADDRESS
+    assert store.devices()[0]["last_refresh_ack"] == record["last_refresh_ack"]
+
+
 def test_preview_is_read_only_and_queue_requires_exact_hash(tmp_path) -> None:
     app = create_app(BridgeConfig(state_path=tmp_path / "state.json", api_key=KEY))
     with TestClient(app) as client:

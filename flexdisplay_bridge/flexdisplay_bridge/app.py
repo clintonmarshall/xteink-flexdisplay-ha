@@ -3473,6 +3473,12 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         authorize_sensitive(request)
         return top52810_plan_summary(payload)
 
+    @app.get("/api/v1/stock-ble/top52810/devices")
+    def top52810_devices(request: Request) -> dict[str, Any]:
+        """Read explicitly queued stock-tag identities and sanitized job status."""
+        authorize_sensitive(request)
+        return {"devices": top52810_jobs.devices()}
+
     @app.post("/api/v1/stock-ble/top52810/jobs")
     def queue_top52810_job(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
         """Queue one explicitly hash-confirmed canary for an advertisement window."""
@@ -3505,6 +3511,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 sid=str(summary["sid"]),
                 frames=[frame.as_record() for frame in plan.frames],
                 expires_seconds=int(payload.get("expires_seconds") or 900),
+                reject_if_active=payload.get("reject_if_active") is True,
             )
         except (TypeError, ValueError) as err:
             raise HTTPException(status_code=400, detail=str(err)) from err

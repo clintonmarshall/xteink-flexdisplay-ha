@@ -264,6 +264,28 @@ class FlexDisplayApiClient:
         """Reset the Bridge-side Meshtastic unread counter."""
         return await self._request("POST", "/api/v1/flexhub/meshtastic/read")
 
+    async def top52810_devices(self) -> list[dict[str, Any]]:
+        """Read stock-tag records without scanning or claiming jobs."""
+        payload = await self._request("GET", "/api/v1/stock-ble/top52810/devices")
+        return payload["devices"]
+
+    async def send_top52810_diagnostic(self, address: str, name: str) -> dict[str, Any]:
+        """Queue the known diagnostic only after validating its immutable preview."""
+        plan = await self._request(
+            "POST", "/api/v1/stock-ble/top52810/plans/preview",
+            json={"pattern": "diagnostic", "sid": "A1B2C3"},
+        )
+        expected = "9da514d391bfd40e444138f87d7aa8b06445633b2c37a22fa6a5969d11707876"
+        if (plan.get("plan_sha256") != expected or plan.get("write_count") != 44
+                or plan.get("device_io") is not False):
+            raise FlexDisplayApiError("Diagnostic plan changed; refusing to send")
+        return await self._request(
+            "POST", "/api/v1/stock-ble/top52810/jobs",
+            json={"pattern": "diagnostic", "sid": "A1B2C3", "address": address,
+                  "expected_name": name, "expected_plan_sha256": expected,
+                  "expires_seconds": 900, "reject_if_active": True},
+        )
+
     async def pending_top52810_job(self, address: str) -> dict[str, Any] | None:
         """Return the newest hash-confirmed job waiting for this BLE address."""
         payload = await self._request(

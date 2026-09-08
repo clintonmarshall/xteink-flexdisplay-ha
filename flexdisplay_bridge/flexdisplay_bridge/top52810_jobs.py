@@ -106,6 +106,7 @@ class Top52810JobStore:
         sid: str,
         frames: list[dict[str, Any]],
         expires_seconds: int = 900,
+        reject_if_active: bool = False,
     ) -> dict[str, Any]:
         address = address.strip().upper()
         if not ADDRESS.fullmatch(address):
@@ -123,6 +124,12 @@ class Top52810JobStore:
         now = datetime.now(UTC)
         with self._lock:
             self.expire(now=now)
+            if reject_if_active and any(
+                job.get("address") == address
+                and job.get("status") in ACTIVE | {"refresh_started"}
+                for job in self._state["jobs"].values()
+            ):
+                raise ValueError("A job is already active for this tag")
             for existing in self._state["jobs"].values():
                 if existing.get("address") == address and existing.get("status") in ACTIVE:
                     existing["status"] = "superseded"
@@ -174,6 +181,36 @@ class Top52810JobStore:
                 changed = True
         if changed:
             self._save()
+
+    def devices(self) -> list[dict[str, Any]]:
+        """Expose only explicitly queued identities, never scan-based enrollment."""
+        with self._lock:
+            self.expire()
+            latest: dict[str, dict[str, Any]] = {}
+            refreshes: dict[str, str] = {}
+            for job in self._state["jobs"].values():
+                address = job["address"]
+                if address not in latest or job["job_id"] > latest[address]["job_id"]:
+                    latest[address] = job
+                for event in job.get("status_history", []):
+                    if event.get("status") == "refresh_started":
+                        refreshes[address] = max(refreshes.get(address, ""), event["at"])
+            return [
+                {
+                    "address": address,
+                    "expected_name": job["expected_name"],
+                    "manufacturer_id": job["manufacturer_id"],
+                    "manufacturer_payload_hex": job["manufacturer_payload_hex"],
+                    "status": job["status"],
+                    "job_id": job["job_id"],
+                    "updated_at": job["updated_at"],
+                    "last_refresh_ack": refreshes.get(address),
+                    "attempt_count": job["attempt_count"],
+                    "active": job["status"] in ACTIVE | {"refresh_started"},
+                    "experimental": True,
+                }
+                for address, job in sorted(latest.items())
+            ]
 
     def pending(self, address: str) -> dict[str, Any] | None:
         address = address.strip().upper()
