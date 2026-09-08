@@ -1,11 +1,11 @@
 {
   "$schema": "docs/release-manifest.schema.json",
   "schema_version": 1,
-  "recorded_at": "2026-09-07",
+  "recorded_at": "2026-09-08",
   "platform": {
-    "version": "0.50.4",
-    "release_tag": "v0.50.4",
-    "release_commit": "c8f8d8196766663964e6abf50e4b24478e5816ad",
+    "version": "0.50.5",
+    "release_tag": "v0.50.5",
+    "release_commit": "e07d65e63498b9136cf57abbd89ad9332eecb0f3",
     "released_at": null,
     "classification": "software-only"
   },

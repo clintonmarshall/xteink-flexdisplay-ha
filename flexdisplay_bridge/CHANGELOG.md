@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.50.5
+
+- Initialize both the FlexDisplay coordinator entity and Home Assistant image
+  entity bases for each current-screen entity.
+- Pass the Home Assistant instance into image-entity construction so its HTTP
+  client and rotating access tokens are available after Core startup.
+- Add focused regression coverage for current-screen image entity setup.
+- Keep Bridge behavior, device-family behavior, Android receiver versions, and
+  packaged firmware bytes unchanged.
+
 ## 0.50.4
 
 - Correct protected Core-restart reconciliation so the failed workflow is
