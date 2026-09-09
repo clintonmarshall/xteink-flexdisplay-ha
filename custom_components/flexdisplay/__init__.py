@@ -141,6 +141,9 @@ def _coordinator_for_call(
 
 def _register_services(hass: HomeAssistant) -> None:
     """Register integration actions once for all config entries."""
+    from .top52810_services import register_image_services
+
+    register_image_services(hass, _coordinator_for_call)
     if not hass.services.has_service(DOMAIN, SERVICE_SEND_MESHTASTIC_MESSAGE):
 
         async def send_meshtastic(call: ServiceCall) -> None:

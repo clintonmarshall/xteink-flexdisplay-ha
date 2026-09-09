@@ -22,6 +22,7 @@ dependencies = [
 test = [
   "httpx>=0.27,<1",
   "pytest>=8,<9",
+  "voluptuous>=0.15,<1",
 ]
 
 [project.scripts]

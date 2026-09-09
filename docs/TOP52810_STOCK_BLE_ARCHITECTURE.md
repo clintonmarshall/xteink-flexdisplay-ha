@@ -295,6 +295,53 @@ candidate. The tested unit has independently verified private flash and UICR
 recovery artifacts, but their presence does not authorize platform firmware
 actions or establish compatibility for another unit.
 
+## Custom-image actions (development)
+
+Unreleased: custom images use the existing HA BLE executor and durable queue,
+not a new scanner. Only `DF:84:6B:DE:F6:ED` / `TRSEPD_F6ED` is admitted.
+
+Prepare a single **128 x 296 PNG**, at most 128 KiB, as raw base64 (no data-URI
+prefix). Remote URLs and server-local paths are not accepted. Animation and
+other formats are rejected. Transparency is composited onto white, then pixels
+are quantized deterministically to black/white/red without resizing or dithering.
+
+Call `flexdisplay.preview_top52810_image` with `image_base64` and optional
+`config_entry_id` (required when multiple Bridges are configured). Request its
+action response. It returns `plan_sha256`, `logical_png_base64` and
+`stock_png_base64`, without creating a job or performing BLE I/O. Decode the
+two preview fields as PNGs and inspect the expected stock hatch bands.
+
+```yaml
+- action: flexdisplay.preview_top52810_image
+  data:
+    image_base64: "{{ png_base64 }}"
+  response_variable: image_preview
+```
+
+After approving the preview, run the send separately with the same image bytes
+and the returned hash:
+
+```yaml
+- action: flexdisplay.send_top52810_image
+  data:
+    image_base64: "{{ png_base64 }}"
+    expected_plan_sha256: "<confirmed 64-character plan hash>"
+  response_variable: image_job
+```
+
+The client rechecks the preview; the Bridge independently regenerates and
+verifies the plan. Changed pixels or SID require new confirmation. The Bridge
+preview/jobs APIs use `pattern: image` and `image_base64`. Raw image input is
+not retained in the job; the existing durable frames still encode its pixels.
+Custom images cannot replace active jobs. Each job allows one attempt within
+900 seconds, and retains exact advertisement/GATT/MTU/ACK validation.
+
+Follow the returned job ID using the delivery-status sensor or authenticated
+job API. A refresh ACK is not physical verification. Inspect the screen.
+This does not change firmware, clear busy state, alter disconnect timing or
+repair device-registry linkage. Rollback is another separately approved image
+write; stock overlays remain a limitation. No image is sent by setup or preview.
+
 ## Admission and implementation phases
 
 1. **Architecture:** merge this ownership, identity, capability, transport,

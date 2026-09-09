@@ -269,6 +269,28 @@ class FlexDisplayApiClient:
         payload = await self._request("GET", "/api/v1/stock-ble/top52810/devices")
         return payload["devices"]
 
+    async def preview_top52810_image(self, image_base64: str) -> dict[str, Any]:
+        """Offline preview only; an explicit send must repeat the plan hash."""
+        return await self._request(
+            "POST", "/api/v1/stock-ble/top52810/plans/preview",
+            json={"pattern": "image", "image_base64": image_base64, "sid": "A1B2C3"},
+        )
+
+    async def send_top52810_image(self, image_base64: str, expected_plan_sha256: str) -> dict[str, Any]:
+        """Queue one hash-confirmed custom image for the admitted tag only."""
+        plan = await self.preview_top52810_image(image_base64)
+        if (plan.get("plan_sha256") != expected_plan_sha256
+                or plan.get("write_count") != 44 or plan.get("device_io") is not False):
+            raise FlexDisplayApiError("Image plan changed; preview and confirm again")
+        job = await self._request(
+            "POST", "/api/v1/stock-ble/top52810/jobs",
+            json={"pattern": "image", "image_base64": image_base64, "sid": "A1B2C3",
+                  "address": "DF:84:6B:DE:F6:ED", "expected_name": "TRSEPD_F6ED",
+                  "expected_plan_sha256": expected_plan_sha256,
+                  "expires_seconds": 900, "reject_if_active": True},
+        )
+        return {key: value for key, value in job.items() if key not in {"frames", "lease"}}
+
     async def send_top52810_diagnostic(self, address: str, name: str) -> dict[str, Any]:
         """Queue the known diagnostic only after validating its immutable preview."""
         plan = await self._request(

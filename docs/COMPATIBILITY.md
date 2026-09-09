@@ -1,5 +1,10 @@
 # Compatibility matrix
 
+Development (unreleased): the TOP52810 F6ED canary supports hash-confirmed
+custom PNG delivery through HA. Bridge and integration must both include this
+feature; older versions retain diagnostic-only actions and reject image payloads.
+See [custom-image actions](TOP52810_STOCK_BLE_ARCHITECTURE.md#custom-image-actions-development).
+
 Platform 0.50.8: the admitted TOP52810 F6ED canary has a separate experimental
 HA device page with status sensors and a hash-checked diagnostic-image button.
 This is not general family admission or arbitrary image/firmware upload. See

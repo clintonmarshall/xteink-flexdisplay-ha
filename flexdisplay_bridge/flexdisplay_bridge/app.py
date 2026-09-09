@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import io
@@ -22,6 +23,8 @@ from fastapi.responses import FileResponse, RedirectResponse
 from PIL import Image
 
 from . import __version__
+from .top52810_image import decode_image
+from .top52810_renderer import pixels_to_png, stock_effective_pixels
 from .api.flexhub import FlexHubRouterDependencies, create_flexhub_router
 from .button_actions import (
     BUTTONS as CONFIGURABLE_BUTTONS,
@@ -3430,7 +3433,14 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
     def top52810_plan(payload: dict[str, Any]) -> tuple[tuple[Top52810Color, ...], Any]:
         """Build a bounded, deterministic canary plan without device I/O."""
         pattern = str(payload.get("pattern") or "diagnostic").strip().lower()
-        if pattern == "diagnostic":
+        if pattern != "image" and "image_base64" in payload:
+            raise HTTPException(status_code=400, detail="image_base64 requires pattern image")
+        if pattern == "image":
+            try:
+                pixels = decode_image(payload.get("image_base64"))
+            except ValueError as err:
+                raise HTTPException(status_code=400, detail=str(err)) from err
+        elif pattern == "diagnostic":
             pixels = render_diagnostic_pixels()
         elif pattern in {"white", "black", "red"}:
             color = {
@@ -3442,7 +3452,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         else:
             raise HTTPException(
                 status_code=400,
-                detail="Canary pattern must be diagnostic, white, black, or red",
+                detail="Canary pattern must be diagnostic, white, black, red, or image",
             )
         try:
             sid = int(str(payload.get("sid") or "A1B2C3"), 16)
@@ -3465,6 +3475,11 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             "write_count": len(plan.frames),
             "device_io": False,
             "status": "preview_only",
+            **({
+                "logical_png_base64": base64.b64encode(pixels_to_png(pixels)).decode("ascii"),
+                "stock_png_base64": base64.b64encode(pixels_to_png(stock_effective_pixels(pixels))).decode("ascii"),
+                "physical_image_verified": False,
+            } if str(payload.get("pattern") or "").strip().lower() == "image" else {}),
         }
 
     @app.post("/api/v1/stock-ble/top52810/plans/preview")
@@ -3492,6 +3507,9 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
             )
         address = str(payload.get("address") or "").strip().upper()
         expected_name = str(payload.get("expected_name") or "").strip().upper()
+        custom_image = summary["pattern"] == "image"
+        if custom_image and (address != "DF:84:6B:DE:F6:ED" or expected_name != "TRSEPD_F6ED"):
+            raise HTTPException(status_code=400, detail="Custom images are limited to the admitted TOP52810 F6ED tag")
         if not re.fullmatch(r"TRSEPD_[0-9A-F]{4}", expected_name):
             raise HTTPException(status_code=400, detail="Expected name must match TRSEPD_XXXX")
         if expected_name[-4:] != address.replace(":", "")[-4:]:
@@ -3511,7 +3529,7 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 sid=str(summary["sid"]),
                 frames=[frame.as_record() for frame in plan.frames],
                 expires_seconds=int(payload.get("expires_seconds") or 900),
-                reject_if_active=payload.get("reject_if_active") is True,
+                reject_if_active=custom_image or payload.get("reject_if_active") is True,
             )
         except (TypeError, ValueError) as err:
             raise HTTPException(status_code=400, detail=str(err)) from err

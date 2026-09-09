@@ -1,3 +1,38 @@
+preview_top52810_image:
+  name: Preview TOP52810 image
+  description: Preview a native 128 x 296 PNG for the experimental F6ED tag without any Bluetooth writes. Returns a plan hash and logical/stock previews.
+  fields:
+    image_base64:
+      name: PNG image (base64)
+      description: Raw base64 PNG, at most 128 KiB decoded. No URL or data URI. Transparency is composited onto white.
+      required: true
+      selector:
+        text:
+          multiline: true
+    config_entry_id:
+      name: FlexDisplay config entry
+      selector:
+        text:
+send_top52810_image:
+  name: Send TOP52810 image
+  description: Overwrite experimental tag DF:84:6B:DE:F6:ED once with a previewed image. Requires the preview plan hash. Stock hatch bands may remain; acknowledgement is not visual verification.
+  fields:
+    image_base64:
+      name: PNG image (base64)
+      description: Exactly the same base64 PNG used for the preview.
+      required: true
+      selector:
+        text:
+          multiline: true
+    expected_plan_sha256:
+      name: Confirmed preview plan SHA-256
+      required: true
+      selector:
+        text:
+    config_entry_id:
+      name: FlexDisplay config entry
+      selector:
+        text:
 send_meshtastic_message:
   name: Send Meshtastic message
   description: Send a broadcast or direct text message through the SenseCAP FlexHub.
