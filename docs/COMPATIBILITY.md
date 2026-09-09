@@ -1,5 +1,13 @@
 # Compatibility matrix
 
+Platform 0.50.11: Studio can use the authenticated Home Assistant ingress
+session without a Bridge-key prompt. Trust requires the actual Supervisor
+socket peer and valid ingress identity headers; standalone ingress trust is
+disabled by default. Direct LAN access retains Bridge-key authentication.
+This does not add per-user Bridge roles. Live authentication and recovery
+checks remain required before deploying the change to a named pilot.
+Image conversion, tag admission, BLE timing and packaged firmware are unchanged.
+
 Platform 0.50.10: Content adds PNG/JPEG upload, Fit/Crop preview and
 explicit send for the admitted F6ED tag. HA image actions also accept regular
 files under /media. File actions require Bridge and integration 0.50.10;
@@ -31,7 +39,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.10 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.11 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |

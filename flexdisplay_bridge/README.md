@@ -11,7 +11,7 @@ unchanged.
 
 After installation:
 
-### Studio authentication (development, not yet released)
+### Studio authentication (platform 0.50.11)
 
 Studio opened through Home Assistant ingress uses the authenticated Home
 Assistant session without copying the Bridge API key into the browser. The

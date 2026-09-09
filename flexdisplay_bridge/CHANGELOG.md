@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.50.11
+
+- Use the authenticated Home Assistant ingress session for Studio access,
+  avoiding a repeated Bridge API-key prompt when opened through Home Assistant.
+- Require the actual Supervisor socket peer and valid, non-duplicate ingress
+  identity headers; forwarded-IP headers cannot establish trust.
+- Keep standalone ingress trust disabled by default and preserve direct LAN
+  Bridge-key authentication as the independent administrator recovery path.
+- Do not rotate keys, add permanent browser credential storage, or introduce
+  per-user Bridge roles; ingress access retains existing Studio capabilities.
+- Add authentication boundary tests. Live login, logout/session-expiry,
+  forged-header rejection and direct-key recovery still need a named pilot.
+- Keep image conversion, tag admission, BLE timing, Android and packaged
+  device firmware unchanged. This is a software-only release candidate.
+
 ## 0.50.10
 
 - Add a Content workspace flow for the admitted TOP52810 F6ED tag: upload a
