@@ -264,6 +264,7 @@ class BridgeConfig:
     title: str = "HOME ASSISTANT"
     state_path: Path = Path("/data/flexdisplay-state.json")
     api_key: str = ""
+    ingress_auth_enabled: bool = False
     # Bridge-only HMAC master. Receivers are provisioned with a derived,
     # device-bound 64-character key and never receive this value.
     receiver_key_master: str = ""
@@ -924,6 +925,7 @@ def load_config(path: str | Path | None = None) -> BridgeConfig:
         title=os.getenv("FLEXDISPLAY_DASHBOARD_TITLE", str(raw.get("dashboard", {}).get("title") or "HOME ASSISTANT")),
         state_path=state_path,
         api_key=os.getenv(api_key_env, str(raw.get("server", {}).get("api_key") or "")),
+        ingress_auth_enabled=os.getenv("FLEXDISPLAY_INGRESS_AUTH_ENABLED", "false") == "true",
         receiver_key_master=receiver_key_master,
         home_assistant=ha,
         mqtt=mqtt,

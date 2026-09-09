@@ -11,6 +11,34 @@ unchanged.
 
 After installation:
 
+### Studio authentication (development, not yet released)
+
+Studio opened through Home Assistant ingress uses the authenticated Home
+Assistant session without copying the Bridge API key into the browser. The
+Supervisor-managed App runner enables this only when its options file exists;
+standalone deployments default to key authentication. The backend requires the
+actual socket peer `172.30.32.2`, one valid `X-Ingress-Path`, and one valid
+`X-Remote-User-Id`. Forwarded-IP headers never establish trust, and the App must
+retain Uvicorn `proxy_headers=False`. Do not enable this behind another proxy
+that rewrites the client address or forwards untrusted identity headers.
+
+Ingress users have the existing Studio management capabilities; this does not
+implement per-user Bridge roles. Restrict Home Assistant App/ingress access to
+the intended operators. Direct LAN access still requires the configured Bridge
+key, preserving an independent administrator recovery path. No key is rotated,
+embedded in HTML/URLs, or newly persisted in browser storage. Existing direct
+access retains its session-only key prompt.
+
+Before deployment, verify the actual Supervisor peer and injected user headers
+without logging ingress tokens; test login, logout/session expiry, forged
+headers from a LAN client, and the direct-key recovery path on one DumbHA
+pilot. Deployment/restart and any device writes remain separately authorized.
+
+See [Home Assistant ingress](https://developers.home-assistant.io/docs/apps/presentation/)
+and [ingress identity headers](https://developers.home-assistant.io/docs/apps/security/).
+
+### Setup
+
 1. Start the app.
 2. Confirm `http://HOME_ASSISTANT_IP:8099/healthz` responds.
 3. Power on a FlexDisplay 0.10.0 fleet device; it registers and receives its

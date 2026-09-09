@@ -272,6 +272,11 @@ def mqtt_options(
 
 def main() -> None:
     """Configure and launch the bridge."""
+    # Only the Supervisor-managed App opts into ingress authentication.
+    # Keep proxy_headers=False below: authentication uses the real socket peer.
+    os.environ["FLEXDISPLAY_INGRESS_AUTH_ENABLED"] = (
+        "true" if OPTIONS_PATH.is_file() else "false"
+    )
     options = json.loads(OPTIONS_PATH.read_text(encoding="utf-8")) if OPTIONS_PATH.exists() else {}
     supervisor_token = os.getenv("SUPERVISOR_TOKEN", "")
     os.environ["FLEXDISPLAY_HA_TOKEN"] = supervisor_token

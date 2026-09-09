@@ -23,6 +23,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from PIL import Image
 
 from . import __version__
+from .ingress_auth import authenticated_ingress
 from .top52810_image import decode_image, prepare_image, MAX_UPLOAD_BYTES
 from .top52810_renderer import pixels_to_png, stock_effective_pixels
 from .api.flexhub import FlexHubRouterDependencies, create_flexhub_router
@@ -4881,6 +4882,8 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
         }
 
     def authorize(request: Request) -> None:
+        if authenticated_ingress(request, enabled=settings.ingress_auth_enabled):
+            return
         if (
             settings.api_key
             and request.headers.get("X-FlexDisplay-Bridge-Key") != settings.api_key
