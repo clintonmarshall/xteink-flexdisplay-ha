@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.50.9
+
+- Add explicit Home Assistant preview and hash-confirmed send actions for
+  custom images on the admitted TOP52810 F6ED stock-BLE canary.
+- Accept one native 128 x 296 PNG supplied as raw base64, limited to 128 KiB,
+  composite transparency onto white and quantize to black/white/red.
+- Return logical and predicted stock-overlay previews without device I/O;
+  regenerate and verify the exact plan hash before queueing a send.
+- Preserve fixed-target admission, atomic active-job protection, fifteen-minute
+  expiry and the existing single-attempt Bluetooth transport safeguards.
+- Require both Bridge and integration 0.50.9 for custom-image actions. Live
+  custom-image delivery through HA remains subject to a separate canary test.
+- Keep Android versions, packaged firmware and Bluetooth timing unchanged.
+
 ## 0.50.8
 
 - Add an experimental Home Assistant device page for the admitted TOP52810 F6ED

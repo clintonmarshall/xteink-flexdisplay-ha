@@ -1,9 +1,10 @@
 # Compatibility matrix
 
-Development (unreleased): the TOP52810 F6ED canary supports hash-confirmed
-custom PNG delivery through HA. Bridge and integration must both include this
-feature; older versions retain diagnostic-only actions and reject image payloads.
-See [custom-image actions](TOP52810_STOCK_BLE_ARCHITECTURE.md#custom-image-actions-development).
+Platform 0.50.9: the TOP52810 F6ED canary supports hash-confirmed custom PNG
+delivery through HA. Bridge and integration must both be at least 0.50.9;
+older versions retain diagnostic-only actions and reject image payloads.
+Live custom-image delivery through HA requires a separately verified canary.
+See [custom-image actions](TOP52810_STOCK_BLE_ARCHITECTURE.md#custom-image-actions-platform-0509).
 
 Platform 0.50.8: the admitted TOP52810 F6ED canary has a separate experimental
 HA device page with status sensors and a hash-checked diagnostic-image button.
@@ -24,7 +25,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.8 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.9 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |

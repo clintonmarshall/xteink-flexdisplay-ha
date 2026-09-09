@@ -295,10 +295,11 @@ candidate. The tested unit has independently verified private flash and UICR
 recovery artifacts, but their presence does not authorize platform firmware
 actions or establish compatibility for another unit.
 
-## Custom-image actions (development)
+## Custom-image actions (Platform 0.50.9)
 
-Unreleased: custom images use the existing HA BLE executor and durable queue,
-not a new scanner. Only `DF:84:6B:DE:F6:ED` / `TRSEPD_F6ED` is admitted.
+Custom images require Bridge and integration 0.50.9 or later and use the
+existing HA BLE executor and durable queue, not a new scanner.
+Only `DF:84:6B:DE:F6:ED` / `TRSEPD_F6ED` is admitted.
 
 Prepare a single **128 x 296 PNG**, at most 128 KiB, as raw base64 (no data-URI
 prefix). Remote URLs and server-local paths are not accepted. Animation and
