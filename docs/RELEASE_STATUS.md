@@ -11,9 +11,9 @@ operational claim or change.
 
 | Field | Recorded value |
 | --- | --- |
-| Platform | `0.50.9` |
-| Tag | `v0.50.9` |
-| Commit | `615f2992447107cb1588a48d814dc8c7944eb07f` |
+| Platform | `0.50.10` |
+| Tag | `v0.50.10` |
+| Commit | `8d05970974335feb0351aa29d96efd138c1b3416` |
 | Released | `None` |
 | Classification | `software-only` |
 

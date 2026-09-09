@@ -343,8 +343,9 @@ This does not change firmware, clear busy state, alter disconnect timing or
 repair device-registry linkage. Rollback is another separately approved image
 write; stock overlays remain a limitation. No image is sent by setup or preview.
 
-## Image upload and HA media files (development)
+## Image upload and HA media files (Platform 0.50.10)
 
+HA media-file actions require both Bridge and integration 0.50.10 or later.
 In the Bridge web interface, open **Content**, choose the admitted F6ED tag,
 choose a PNG/JPEG, choose **Fit** (white padding) or **Crop** (center crop),
 and click **Preview image**. Compare the converted image with the predicted

@@ -1,9 +1,10 @@
 # Compatibility matrix
 
-Development (unreleased): Content adds PNG/JPEG upload, Fit/Crop preview and
+Platform 0.50.10: Content adds PNG/JPEG upload, Fit/Crop preview and
 explicit send for the admitted F6ED tag. HA image actions also accept regular
-files under /media. Both require the new Bridge conversion endpoint; native
-base64 actions remain compatible. Tag admission and BLE timing are unchanged.
+files under /media. File actions require Bridge and integration 0.50.10;
+older versions retain native-base64 actions without file conversion.
+Tag admission and BLE timing are unchanged.
 
 Platform 0.50.9: the TOP52810 F6ED canary supports hash-confirmed custom PNG
 delivery through HA. Bridge and integration must both be at least 0.50.9;
@@ -30,7 +31,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.9 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.10 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.50.10
+
+- Add a Content workspace flow for the admitted TOP52810 F6ED tag: upload a
+  PNG/JPEG, choose Fit or Crop, preview the converted and predicted stock
+  appearance, then explicitly confirm Send without copying base64 or hashes.
+- Extend HA image actions with regular image files under /media. Both paths
+  share bounded conversion with EXIF orientation, white transparency
+  composition, native-size resizing and black/white/red quantization.
+- Limit source images to 5 MiB and 12 million pixels; reject animation,
+  traversal and symlink-based media access.
+- Invalidate changed/stale previews, prevent duplicate clicks and preserve
+  hash confirmation, active-job protection and single-attempt delivery.
+- Keep native base64 actions compatible. Bridge and integration 0.50.10 are
+  required for HA media-file actions; live delivery needs a separate canary.
+- Keep Android, packaged firmware, tag admission and BLE timing unchanged.
+
 ## 0.50.9
 
 - Add explicit Home Assistant preview and hash-confirmed send actions for
