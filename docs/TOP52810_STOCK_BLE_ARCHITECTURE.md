@@ -343,6 +343,49 @@ This does not change firmware, clear busy state, alter disconnect timing or
 repair device-registry linkage. Rollback is another separately approved image
 write; stock overlays remain a limitation. No image is sent by setup or preview.
 
+## Image upload and HA media files (development)
+
+In the Bridge web interface, open **Content**, choose the admitted F6ED tag,
+choose a PNG/JPEG, choose **Fit** (white padding) or **Crop** (center crop),
+and click **Preview image**. Compare the converted image with the predicted
+stock-firmware appearance. Click **Send to F6ED** and confirm the overwrite.
+Changing the file or layout invalidates the preview. A stale asynchronous
+preview cannot enable Send. After sending, use **Check delivery** and inspect
+the actual panel. If a send request fails, check HA delivery status before
+retrying: a lost response may still mean the job was queued.
+
+The existing HA preview/send actions accept exactly one of `image_file` or
+`image_base64`. Use an absolute path such as `/media/dog.jpg` on the HA host,
+not a Mac path or a URL. Files must be regular, non-symlink files beneath
+/media, with no parent-directory traversal. Reads run in HA's executor:
+
+```yaml
+action: flexdisplay.preview_top52810_image
+data:
+  image_file: /media/dog.jpg
+  resize_mode: fit
+response_variable: preview
+```
+
+Run send separately with the same file/layout and the preview's `plan_sha256`
+as `expected_plan_sha256`. The file is reread and reconverted; changed rendered
+pixels fail hash confirmation. HA action users still handle the confirmation
+hash; the upload interface handles it internally. Do not automatically chain
+preview to send when human approval is required.
+
+Both paths call the authenticated, offline
+`POST /api/v1/stock-ble/top52810/images/prepare?resize_mode=fit` endpoint
+with raw image bytes. It enforces 5 MiB while streaming and 12 million decoded
+pixels, PNG/JPEG only and no animation. It honors EXIF orientation, composites
+transparency on white, resizes and quantizes through the stock renderer.
+Output contains a normalized native PNG and logical/stock previews and plan
+hash. Source images are not stored in a library; queued frames still encode
+their rendered pixels. Native 128 x 296 base64 input remains supported.
+
+No changes to single-attempt delivery, active-job protection, fixed target,
+firmware or disconnect timing. Live HA file-action and proxy delivery
+verification remain post-deployment canary requirements.
+
 ## Admission and implementation phases
 
 1. **Architecture:** merge this ownership, identity, capability, transport,

@@ -18,6 +18,9 @@
       --shadow: 0 24px 70px rgba(0, 0, 0, .34);
     }
     * { box-sizing: border-box; }
+    #tagImagePreviews:not([hidden]) { display:flex; flex-wrap:wrap; gap:24px; margin:16px 0; }
+    #tagImagePreviews figure { margin:0; }
+    #tagImagePreviews img { image-rendering:pixelated; }
     body {
       margin: 0;
       min-height: 100vh;
@@ -1314,6 +1317,24 @@
 
       <section id="workspaceContent" class="workspace-panel" data-workspace-panel="content" hidden>
         <div class="module-workspace">
+          <section class="section" aria-labelledby="tagImageHeading">
+            <h2 id="tagImageHeading">Send a picture to your e-ink tag</h2>
+            <p class="muted">Experimental stock TOP52810 · 128 × 296 · black, white and red.
+              Upload and preview never write to the tag. Keep the tag enabled in Home Assistant and near its Bluetooth proxy.</p>
+            <label>Tag<select id="tagImageTarget"><option value="DF:84:6B:DE:F6:ED">TOP52810 F6ED — DF:84:6B:DE:F6:ED</option></select></label>
+            <label>Image<input id="tagImageFile" type="file" accept="image/png,image/jpeg"></label>
+            <p class="small muted">PNG or JPEG, up to 5 MiB and 12 megapixels. Images are processed for this preview, not added to a library.</p>
+            <label>Layout<select id="tagImageMode"><option value="fit">Fit — keep the whole image, pad with white</option><option value="crop">Crop — fill the screen, trim the edges</option></select></label>
+            <button id="tagImagePreview">Preview image</button>
+            <div id="tagImagePreviews" hidden>
+              <figure><img id="tagImageLogical" width="128" height="296" alt="Converted black white and red image"><figcaption>Converted image</figcaption></figure>
+              <figure><img id="tagImageStock" width="128" height="296" alt="Predicted image with stock firmware hatch bands"><figcaption>Predicted stock appearance</figcaption></figure>
+            </div>
+            <p class="small muted">Stock firmware may add hatch bands. Delivery acknowledgement does not prove the physical image is clear.</p>
+            <button id="tagImageSend" class="primary" disabled>Send to F6ED</button>
+            <button id="tagImageStatus" disabled>Check delivery</button>
+            <p id="tagImageMessage" role="status" aria-live="polite">Choose an image to begin.</p>
+          </section>
           <div class="module-hero">
             <div><div class="eyebrow">Content workspace</div><h2>Create and organise screens</h2><p class="muted">Build mixed channels, photo albums, managed content packs, and branded fetch screens from one place.</p></div>
             <span class="connection-pill"><span class="live-dot"></span>Bridge-managed content</span>
@@ -7230,6 +7251,84 @@
       if (!state.dirty) return;
       event.preventDefault();
       event.returnValue = "";
+    });
+    let tagImageRevision = 0;
+    let tagImagePrepared = null;
+    let tagImageJob = null;
+    let tagImageSending = false;
+    function invalidateTagImage() {
+      tagImageRevision++;
+      tagImagePrepared = null;
+      $("#tagImageSend").disabled = true;
+      $("#tagImagePreviews").hidden = true;
+      $("#tagImageLogical").removeAttribute("src");
+      $("#tagImageStock").removeAttribute("src");
+      $("#tagImageMessage").textContent = "Preview this selection before sending.";
+    }
+    ["#tagImageFile", "#tagImageMode", "#tagImageTarget"].forEach((id) =>
+      $(id).addEventListener("change", invalidateTagImage));
+    $("#tagImagePreview").addEventListener("click", async () => {
+      invalidateTagImage();
+      const revision = tagImageRevision;
+      const file = $("#tagImageFile").files[0];
+      if (!file || file.size > 5 * 1024 * 1024 || !file.size) {
+        $("#tagImageMessage").textContent = "Choose a PNG or JPEG of at most 5 MiB.";
+        return;
+      }
+      $("#tagImagePreview").disabled = true;
+      $("#tagImageMessage").textContent = "Converting image…";
+      try {
+        const response = await api("stock-ble/top52810/images/prepare?resize_mode=" + $("#tagImageMode").value,
+          {method:"POST", body:file});
+        const prepared = await response.json();
+        if (revision !== tagImageRevision) return;
+        if (!prepared.image_base64 || !/^[0-9a-f]{64}$/.test(prepared.plan_sha256) ||
+            prepared.device_io !== false || prepared.write_count !== 44) throw new Error("Invalid preview response");
+        tagImagePrepared = prepared;
+        $("#tagImageLogical").src = "data:image/png;base64," + prepared.logical_png_base64;
+        $("#tagImageStock").src = "data:image/png;base64," + prepared.stock_png_base64;
+        $("#tagImagePreviews").hidden = false;
+        $("#tagImageSend").disabled = false;
+        $("#tagImageMessage").textContent = "Preview ready. Send will overwrite the selected tag.";
+      } catch (error) {
+        if (revision === tagImageRevision) $("#tagImageMessage").textContent = error.message;
+      } finally { $("#tagImagePreview").disabled = false; }
+    });
+    $("#tagImageSend").addEventListener("click", async () => {
+      if (!tagImagePrepared || tagImageSending) return;
+      if (!window.confirm("Overwrite TOP52810 F6ED with this previewed image?")) return;
+      const prepared = tagImagePrepared;
+      tagImagePrepared = null;
+      tagImageSending = true;
+      $("#tagImageSend").disabled = true;
+      $("#tagImagePreview").disabled = true;
+      $("#tagImageMessage").textContent = "Queueing one image…";
+      try {
+        const response = await api("stock-ble/top52810/jobs", {method:"POST", body:{
+          pattern:"image", image_base64:prepared.image_base64, sid:prepared.sid,
+          address:"DF:84:6B:DE:F6:ED", expected_name:"TRSEPD_F6ED",
+          expected_plan_sha256:prepared.plan_sha256, expires_seconds:900, reject_if_active:true
+        }});
+        const job = await response.json();
+        tagImageJob = job.job_id;
+        $("#tagImageStatus").disabled = !tagImageJob;
+        $("#tagImageMessage").textContent = "Queued " + job.job_id + ". Waiting up to 15 minutes for the tag. Use Check delivery.";
+      } catch (error) {
+        $("#tagImageMessage").textContent = "Send not confirmed: " + error.message +
+          ". Check the HA delivery-status sensor before trying again; no automatic retry was made.";
+      } finally {
+        tagImageSending = false;
+        $("#tagImagePreview").disabled = false;
+      }
+    });
+    $("#tagImageStatus").addEventListener("click", async () => {
+      if (!tagImageJob) return;
+      try {
+        const response = await api("stock-ble/top52810/jobs/" + encodeURIComponent(tagImageJob));
+        const job = await response.json();
+        $("#tagImageMessage").textContent = "Job " + tagImageJob + ": " +
+          (job.status || job.state || "unknown") + ". Inspect the tag to confirm the physical result.";
+      } catch (error) { $("#tagImageMessage").textContent = error.message; }
     });
     activateWorkspace(state.workspace);
     setPreviewZoom(1);

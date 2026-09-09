@@ -82,3 +82,53 @@ def test_client_never_confirms_changed_preview_and_filters_private_job_fields(mo
     payload = client._request.call_args.kwargs["json"]
     assert payload["address"] == "DF:84:6B:DE:F6:ED"
     assert payload["reject_if_active"] is True and payload["expires_seconds"] == 900
+
+
+def test_file_actions_and_exclusive_inputs(modules, monkeypatch):
+    api, services = modules
+    registered = {}
+    client = SimpleNamespace(
+        prepare_top52810_image=AsyncMock(return_value={"image_base64": "AAAA", "plan_sha256": "a" * 64}),
+        preview_top52810_image=AsyncMock(),
+        send_top52810_image=AsyncMock(return_value={"job_id": "test"}))
+    hass = SimpleNamespace(
+        async_add_executor_job=AsyncMock(return_value=b"png"),
+        services=SimpleNamespace(has_service=lambda *args: False,
+            async_register=lambda domain, name, handler, **kw: registered.update({name: (handler, kw)})))
+    services.register_image_services(hass, lambda *args: SimpleNamespace(client=client))
+    preview, config = registered["preview_top52810_image"]
+    with pytest.raises(vol.Invalid):
+        config["schema"]({"image_file": "/media/dog.png", "image_base64": "AAAA"})
+    call = SimpleNamespace(data=config["schema"]({"image_file": "/media/dog.png", "resize_mode": "crop"}))
+    assert asyncio.run(preview(call))["plan_sha256"] == "a" * 64
+    client.prepare_top52810_image.assert_awaited_once_with(b"png", "crop")
+    client.send_top52810_image.assert_not_called()
+    send, config = registered["send_top52810_image"]
+    call.data = config["schema"]({"image_file": "/media/dog.png", "expected_plan_sha256": "a" * 64})
+    assert asyncio.run(send(call)) == {"job_id": "test"}
+    client.send_top52810_image.assert_awaited_once_with("AAAA", "a" * 64)
+    hass.async_add_executor_job.side_effect = OSError("not a regular file")
+    with pytest.raises(services.ServiceValidationError):
+        asyncio.run(preview(call))
+
+
+def test_media_read_cannot_escape_root(modules, monkeypatch, tmp_path):
+    import os
+    media = sys.modules["image_service_test.top52810_media"]
+    original_open = os.open
+    def redirected(path, flags, **kwargs):
+        return original_open(str(tmp_path) if path == "/media" else path, flags, **kwargs)
+    monkeypatch.setattr(media.os, "open", redirected)
+    (tmp_path / "dog.png").write_bytes(b"png")
+    assert media.read_media_image("/media/dog.png") == b"png"
+    for invalid in ("/config/secrets.yaml", "/media/../secret", "https://example.com/dog.png", "/media"):
+        with pytest.raises(ValueError):
+            media.read_media_image(invalid)
+    (tmp_path / "link.png").symlink_to(tmp_path / "dog.png")
+    (tmp_path / "subdir").symlink_to(tmp_path, target_is_directory=True)
+    for path in ("/media/link.png", "/media/subdir/dog.png"):
+        with pytest.raises(OSError):
+            media.read_media_image(path)
+    os.mkfifo(tmp_path / "pipe")
+    with pytest.raises(ValueError):
+        media.read_media_image("/media/pipe")

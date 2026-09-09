@@ -1,5 +1,10 @@
 # Compatibility matrix
 
+Development (unreleased): Content adds PNG/JPEG upload, Fit/Crop preview and
+explicit send for the admitted F6ED tag. HA image actions also accept regular
+files under /media. Both require the new Bridge conversion endpoint; native
+base64 actions remain compatible. Tag admission and BLE timing are unchanged.
+
 Platform 0.50.9: the TOP52810 F6ED canary supports hash-confirmed custom PNG
 delivery through HA. Bridge and integration must both be at least 0.50.9;
 older versions retain diagnostic-only actions and reject image payloads.

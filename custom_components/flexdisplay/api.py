@@ -23,14 +23,15 @@ class FlexDisplayApiClient:
         self._headers = {"X-FlexDisplay-Bridge-Key": api_key} if api_key else {}
 
     async def _request(
-        self, method: str, path: str, json: dict[str, Any] | None = None
+        self, method: str, path: str, json: dict[str, Any] | None = None,
+        data: bytes | None = None,
     ) -> dict[str, Any]:
         try:
             async with self._session.request(
                 method,
                 f"{self._base_url}{path}",
                 headers=self._headers,
-                json=json,
+                **({"data": data} if data is not None else {"json": json}),
                 timeout=10,
             ) as response:
                 if response.status >= 400:
@@ -268,6 +269,15 @@ class FlexDisplayApiClient:
         """Read stock-tag records without scanning or claiming jobs."""
         payload = await self._request("GET", "/api/v1/stock-ble/top52810/devices")
         return payload["devices"]
+
+    async def prepare_top52810_image(self, image: bytes, resize_mode: str) -> dict[str, Any]:
+        """Convert through the same bounded Bridge renderer used by uploads."""
+        if resize_mode not in {"fit", "crop"}:
+            raise FlexDisplayApiError("resize_mode must be fit or crop")
+        return await self._request(
+            "POST", f"/api/v1/stock-ble/top52810/images/prepare?resize_mode={resize_mode}",
+            data=image,
+        )
 
     async def preview_top52810_image(self, image_base64: str) -> dict[str, Any]:
         """Offline preview only; an explicit send must repeat the plan hash."""

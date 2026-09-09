@@ -4,12 +4,47 @@ import base64
 import binascii
 from io import BytesIO
 
-from PIL import Image, UnidentifiedImageError
+from PIL import Image, ImageOps, UnidentifiedImageError
 
 from .top52810_renderer import quantize_image
 
 MAX_PNG_BYTES = 131072
 MAX_BASE64_CHARS = 4 * ((MAX_PNG_BYTES + 2) // 3)
+MAX_UPLOAD_BYTES = 5 * 1024 * 1024
+MAX_UPLOAD_PIXELS = 12_000_000
+
+
+def prepare_image(raw: bytes, resize_mode: str = "fit") -> str:
+    """Convert a bounded PNG/JPEG to the canonical native PNG, offline."""
+    if resize_mode not in {"fit", "crop"}:
+        raise ValueError("resize_mode must be fit or crop")
+    if not raw or len(raw) > MAX_UPLOAD_BYTES:
+        raise ValueError("Image must be at most 5 MiB")
+    try:
+        with Image.open(BytesIO(raw)) as source:
+            if source.format not in {"PNG", "JPEG"}:
+                raise ValueError("Choose a PNG or JPEG image")
+            if source.width * source.height > MAX_UPLOAD_PIXELS:
+                raise ValueError("Image must contain at most 12 million pixels")
+            if getattr(source, "n_frames", 1) != 1:
+                raise ValueError("Animated images are not supported")
+            source.verify()
+        with Image.open(BytesIO(raw)) as source:
+            rgba = ImageOps.exif_transpose(source).convert("RGBA")
+            white = Image.new("RGBA", rgba.size, "white")
+            white.alpha_composite(rgba)
+            rgb = white.convert("RGB")
+            if resize_mode == "crop":
+                canvas = ImageOps.fit(rgb, (128, 296), method=Image.Resampling.LANCZOS)
+            else:
+                fitted = ImageOps.contain(rgb, (128, 296), method=Image.Resampling.LANCZOS)
+                canvas = Image.new("RGB", (128, 296), "white")
+                canvas.paste(fitted, ((128 - fitted.width) // 2, (296 - fitted.height) // 2))
+            from .top52810_renderer import pixels_to_png
+            return base64.b64encode(pixels_to_png(quantize_image(canvas))).decode("ascii")
+    except (OSError, SyntaxError, Image.DecompressionBombError,
+            Image.DecompressionBombWarning) as err:
+        raise ValueError("Invalid or oversized PNG/JPEG image") from err
 
 
 def decode_image(value):

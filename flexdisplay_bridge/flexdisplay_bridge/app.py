@@ -23,7 +23,7 @@ from fastapi.responses import FileResponse, RedirectResponse
 from PIL import Image
 
 from . import __version__
-from .top52810_image import decode_image
+from .top52810_image import decode_image, prepare_image, MAX_UPLOAD_BYTES
 from .top52810_renderer import pixels_to_png, stock_effective_pixels
 from .api.flexhub import FlexHubRouterDependencies, create_flexhub_router
 from .button_actions import (
@@ -3481,6 +3481,26 @@ def create_app(config: BridgeConfig | None = None) -> FastAPI:
                 "physical_image_verified": False,
             } if str(payload.get("pattern") or "").strip().lower() == "image" else {}),
         }
+
+    @app.post("/api/v1/stock-ble/top52810/images/prepare")
+    async def prepare_top52810_image(request: Request, resize_mode: str = "fit") -> dict[str, Any]:
+        """Bounded offline conversion shared by Studio uploads and HA media files."""
+        authorize_sensitive(request)
+        if resize_mode not in {"fit", "crop"}:
+            raise HTTPException(status_code=400, detail="resize_mode must be fit or crop")
+        raw = bytearray()
+        async for chunk in request.stream():
+            if len(raw) + len(chunk) > MAX_UPLOAD_BYTES:
+                raise HTTPException(status_code=413, detail="Image must be at most 5 MiB")
+            raw.extend(chunk)
+        try:
+            native = await asyncio.to_thread(prepare_image, bytes(raw), resize_mode)
+        except ValueError as err:
+            raise HTTPException(status_code=400, detail=str(err)) from err
+        summary = await asyncio.to_thread(
+            top52810_plan_summary, {"pattern": "image", "image_base64": native}
+        )
+        return {**summary, "image_base64": native, "resize_mode": resize_mode}
 
     @app.post("/api/v1/stock-ble/top52810/plans/preview")
     def preview_top52810_plan(request: Request, payload: dict[str, Any] = Body(...)) -> dict[str, Any]:
