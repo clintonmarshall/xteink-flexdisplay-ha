@@ -9,7 +9,17 @@ import homeassistant.helpers.config_validation as cv
 
 from .api import FlexDisplayApiError
 from .const import DOMAIN
-from .top52810_media import read_media_image
+from .top52810_media import async_image_path, read_media_image
+
+
+IMAGE_SELECTION = vol.Any(
+    str,  # Existing image_file YAML remains supported.
+    vol.Schema({
+        vol.Required("media_content_id"): str,
+        vol.Required("media_content_type"): vol.In({"image/png", "image/jpeg"}),
+        vol.Remove("metadata"): dict,
+    }),
+)
 
 
 def _client_for_device(hass, device_id):
@@ -74,7 +84,8 @@ def register_image_services(hass, resolve):
     async def send_image(call):
         try:
             client = _client_for_device(hass, call.data["device_id"])
-            raw = await hass.async_add_executor_job(read_media_image, call.data["image_file"])
+            path = await async_image_path(hass, call.data["image_file"])
+            raw = await hass.async_add_executor_job(read_media_image, path)
             prepared = await client.prepare_top52810_image(raw, call.data["resize_mode"])
             image = prepared.get("image_base64")
             plan = prepared.get("plan_sha256")
@@ -95,7 +106,7 @@ def register_image_services(hass, resolve):
             DOMAIN, "send_image", send_image,
             schema=vol.Schema({
                 vol.Required("device_id"): cv.string,
-                vol.Required("image_file"): cv.string,
+                vol.Required("image_file"): IMAGE_SELECTION,
                 vol.Optional("resize_mode", default="fit"): vol.In({"fit", "crop"}),
             }),
             supports_response=SupportsResponse.OPTIONAL,

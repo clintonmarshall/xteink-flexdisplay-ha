@@ -387,21 +387,32 @@ No changes to single-attempt delivery, active-job protection, fixed target,
 firmware or disconnect timing. Live HA file-action and proxy delivery
 verification remain post-deployment canary requirements.
 
-## Friendly automation action (implementation candidate)
+## Friendly automation action and media picker
 
 `flexdisplay.send_image` appears as **FlexDisplay: Send image to display** in
 Home Assistant's **Perform action** picker. Select the experimental TOP52810
-F6ED device, enter an absolute PNG/JPEG path under Home Assistant's `/media`
-directory, and choose Fit or Crop. This field is a server-side path, not a file
-upload, URL, or path on the user's Mac. This action is not yet deployed.
+F6ED device, browse **My media** for a PNG/JPEG image, and choose Fit or Crop.
+The media-picker enhancement is an implementation candidate, not yet deployed.
+Upload the image to Home Assistant's local media library first; selecting media
+does not upload a file from the user's Mac. Only local files under `/media` are
+accepted (at most 5 MiB and 12 megapixels). URLs, streams, other media sources,
+symlinks, and configured media directories outside `/media` are rejected.
 
 ```yaml
 action: flexdisplay.send_image
 data:
   device_id: YOUR_HOME_ASSISTANT_TAG_DEVICE_ID
-  image_file: /media/dog.png
+  image_file:
+    media_content_id: media-source://media_source/local/dog.png
+    media_content_type: image/png
   resize_mode: fit
 ```
+
+The picker supplies the media identifier; do not construct it manually when
+using a differently named media directory. Home Assistant's media-source API
+resolves it to a local path; the integration never downloads its playback URL.
+Existing YAML using `image_file: /media/dog.png` remains supported, as do templates
+that produce a local path.
 
 The action reads the source once, converts through the existing bounded Bridge
 renderer, and internally binds the resulting native image to its plan hash.

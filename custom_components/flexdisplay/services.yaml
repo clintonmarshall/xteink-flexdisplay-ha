@@ -12,11 +12,14 @@ send_image:
               model: TOP52810M-D01 / MS136F6 V1.0
     image_file:
       name: Image file
-      description: Absolute Home Assistant path under /media, e.g. /media/dog.png. PNG/JPEG up to 5 MiB and 12 megapixels. This is a server path, not an upload or URL.
+      description: Browse My media for a PNG/JPEG under /media (up to 5 MiB and 12 megapixels). URLs, streams and symlinks are not supported. Existing /media paths still work in YAML.
       required: true
-      example: /media/dog.png
       selector:
-        text:
+        media:
+          accept:
+            - image/png
+            - image/jpeg
+          multiple: false
     resize_mode:
       name: Layout
       default: fit

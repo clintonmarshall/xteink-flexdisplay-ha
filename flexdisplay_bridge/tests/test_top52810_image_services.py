@@ -18,8 +18,13 @@ def modules(monkeypatch):
     monkeypatch.setitem(sys.modules, package.__name__, package)
     for name, attrs in {
         "homeassistant": {}, "homeassistant.helpers": {},
+        "homeassistant.components": {},
+        "homeassistant.components.media_source": {"async_resolve_media": AsyncMock()},
         "homeassistant.core": {"SupportsResponse": SimpleNamespace(ONLY="only", OPTIONAL="optional")},
-        "homeassistant.exceptions": {"ServiceValidationError": type("ServiceValidationError", (Exception,), {})},
+        "homeassistant.exceptions": {
+            "ServiceValidationError": type("ServiceValidationError", (Exception,), {}),
+            "HomeAssistantError": type("HomeAssistantError", (Exception,), {}),
+        },
         "homeassistant.helpers.config_validation": {"string": str},
         "homeassistant.helpers.device_registry": {},
         "homeassistant.config_entries": {"ConfigEntryState": SimpleNamespace(LOADED="loaded")},
@@ -174,6 +179,7 @@ def test_friendly_send_converts_and_binds_hash_once(friendly):
     client.send_top52810_image.assert_not_called()
     assert config["supports_response"] == "optional"
     assert asyncio.run(handler(call)) == {"job_id": "queued"}
+    sys.modules["homeassistant.components.media_source"].async_resolve_media.assert_not_called()
     hass.async_add_executor_job.assert_awaited_once()
     client.prepare_top52810_image.assert_awaited_once_with(b"png", "fit")
     client.send_top52810_image.assert_awaited_once_with("AAAA", "a" * 64)
@@ -197,6 +203,67 @@ def test_friendly_crop_and_picker_metadata(friendly):
         "integration": "flexdisplay", "model": "TOP52810M-D01 / MS136F6 V1.0"}]
     assert "expected_plan_sha256" not in action["fields"]
     assert action["fields"]["image_file"]["required"] is True
+    assert action["fields"]["image_file"]["selector"] == {
+        "media": {"accept": ["image/png", "image/jpeg"], "multiple": False}}
+
+
+@pytest.mark.parametrize("mime", ["image/png", "image/jpeg"])
+def test_media_picker_resolves_local_image(friendly, mime):
+    services, hass, client, _, _, handler, config, call = friendly
+    resolver = sys.modules["homeassistant.components.media_source"].async_resolve_media
+    resolver.return_value = SimpleNamespace(path=Path("/media/dog.png"), mime_type=mime)
+    media_id = "media-source://media_source/local/dog.png"
+    call.data = config["schema"]({**call.data, "image_file": {
+        "media_content_id": media_id, "media_content_type": mime,
+        "metadata": {"title": "Dog"}}})
+    assert "metadata" not in call.data["image_file"]
+    assert asyncio.run(handler(call)) == {"job_id": "queued"}
+    resolver.assert_awaited_once_with(hass, media_id, None)
+    hass.async_add_executor_job.assert_awaited_once_with(services.read_media_image, "/media/dog.png")
+    client.prepare_top52810_image.assert_awaited_once_with(b"png", "fit")
+    client.send_top52810_image.assert_awaited_once_with("AAAA", "a" * 64)
+
+
+@pytest.mark.parametrize("failure", ["remote", "other_source", "resolver", "stream", "mime", "outside", "symlink"])
+def test_media_picker_failure_never_sends(friendly, failure):
+    services, hass, client, _, _, handler, config, call = friendly
+    resolver = sys.modules["homeassistant.components.media_source"].async_resolve_media
+    media_id = "media-source://media_source/local/dog.png"
+    resolver.return_value = SimpleNamespace(path=Path("/media/dog.png"), mime_type="image/png")
+    if failure == "remote":
+        media_id = "https://example.com/dog.png"
+    elif failure == "other_source":
+        media_id = "media-source://camera/dog.png"
+    elif failure == "resolver":
+        resolver.side_effect = sys.modules["homeassistant.exceptions"].HomeAssistantError("missing")
+    elif failure == "stream":
+        resolver.return_value.path = None
+    elif failure == "mime":
+        resolver.return_value.mime_type = "video/mp4"
+    elif failure == "outside":
+        resolver.return_value.path = Path("/config/dog.png")
+        async def read(reader, path):
+            return reader(path)
+        hass.async_add_executor_job.side_effect = read
+    else:
+        hass.async_add_executor_job.side_effect = OSError("symlink rejected")
+    call.data = config["schema"]({**call.data, "image_file": {
+        "media_content_id": media_id, "media_content_type": "image/png"}})
+    with pytest.raises(services.ServiceValidationError):
+        asyncio.run(handler(call))
+    if failure in {"remote", "other_source"}:
+        resolver.assert_not_called()
+    client.prepare_top52810_image.assert_not_called()
+    client.send_top52810_image.assert_not_called()
+
+
+def test_media_picker_rejects_malformed_selections(friendly):
+    _, _, _, _, _, _, config, call = friendly
+    for selection in ({}, [], {"media_content_id": "x"},
+                      {"media_content_id": "x", "media_content_type": "video/mp4"},
+                      {"media_content_id": "x", "media_content_type": "image/png", "entity_id": "camera.x"}):
+        with pytest.raises(vol.Invalid):
+            config["schema"]({**call.data, "image_file": selection})
 
 
 @pytest.mark.parametrize("failure", ["unknown", "disabled", "wrong_identity", "unloaded",
