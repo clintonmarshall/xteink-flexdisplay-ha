@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.50.12
+
+- Add the Home Assistant automation action **Send image to display** with a
+  display selector, PNG/JPEG path under `/media`, and Fit/Crop layout.
+- Convert the image and bind its preview hash internally, without requiring
+  users to copy a hash. Preserve the existing explicit preview/send actions.
+- Require one enabled, admitted TOP52810 F6ED device on its loaded Bridge;
+  reject unavailable, unsupported or ambiguous selections without fallback.
+- Preserve active-job rejection and single-attempt delivery. No automatic
+  retries, clearing passes, BLE timing changes or broader tag admission.
+- Keep Android and packaged firmware unchanged. This is a software-only
+  candidate; live picker and image delivery validation remain deployment gates.
+
 ## 0.50.11
 
 - Use the authenticated Home Assistant ingress session for Studio access,

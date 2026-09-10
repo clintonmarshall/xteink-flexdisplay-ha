@@ -1,5 +1,13 @@
 # Compatibility matrix
 
+Platform 0.50.12: the HA integration adds `flexdisplay.send_image` with a
+TOP52810 F6ED device selector and `/media` PNG/JPEG path. Conversion and hash
+binding are automatic. This action requires integration 0.50.12 and the Bridge
+image preparation API introduced in 0.50.10; supported deployments keep both
+components version-locked. Older integrations retain explicit preview/send
+actions. No additional tag families are admitted. Live picker and image
+delivery verification remain required after deployment.
+
 Platform 0.50.11: Studio can use the authenticated Home Assistant ingress
 session without a Bridge-key prompt. Trust requires the actual Supervisor
 socket peer and valid ingress identity headers; standalone ingress trust is
@@ -39,7 +47,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.11 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.12 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
