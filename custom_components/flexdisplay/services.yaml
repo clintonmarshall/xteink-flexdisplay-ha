@@ -1,3 +1,32 @@
+send_image:
+  name: Send image to display
+  description: Convert a PNG/JPEG and queue one update for the experimental TOP52810 F6ED tag. Other display families are not supported by this action yet. No manual preview hash is needed. Completion means queued, not physically refreshed; no automatic retry or clearing pass.
+  fields:
+    device_id:
+      name: Display
+      required: true
+      selector:
+        device:
+          filter:
+            - integration: flexdisplay
+              model: TOP52810M-D01 / MS136F6 V1.0
+    image_file:
+      name: Image file
+      description: Absolute Home Assistant path under /media, e.g. /media/dog.png. PNG/JPEG up to 5 MiB and 12 megapixels. This is a server path, not an upload or URL.
+      required: true
+      example: /media/dog.png
+      selector:
+        text:
+    resize_mode:
+      name: Layout
+      default: fit
+      selector:
+        select:
+          options:
+            - label: Fit (white padding)
+              value: fit
+            - label: Crop (fill screen)
+              value: crop
 preview_top52810_image:
   name: Preview TOP52810 image
   description: Preview a PNG/JPEG file under /media, or a native base64 PNG, for the experimental F6ED tag without Bluetooth writes.

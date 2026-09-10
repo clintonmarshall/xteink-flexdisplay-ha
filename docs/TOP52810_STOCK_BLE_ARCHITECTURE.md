@@ -387,6 +387,38 @@ No changes to single-attempt delivery, active-job protection, fixed target,
 firmware or disconnect timing. Live HA file-action and proxy delivery
 verification remain post-deployment canary requirements.
 
+## Friendly automation action (implementation candidate)
+
+`flexdisplay.send_image` appears as **FlexDisplay: Send image to display** in
+Home Assistant's **Perform action** picker. Select the experimental TOP52810
+F6ED device, enter an absolute PNG/JPEG path under Home Assistant's `/media`
+directory, and choose Fit or Crop. This field is a server-side path, not a file
+upload, URL, or path on the user's Mac. This action is not yet deployed.
+
+```yaml
+action: flexdisplay.send_image
+data:
+  device_id: YOUR_HOME_ASSISTANT_TAG_DEVICE_ID
+  image_file: /media/dog.png
+  resize_mode: fit
+```
+
+The action reads the source once, converts through the existing bounded Bridge
+renderer, and internally binds the resulting native image to its plan hash.
+The existing client previews those exact bytes again and rejects changed plans
+before queuing one job. No manual hash entry or separate preview step is needed.
+Calling this action authorizes that image update; merely loading or configuring
+an automation does not send anything. The optional response contains the queued
+job, not proof of a completed physical refresh.
+
+The selected device must be enabled and resolve unambiguously to the admitted
+F6ED identity on its loaded Bridge. No fallback to another Bridge, generic
+receiver, or other tag is permitted. Existing explicit preview/hash-send actions
+remain unchanged. Active-job rejection, expiry, single-attempt BLE delivery,
+and stock firmware limitations remain unchanged; this adds no automatic retry
+or white clearing pass. Verify the picker and one separately authorized image
+update after deployment before calling the feature physically validated.
+
 ## Admission and implementation phases
 
 1. **Architecture:** merge this ownership, identity, capability, transport,
