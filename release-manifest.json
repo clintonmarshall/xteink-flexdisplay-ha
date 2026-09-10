@@ -3,9 +3,9 @@
   "schema_version": 1,
   "recorded_at": "2026-09-10",
   "platform": {
-    "version": "0.50.12",
-    "release_tag": "v0.50.12",
-    "release_commit": "02a16f336d347f120c28fc147178ae7c9aba4d7c",
+    "version": "0.50.13",
+    "release_tag": "v0.50.13",
+    "release_commit": "a40df72b1367f0e60b91b5f1b618d7f0b79ae45b",
     "released_at": null,
     "classification": "software-only"
   },

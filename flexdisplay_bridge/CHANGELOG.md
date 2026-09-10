@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.50.13
+
+- Add a Home Assistant My media picker to **Send image to display** for one
+  local PNG/JPEG, with automatic conversion and existing Fit/Crop options.
+- Resolve local media through Home Assistant's media-source API; retain
+  existing `/media/...` YAML paths and the bounded, no-symlink file reader.
+- Reject remote URLs, streams, other media sources and files outside `/media`.
+- Preserve device admission, plan binding and single-attempt delivery. No
+  automatic retries, clearing passes, BLE timing or firmware changes.
+- Include media-picker feature PR #63. Software-only candidate; live picker
+  and image delivery checks remain post-deployment requirements.
+
 ## 0.50.12
 
 - Add the Home Assistant automation action **Send image to display** with a

@@ -1,5 +1,13 @@
 # Compatibility matrix
 
+Platform 0.50.13: `flexdisplay.send_image` adds a single PNG/JPEG My media
+picker using the Home Assistant Core 2026.9.1 selector and media-source API
+contracts. The picker requires integration 0.50.13; older integrations retain
+path entry. Existing `/media/...` YAML remains compatible. Only local media
+under `/media` is accepted; URLs, streams and symlinks are rejected. The Bridge
+image preparation contract is unchanged and components remain version-locked.
+Live UI selection and physical image delivery remain deployment checks.
+
 Platform 0.50.12: the HA integration adds `flexdisplay.send_image` with a
 TOP52810 F6ED device selector and `/media` PNG/JPEG path. Conversion and hash
 binding are automatic. This action requires integration 0.50.12 and the Bridge
@@ -47,7 +55,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.12 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.13 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
