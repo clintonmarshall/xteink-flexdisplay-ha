@@ -430,6 +430,23 @@ and stock firmware limitations remain unchanged; this adds no automatic retry
 or white clearing pass. Verify the picker and one separately authorized image
 update after deployment before calling the feature physically validated.
 
+## Response diagnostics candidate (2026-09-11)
+
+The full-black job `top52810-00000019` received a refresh acknowledgement,
+but the operator observed a partial update with a red tinge, not a black
+screen. The subsequent white job `top52810-0000001a` stopped at session frame
+1 with an unexpected notification. Version 0.50.13 did not retain those
+notification bytes, so their value and the underlying cause are unknown.
+
+The diagnostics candidate includes the expected acknowledgement, first eight
+received bytes in hex, original response length and truncation flag in the
+existing unexpected-notification error. This reaches the existing HA warning
+and terminal job detail; it does not dump image frames or leases. Empty
+responses are explicit. Transfer still stops immediately with notification
+cleanup and no retry, changed timing or relaxed acknowledgement acceptance.
+Deployment and a fresh single-device test are required to capture a new
+response; this cannot recover bytes from the earlier failed session.
+
 ## Admission and implementation phases
 
 1. **Architecture:** merge this ownership, identity, capability, transport,

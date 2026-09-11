@@ -11,6 +11,7 @@ from typing import Any, Protocol
 
 
 ATT_VALUE_MAX = 244
+NOTIFICATION_DIAGNOSTIC_BYTES = 8
 STATUS_FAILURE = bytes.fromhex("30 31")
 EXPECTED_PHASES = (
     "session",
@@ -165,7 +166,11 @@ async def execute_claimed_job(
                 if observed == expected:
                     break
                 raise Top52810TransportError(
-                    f"frame {index} returned an unexpected notification"
+                    f"frame {index} returned an unexpected notification; "
+                    f"expected={expected.hex(' ')}; "
+                    f"received={observed[:NOTIFICATION_DIAGNOSTIC_BYTES].hex(' ') or '<empty>'}; "
+                    f"received_length={len(observed)}; "
+                    f"truncated={len(observed) > NOTIFICATION_DIAGNOSTIC_BYTES}"
                 )
     finally:
         await client.stop_notify(notify_uuid)

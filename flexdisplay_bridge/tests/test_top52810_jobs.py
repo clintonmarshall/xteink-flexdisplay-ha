@@ -264,6 +264,27 @@ def test_transport_rejects_tampered_plan_before_first_write() -> None:
     assert client.writes == []
 
 
+@pytest.mark.parametrize("observed", [b"", bytes.fromhex("34 31"), bytes(range(64))])
+def test_unexpected_notification_has_bounded_evidence_and_stops(observed) -> None:
+    job = _transport_job()
+
+    class UnexpectedClient(_Client):
+        async def write_gatt_char(self, uuid, payload, *, response):
+            self.writes.append((uuid, payload, response))
+            self.callback(None, bytearray(observed))
+
+    client = UnexpectedClient(job)
+    with pytest.raises(TRANSPORT.Top52810TransportError) as error:
+        asyncio.run(TRANSPORT.execute_claimed_job(client, job))
+    assert str(error.value) == (
+        "frame 1 returned an unexpected notification; expected=30 34 00 00 00 00; "
+        f"received={observed[:8].hex(' ') or '<empty>'}; "
+        f"received_length={len(observed)}; truncated={len(observed) > 8}"
+    )
+    assert len(client.writes) == 1
+    assert client.callback is None
+
+
 @pytest.mark.parametrize("services", [[], ["00000200-1212-efde-1523-785fef13d123"]])
 def test_advertisement_requires_complete_identity_tuple(services) -> None:
     job = {
