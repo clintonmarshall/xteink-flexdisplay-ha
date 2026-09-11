@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.50.15
+
+- Hold the TOP52810 BLE connection for 20 seconds after the exact refresh-start
+  acknowledgement, matching the earlier Mac sender's observation interval.
+- Report stock session response `30 35` as tag busy, stopping before image
+  data without an automatic retry.
+- Retain strict acknowledgement checks, immediate cleanup on earlier errors,
+  cancellation cleanup and single-attempt delivery. No automatic clearing pass.
+- Include PR #67. The timing change is not a proven refresh fix; physical
+  validation remains required after a separately authorized deployment.
+- Software-only candidate; image encoding, Android and packaged device
+  firmware are unchanged.
+
 ## 0.50.14
 
 - Include expected acknowledgement, at most eight received bytes, response
