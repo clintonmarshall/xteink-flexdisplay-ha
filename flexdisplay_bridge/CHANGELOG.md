@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.50.16
+
+- Add a separately confirmed workflow to finish an already-staged integration
+  deployment when protected main has advanced, without weakening normal restart
+  guards. Verify both published releases and exact installed source bytes.
+- Require the original stage evidence, backup, rollback directory, unchanged
+  Core and Bridge versions, and an untouched restart record before one restart.
+  Preserve the durable requested marker and prohibit automatic retries.
+- Include deployment-completion PR #70 and protected-test dependency PR #71.
+  Include PR #69's X3/X4 provenance documentation; packaged bytes are unchanged.
+- Publish completion control code only: installing the new receiver and running
+  completion for the staged v0.50.15 integration require separate authorization.
+  This release does not itself complete DumbHA's pending restart.
+- Software-only candidate; tag rendering, BLE timing, Android and packaged
+  device firmware are unchanged from v0.50.15. No tag write is scheduled.
+
 ## 0.50.15
 
 - Hold the TOP52810 BLE connection for 20 seconds after the exact refresh-start

@@ -1,5 +1,14 @@
 # Compatibility matrix
 
+Platform 0.50.16 adds guarded completion of an already-staged deployment.
+The completion workflow and receiver require this release or a later reviewed
+control release; older receivers reject the new command. Normal restart guards
+remain unchanged. The control release may finish an older published integration
+only with exact stage/source/backup evidence and separate restart approval;
+it does not install the control release's integration. Runtime components stay
+version-locked, so completing staged v0.50.15 retains Bridge/integration 0.50.15.
+Image services, BLE timing, Android and packaged firmware are unchanged.
+
 Platform 0.50.15 holds the TOP52810 connection for 20 seconds after refresh
 acceptance and explicitly reports session response `30 35` as busy. Older
 integrations disconnect immediately and report a generic unexpected response.
@@ -68,7 +77,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.15 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.16 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
