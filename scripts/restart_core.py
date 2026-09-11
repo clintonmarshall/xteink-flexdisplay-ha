@@ -31,10 +31,15 @@ from deploy_bridge import (
     validate_health,
     validate_known_hosts,
 )
-from deploy_integration import validate_status
+from deploy_integration import (
+    build_integration_archive,
+    run_command_with_input,
+    validate_status,
+)
 
 
 CONFIRMATION = "restart-dumbha-core-for-flexdisplay-integration"
+FINISH_CONFIRMATION = "finish-dumbha-staged-flexdisplay-restart"
 RECONCILIATION_CONFIRMATION = "reconcile-dumbha-flexdisplay-core-restart"
 REQUESTED_AT = re.compile(
     r"^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$"
@@ -50,6 +55,9 @@ def parse_arguments() -> argparse.Namespace:
     parser.add_argument("--expected-requested-at")
     parser.add_argument("--expected-staged-version")
     parser.add_argument("--expected-staged-receiver-sha256")
+    parser.add_argument("--staged-integration", type=Path)
+    parser.add_argument("--expected-backup")
+    parser.add_argument("--expected-core-version")
     parser.add_argument(
         "--receiver",
         type=Path,
@@ -66,7 +74,10 @@ def main() -> int:
     if not SHA40.fullmatch(arguments.source_commit):
         raise DeploymentError("source commit must be a full lowercase SHA")
     reconcile = arguments.confirmation == RECONCILIATION_CONFIRMATION
-    if arguments.confirmation not in (CONFIRMATION, RECONCILIATION_CONFIRMATION):
+    finish = arguments.confirmation == FINISH_CONFIRMATION
+    if arguments.confirmation not in (
+        CONFIRMATION, RECONCILIATION_CONFIRMATION, FINISH_CONFIRMATION
+    ):
         raise DeploymentError("Core restart confirmation phrase does not match")
     recovery_values = (
         arguments.failed_run_id,
@@ -74,6 +85,35 @@ def main() -> int:
         arguments.expected_staged_version,
         arguments.expected_staged_receiver_sha256,
     )
+    completion_archive = None
+    if finish:
+        if any(
+            value is not None for value in (
+                arguments.failed_run_id,
+                arguments.expected_requested_at,
+                arguments.expected_staged_version,
+            )
+        ):
+            raise DeploymentError("staged completion refuses reconciliation arguments")
+        if not SHA256.fullmatch(arguments.expected_staged_receiver_sha256 or ""):
+            raise DeploymentError("staged completion requires the original receiver checksum")
+        if not re.fullmatch(r"[A-Za-z0-9_-]+", arguments.expected_backup or ""):
+            raise DeploymentError("staged completion requires the exact backup")
+        if not SEMVER.fullmatch(arguments.expected_core_version or ""):
+            raise DeploymentError("staged completion requires the exact Core version")
+        if arguments.staged_integration is None:
+            raise DeploymentError("staged completion requires protected integration source")
+        completion_archive = build_integration_archive(arguments.staged_integration)
+        if len(completion_archive) > 16 * 1024 * 1024:
+            raise DeploymentError("staged integration archive exceeds completion limit")
+    elif any(
+        value is not None for value in (
+            arguments.staged_integration,
+            arguments.expected_backup,
+            arguments.expected_core_version,
+        )
+    ):
+        raise DeploymentError("completion arguments require separate confirmation")
     if reconcile:
         if arguments.failed_run_id is None or arguments.failed_run_id < 1:
             raise DeploymentError("reconciliation requires a positive failed run ID")
@@ -89,7 +129,7 @@ def main() -> int:
             arguments.expected_staged_receiver_sha256, str
         ) or not SHA256.fullmatch(arguments.expected_staged_receiver_sha256):
             raise DeploymentError("reconciliation requires the staged receiver checksum")
-    elif any(value is not None for value in recovery_values):
+    elif not finish and any(value is not None for value in recovery_values):
         raise DeploymentError("restart mode refuses reconciliation arguments")
     if not arguments.receiver.is_file():
         raise DeploymentError("reviewed deployment receiver is missing from the tag")
@@ -150,10 +190,12 @@ def main() -> int:
             staged_version=integration_version,
             restart_state="requested" if reconcile else "not_started",
             staged_receiver_sha256=(
-                arguments.expected_staged_receiver_sha256 if reconcile else None
+                arguments.expected_staged_receiver_sha256 if reconcile or finish else None
             ),
         )
         validate_health(http_json("/healthz"), target_version)
+        if finish and before.get("core_version") != arguments.expected_core_version:
+            raise DeploymentError("Core version changed before staged completion")
         require_http_200("/", HOME_ASSISTANT_PORT, "Home Assistant")
         print(
             json.dumps(
@@ -164,7 +206,9 @@ def main() -> int:
                     "source_commit": arguments.source_commit,
                     "home_assistant_core": before.get("core_version"),
                     "integration_version": integration_version,
-                    "operation": "reconcile" if reconcile else "restart",
+                    "operation": (
+                        "reconcile" if reconcile else "finish_staged" if finish else "restart"
+                    ),
                 },
                 sort_keys=True,
             ),
@@ -178,9 +222,19 @@ def main() -> int:
             if reconcile
             else f"restart-core {target_version} {receiver_sha256}"
         )
+        if finish:
+            archive_sha = hashlib.sha256(completion_archive).hexdigest()
+            command = (
+                f"finish-staged-core {target_version} {receiver_sha256} "
+                f"{arguments.expected_staged_receiver_sha256} {archive_sha} "
+                f"{arguments.expected_backup} {arguments.expected_core_version}"
+            )
         result = require_mapping(
             parse_json(
-                run_command(
+                run_command_with_input(
+                    [*ssh_prefix, command], environment, completion_archive, timeout=600
+                )
+                if finish else run_command(
                     [*ssh_prefix, command],
                     environment,
                     timeout=600,
@@ -192,7 +246,7 @@ def main() -> int:
         if result.get("target_version") != integration_version:
             raise DeploymentError("Core restart record has the wrong integration version")
         expected_result_receiver = (
-            arguments.expected_staged_receiver_sha256 if reconcile else receiver_sha256
+            arguments.expected_staged_receiver_sha256 if reconcile or finish else receiver_sha256
         )
         if result.get("receiver_sha256") != expected_result_receiver:
             raise DeploymentError("Core restart record has the wrong receiver checksum")
@@ -200,6 +254,13 @@ def main() -> int:
             raise DeploymentError("remote command did not confirm the Core restart")
         if result.get("core_restart_state") != "verified":
             raise DeploymentError("remote command did not verify the Core restart")
+        if finish and (
+            result.get("rollback_backup") != arguments.expected_backup
+            or result.get("home_assistant_core") != arguments.expected_core_version
+            or result.get("source_archive_sha256") != archive_sha
+            or result.get("core_restart_receiver_sha256") != receiver_sha256
+        ):
+            raise DeploymentError("staged completion evidence changed")
         if reconcile:
             evidence = require_mapping(
                 result.get("core_restart_reconciliation"),
@@ -221,7 +282,7 @@ def main() -> int:
             staged_version=integration_version,
             restart_state="verified",
             staged_receiver_sha256=(
-                arguments.expected_staged_receiver_sha256 if reconcile else None
+                arguments.expected_staged_receiver_sha256 if reconcile or finish else None
             ),
         )
         validate_health(http_json("/healthz"), target_version)

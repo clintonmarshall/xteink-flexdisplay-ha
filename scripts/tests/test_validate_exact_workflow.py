@@ -41,6 +41,7 @@ class ValidateExactWorkflowContractTests(unittest.TestCase):
             "android-release",
             "deploy-bridge",
             "deploy-integration",
+            "finish-staged-core",
             "promote-release-tag",
             "publish-release",
             "reconcile-core-restart",

@@ -54,6 +54,8 @@ python3 -m venv .venv
 
 Reuse an existing project virtual environment when it already contains the
 declared test dependencies. Keep `.venv` untracked.
+The offline receiver regression tests also require Bash, `jq`, and `tar`.
+They use temporary fixtures and never contact or restart Home Assistant.
 
 Forgejo required checks are authoritative. The Forgejo Runner must execute the
 baseline commands above and, when affected:
@@ -412,6 +414,50 @@ recording the operator-reviewed reconciliation. Never use reconciliation when
 the restart itself was not independently observed. A verified predecessor
 record may then be replaced by the next separately confirmed integration stage;
 an incomplete or mismatched predecessor remains blocking.
+
+### Finish a staged deployment after main advances
+
+The ordinary `restart-core.yml` remains current-main-only. If another reviewed
+change advances `main` after staging but before the Core restart, do not move
+the staged tag, change the pending record, restage over it, or use reconciliation
+to pretend a restart occurred. `finish-staged-core.yml` is a separate manual
+completion path, not an alternative deployment or rollback path.
+
+1. Merge and publish a reviewed completion-control release through the normal
+   protected release process. It need not be deployed to the Bridge or staged
+   integration. Dispatch the workflow from that immutable annotated control
+   tag, which must resolve to the exact current green protected `main` commit.
+2. Independently verify the owner-only tag protection and both published tags:
+   the completion-control release and the earlier staged release. The workflow
+   requires both exact commits' successful release checks, annotated tag
+   identities, and that the staged commit is an ancestor of the control commit.
+   A local fixed-purpose dispatcher must bind these identities and the reviewed
+   workflow hash; do not reuse the ordinary restart helper with its guard removed.
+3. Install the control release's exact receiver through a separately approved
+   receiver update, backing up the current receiver first. This changes only
+   the restricted deployment receiver; do not edit the stage record or its
+   original receiver checksum. Installation alone does not restart Core.
+4. Record and separately confirm the exact staged tag/commit, original receiver
+   checksum (derived from that tag), integration backup slug, current Core
+   version, target DumbHA, expected interruption, and rollback directory.
+   Use the distinct confirmation `finish-dumbha-staged-flexdisplay-restart`.
+5. The runner sends a deterministic verification archive built only from the
+   staged commit. It never installs that archive. Under the existing receiver
+   lock, completion requires its hash to match the stage record, checks every
+   installed source file byte-for-byte, rejects extra source files, links and
+   special files (runtime `__pycache__/*.pyc` is ignored), verifies the rollback
+   directory/version and Home Assistant-folder backup, and requires the exact
+   unchanged Core and Bridge versions with App auto-update off.
+6. Only an untouched `not_started` record may proceed. Completion uses the same
+   durable `requested` marker before issuing exactly one Core restart and the
+   same post-restart Core/configuration/Bridge health checks. It preserves the
+   original stage receiver and archive hashes. Failure or uncertainty after
+   the requested marker is an investigation boundary, never an automatic retry.
+
+Neither the workflow nor its receiver installs an App, writes a tag image,
+changes firmware, alters a published release, restores a backup, or installs
+the control release's integration. Keep software validation, receiver
+installation, workflow dispatch, and physical display verification distinct.
 
 1. Read the exact Home Assistant inventory record and verify the current target,
    environment, transport, and approved deployment path.

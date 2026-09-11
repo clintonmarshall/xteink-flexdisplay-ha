@@ -273,6 +273,7 @@ stage_integration() {
 
 restart_core_for_integration() {
   local target_version=$1 expected_receiver_sha=$2
+  local staged_receiver_sha=${3:-$expected_receiver_sha}
   local before_file="$temporary_directory/core-before.json"
   local restart_file="$temporary_directory/core-restart.json"
   local after_file="$temporary_directory/core-after.json"
@@ -284,7 +285,7 @@ restart_core_for_integration() {
   test "$expected_receiver_sha" = "$SELF_SHA256"
   test "$(integration_version "$INTEGRATION_DIR/manifest.json")" = "$target_version"
   test -f "$INTEGRATION_STAGE_RECORD"
-  "$JQ" -e --arg target "$target_version" --arg receiver "$SELF_SHA256" \
+  "$JQ" -e --arg target "$target_version" --arg receiver "$staged_receiver_sha" \
     '.target_version == $target and .receiver_sha256 == $receiver and
      .core_restart_performed == false and
      .core_restart_state == "not_started"' "$INTEGRATION_STAGE_RECORD" > /dev/null
@@ -292,8 +293,9 @@ restart_core_for_integration() {
   "$HA_CLI" core check --no-progress --raw-json > "$check_file"
   "$JQ" -e '.result == "ok"' "$check_file" > /dev/null
   installed_core="$(core_version "$before_file")"
-  "$JQ" --arg requested_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  "$JQ" --arg requested_at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --arg restart_receiver "$SELF_SHA256" \
     '.core_restart_state = "requested" |
+     .core_restart_receiver_sha256 = $restart_receiver |
      .core_restart_requested_at = $requested_at' \
     "$INTEGRATION_STAGE_RECORD" > "$INTEGRATION_STAGE_RECORD.tmp"
   chmod 600 "$INTEGRATION_STAGE_RECORD.tmp"
@@ -321,6 +323,59 @@ restart_core_for_integration() {
   chmod 600 "$INTEGRATION_STAGE_RECORD.tmp"
   mv "$INTEGRATION_STAGE_RECORD.tmp" "$INTEGRATION_STAGE_RECORD"
   "$JQ" -c . "$INTEGRATION_STAGE_RECORD"
+}
+
+finish_staged_core() {
+  local target=$1 current_receiver=$2 staged_receiver=$3 archive_sha=$4 backup=$5 expected_core=$6
+  local archive="$temporary_directory/verify.tar.gz" extracted="$temporary_directory/verify"
+  local record="$INTEGRATION_STAGE_RECORD" rollback previous relative path
+  test "$current_receiver" = "$SELF_SHA256"
+  test ! -L "$record"
+  "$JQ" -e --arg target "$target" --arg receiver "$staged_receiver" \
+    --arg archive "$archive_sha" --arg backup "$backup" \
+    '.target_version == $target and .receiver_sha256 == $receiver and
+     .source_archive_sha256 == $archive and .rollback_backup == $backup and
+     .core_restart_state == "not_started" and .core_restart_performed == false' "$record" >/dev/null
+  previous="$("$JQ" -er '.previous_version' "$record")"
+  rollback="$("$JQ" -er '.rollback_directory' "$record")"
+  [[ "$previous" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  test "${rollback%/*}" = "$INTEGRATION_ROLLBACK_ROOT"
+  [[ "${rollback##*/}" =~ ^[0-9]{8}T[0-9]{6}Z-[0-9]+\.[0-9]+\.[0-9]+$ ]]
+  test ! -L "$rollback"
+  test ! -L "$rollback/flexdisplay"
+  test ! -L "$rollback/flexdisplay/manifest.json"
+  test "$(integration_version "$rollback/flexdisplay/manifest.json")" = "$previous"
+  "$HA_CLI" backups info "$backup" --no-progress --raw-json > "$temporary_directory/backup.json"
+  "$JQ" -e --arg backup "$backup" '.result == "ok" and .data.slug == $backup and
+    ((((.data.folders // []) | index("homeassistant")) != null) or
+     ((.data.homeassistant // "") | type == "string" and length > 0))' "$temporary_directory/backup.json" >/dev/null
+  test "$(core_version "$temporary_directory/core.json")" = "$expected_core"
+  app_info "$temporary_directory/app.json"
+  "$JQ" -e --arg target "$target" '.data.version == $target and .data.state == "started" and
+    .data.auto_update == false' "$temporary_directory/app.json" >/dev/null
+  # Read at most 16 MiB + 1; verify against the protected source AND stage record.
+  head -c 16777217 > "$archive"
+  test "$(wc -c < "$archive")" -le 16777216
+  test "$($SHA256SUM "$archive" | awk '{print $1}')" = "$archive_sha"
+  validate_integration_archive "$archive" "$temporary_directory/list" "$temporary_directory/verbose"
+  mkdir "$extracted"
+  "$TAR" -xzf "$archive" -C "$extracted" --no-same-owner --no-same-permissions
+  test "$(integration_version "$extracted/custom_components/flexdisplay/manifest.json")" = "$target"
+  test ! -L "$INTEGRATION_DIR"
+  # Reject symlinks/special files and unknown source files; only runtime bytecode is ignored.
+  test -z "$(find "$INTEGRATION_DIR" ! -type d ! -type f -print)"
+  test -z "$(find "$INTEGRATION_DIR" -name $'*\n*' -print)"
+  while IFS= read -r path; do
+    relative=${path#"$extracted/custom_components/flexdisplay/"}
+    cmp "$path" "$INTEGRATION_DIR/$relative"
+  done < <(find "$extracted/custom_components/flexdisplay" -type f -print)
+  while IFS= read -r path; do
+    relative=${path#"$INTEGRATION_DIR/"}
+    case "$relative" in __pycache__/*.pyc|*/__pycache__/*.pyc) continue ;; esac
+    test -f "$extracted/custom_components/flexdisplay/$relative"
+  done < <(find "$INTEGRATION_DIR" -type f -print)
+  # Same lock and durable requested-before-restart boundary as the ordinary path.
+  restart_core_for_integration "$target" "$current_receiver" "$staged_receiver"
 }
 
 reconcile_core_restart() {
@@ -494,6 +549,14 @@ case "$ORIGINAL_COMMAND" in
       exit 1
     fi
     restart_core_for_integration "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}"
+    ;;
+  finish-staged-core\ *)
+    if [[ ! "$ORIGINAL_COMMAND" =~ ^finish-staged-core\ ([0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{64})\ ([0-9a-f]{64})\ ([0-9a-f]{64})\ ([A-Za-z0-9_-]+)\ ([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+      echo "Refusing invalid staged completion request" >&2
+      exit 64
+    fi
+    finish_staged_core "${BASH_REMATCH[1]}" "${BASH_REMATCH[2]}" "${BASH_REMATCH[3]}" \
+      "${BASH_REMATCH[4]}" "${BASH_REMATCH[5]}" "${BASH_REMATCH[6]}"
     ;;
   reconcile-core\ *)
     if [[ ! "$ORIGINAL_COMMAND" =~ ^reconcile-core\ ([0-9]+\.[0-9]+\.[0-9]+)\ ([0-9a-f]{64})\ ([0-9a-f]{64})\ ([0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z)\ ([1-9][0-9]*)$ ]]; then

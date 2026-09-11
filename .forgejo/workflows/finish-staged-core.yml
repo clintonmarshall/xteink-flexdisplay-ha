@@ -1,0 +1,204 @@
+name: Finish an already-staged DumbHA FlexDisplay deployment
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Existing published protected annotated Platform tag (vX.Y.Z)
+        required: true
+        type: string
+      source_commit:
+        description: Exact green current main commit of the published completion-control tag
+        required: true
+        type: string
+      staged_tag:
+        description: Published protected tag already staged on DumbHA
+        required: true
+        type: string
+      staged_commit:
+        description: Exact commit of the staged tag
+        required: true
+        type: string
+      backup:
+        description: Exact integration backup recorded by staging
+        required: true
+        type: string
+      core_version:
+        description: Observed Home Assistant Core version
+        required: true
+        type: string
+      confirmation:
+        description: Type finish-dumbha-staged-flexdisplay-restart after separate approval
+        required: true
+        type: string
+
+concurrency:
+  group: flexdisplay-core-restart-dumbha
+  cancel-in-progress: false
+
+jobs:
+  restart:
+    if: ${{ forgejo.actor == forgejo.repository_owner }}
+    runs-on: dumbha-flexdisplay-production
+    env:
+      REQUESTED_TAG: ${{ inputs.tag }}
+      CONFIRMED_SOURCE_COMMIT: ${{ inputs.source_commit }}
+      RESTART_CONFIRMATION: ${{ inputs.confirmation }}
+      FORGEJO_API_URL: ${{ forgejo.api_url }}
+      FORGEJO_REPOSITORY: ${{ forgejo.repository }}
+      STAGED_TAG: ${{ inputs.staged_tag }}
+      STAGED_COMMIT: ${{ inputs.staged_commit }}
+      EXPECTED_BACKUP: ${{ inputs.backup }}
+      EXPECTED_CORE_VERSION: ${{ inputs.core_version }}
+      DISPATCH_REF: ${{ forgejo.ref }}
+      DISPATCH_SHA: ${{ forgejo.sha }}
+    steps:
+      - name: Verify exact Forgejo release and validation status
+        shell: bash
+        env:
+          RELEASE_API_TOKEN: ${{ forgejo.token }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          umask 077
+          [[ "$REQUESTED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$CONFIRMED_SOURCE_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          test "$RESTART_CONFIRMATION" = "finish-dumbha-staged-flexdisplay-restart"
+          [[ "$STAGED_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          [[ "$STAGED_COMMIT" =~ ^[0-9a-f]{40}$ ]]
+          [[ "$EXPECTED_BACKUP" =~ ^[A-Za-z0-9_-]+$ ]]
+          [[ "$EXPECTED_CORE_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          test "$DISPATCH_REF" = "refs/tags/$REQUESTED_TAG"
+          test "$DISPATCH_SHA" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$FORGEJO_API_URL" = "http://10.200.40.231:3000/api/v1"
+          test "$FORGEJO_REPOSITORY" = "clintonmarshall/xteink-flexdisplay-ha"
+          test -n "$RELEASE_API_TOKEN"
+
+          preflight_tmp="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-restart-preflight.XXXXXX")"
+          auth_config="$preflight_tmp/curl.conf"
+          cleanup_preflight() {
+            local exit_code=$?
+            set +e
+            if [[ -f "$auth_config" ]]; then
+              : > "$auth_config"
+              rm -f -- "$auth_config"
+            fi
+            find "$preflight_tmp" -depth -type f -delete 2>/dev/null || true
+            find "$preflight_tmp" -depth -type d -exec rmdir {} \; 2>/dev/null || true
+            return "$exit_code"
+          }
+          trap cleanup_preflight EXIT
+          printf 'header = "Authorization: Bearer %s"\n' "$RELEASE_API_TOKEN" > "$auth_config"
+          unset RELEASE_API_TOKEN FORGEJO_TOKEN GITHUB_TOKEN
+
+          for release_kind in control staged; do
+            if [[ "$release_kind" = control ]]; then
+              CHECK_COMMIT="$CONFIRMED_SOURCE_COMMIT"
+              CHECK_TAG="$REQUESTED_TAG"
+            else
+              CHECK_COMMIT="$STAGED_COMMIT"
+              CHECK_TAG="$STAGED_TAG"
+            fi
+          curl -q --config "$auth_config" --fail-with-body --silent --show-error \
+            --proxy '' --noproxy '*' --proto '=http' --max-redirs 0 \
+            --connect-timeout 10 --max-time 30 \
+            "$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/commits/$CHECK_COMMIT/status?limit=100" \
+            > "$preflight_tmp/status.json"
+          curl -q --config "$auth_config" --fail-with-body --silent --show-error \
+            --proxy '' --noproxy '*' --proto '=http' --max-redirs 0 \
+            --connect-timeout 10 --max-time 30 \
+            "$FORGEJO_API_URL/repos/$FORGEJO_REPOSITORY/releases/tags/$CHECK_TAG" \
+            > "$preflight_tmp/release.json"
+
+          STATUS_JSON="$preflight_tmp/status.json" \
+          RELEASE_JSON="$preflight_tmp/release.json" \
+          EXPECTED_REPOSITORY="$FORGEJO_REPOSITORY" \
+          EXPECTED_SHA="$CHECK_COMMIT" \
+          EXPECTED_TAG="$CHECK_TAG" \
+          REQUIRED_CONTEXTS='Validate / bridge (push),Validate / app (push),Validate / integration (push),Validate / android (push),Validate / required (push)' \
+          python3 -I - <<'PY'
+          import json
+          import os
+
+          with open(os.environ["STATUS_JSON"], encoding="utf-8") as source:
+              status = json.load(source)
+          with open(os.environ["RELEASE_JSON"], encoding="utf-8") as source:
+              release = json.load(source)
+          expected_sha = os.environ["EXPECTED_SHA"]
+          expected_repository = os.environ["EXPECTED_REPOSITORY"]
+          expected_tag = os.environ["EXPECTED_TAG"]
+          if status.get("sha") != expected_sha or status.get("state") != "success":
+              raise SystemExit("exact release commit does not have all-success Forgejo status")
+          repository = status.get("repository")
+          if not isinstance(repository, dict) or repository.get("full_name") != expected_repository:
+              raise SystemExit("Forgejo status response identified an unexpected repository")
+          statuses = status.get("statuses")
+          if not isinstance(statuses, list):
+              raise SystemExit("Forgejo status response contains no contexts")
+          for context in os.environ["REQUIRED_CONTEXTS"].split(","):
+              matches = [item for item in statuses if item.get("context") == context]
+              if len(matches) != 1 or matches[0].get("status") != "success":
+                  raise SystemExit(f"required exact-head context is not successful: {context}")
+          if release.get("tag_name") != expected_tag or release.get("target_commitish") != expected_sha:
+              raise SystemExit("published release identity changed")
+          if release.get("draft") is not False or release.get("prerelease") is not False:
+              raise SystemExit("Core restart requires a published stable Forgejo release")
+          PY
+
+          done
+
+      - name: Check out the exact protected release tag
+        # actions/checkout v6, reviewed 2026-08-13
+        uses: https://data.forgejo.org/actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          ref: ${{ inputs.tag }}
+
+      - name: Verify tag, source, metadata, and restart controls
+        shell: bash
+        env:
+          AUTOMATION_ENABLED: ${{ vars.FLEXDISPLAY_DUMBHA_DEPLOYMENT_ENABLED }}
+          RUNNER_ISOLATED: ${{ vars.FLEXDISPLAY_DUMBHA_RUNNER_ISOLATED }}
+          CREDENTIAL_PATH_APPROVED: ${{ vars.FLEXDISPLAY_DUMBHA_CREDENTIAL_PATH_APPROVED }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          test "$AUTOMATION_ENABLED" = "true"
+          test "$RUNNER_ISOLATED" = "true"
+          test "$CREDENTIAL_PATH_APPROVED" = "true"
+          test "$RESTART_CONFIRMATION" = "finish-dumbha-staged-flexdisplay-restart"
+          git fetch --no-tags origin +refs/heads/main:refs/remotes/origin/main
+          test "$(git cat-file -t "refs/tags/$REQUESTED_TAG")" = "tag"
+          test "$(git rev-list -n 1 "refs/tags/$REQUESTED_TAG")" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse HEAD)" = "$CONFIRMED_SOURCE_COMMIT"
+          test "$(git rev-parse origin/main)" = "$CONFIRMED_SOURCE_COMMIT"
+          test -z "$(git status --porcelain --untracked-files=all)"
+          test "$(git cat-file -t "refs/tags/$STAGED_TAG")" = "tag"
+          test "$(git rev-list -n 1 "refs/tags/$STAGED_TAG")" = "$STAGED_COMMIT"
+          git merge-base --is-ancestor "$STAGED_COMMIT" "$CONFIRMED_SOURCE_COMMIT"
+          python3 scripts/check_release_metadata.py --release "${REQUESTED_TAG#v}"
+          bash -n scripts/flexdisplay_bridge_deploy_receiver.sh
+
+      - name: Finish only the verified staged integration
+        shell: bash
+        env:
+          FLEXDISPLAY_DUMBHA_DEPLOY_KEY: ${{ secrets.FLEXDISPLAY_DUMBHA_DEPLOY_KEY }}
+          FLEXDISPLAY_DUMBHA_KNOWN_HOSTS: ${{ secrets.FLEXDISPLAY_DUMBHA_KNOWN_HOSTS }}
+          FORGEJO_TOKEN: ""
+          GITHUB_TOKEN: ""
+        run: |
+          set -euo pipefail
+          staged_source="$(mktemp -d "${RUNNER_TEMP:-/tmp}/flexdisplay-staged-source.XXXXXX")"
+          git archive "$STAGED_COMMIT" custom_components/flexdisplay | tar -x -C "$staged_source"
+          staged_receiver_sha="$(git show "$STAGED_COMMIT:scripts/flexdisplay_bridge_deploy_receiver.sh" | sha256sum | awk '{print $1}')"
+          python3 scripts/restart_core.py \
+            --tag "$STAGED_TAG" \
+            --source-commit "$STAGED_COMMIT" \
+            --staged-integration "$staged_source/custom_components/flexdisplay" \
+            --expected-staged-receiver-sha256 "$staged_receiver_sha" \
+            --expected-backup "$EXPECTED_BACKUP" \
+            --expected-core-version "$EXPECTED_CORE_VERSION" \
+            --confirmation "$RESTART_CONFIRMATION"
