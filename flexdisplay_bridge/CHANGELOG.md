@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.50.17
+
+- Include PR #73: permit the admitted TOP52810 canary's existing single attempt
+  from a matching connectable-cache observation up to five minutes old, instead
+  of rejecting observations older than ten seconds.
+- Show older eligible observations as `recently_seen`, preserving the original
+  last-seen timestamp. This is a cache-age heuristic, not a detected power-on
+  countdown or proof the tag is awake; a sleeping tag can consume the attempt.
+- Recheck observation age and integration unload after claiming a job, before
+  connecting. Preserve identity, expiry, GATT/MTU and single-attempt safeguards.
+- Correct the timing notes to record the owner's reported five-minute window
+  after battery connection without promising a periodic wake schedule.
+- Software-only candidate: no queue expiry extension, automatic retry, refresh
+  protocol change, Android change or packaged firmware change. Deployment and
+  a separately authorized physical canary test remain required.
+
 ## 0.50.16
 
 - Add a separately confirmed workflow to finish an already-staged integration

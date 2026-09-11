@@ -1,5 +1,14 @@
 # Compatibility matrix
 
+Platform 0.50.17 permits one authorized TOP52810 attempt from a matching
+connectable-cache observation aged up to 300 seconds. Older integrations reject
+observations older than ten seconds. The Bluetooth window sensor now reports
+`recently_seen` for eligible sightings older than ten seconds; automations must
+not interpret this as proof the tag is awake or connected. No service schema,
+image encoding, expiry, retry, admission or refresh protocol changes occur.
+Components remain version-locked. The owner's reported five-minute power-on
+window is not measured by this cache-age heuristic; physical testing is pending.
+
 Platform 0.50.16 adds guarded completion of an already-staged deployment.
 The completion workflow and receiver require this release or a later reviewed
 control release; older receivers reject the new command. Normal restart guards
@@ -77,7 +86,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.16 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.17 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
