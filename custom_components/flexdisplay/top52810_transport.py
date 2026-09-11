@@ -13,6 +13,7 @@ from typing import Any, Protocol
 ATT_VALUE_MAX = 244
 NOTIFICATION_DIAGNOSTIC_BYTES = 8
 STATUS_FAILURE = bytes.fromhex("30 31")
+STATUS_BUSY = bytes.fromhex("30 35")
 EXPECTED_PHASES = (
     "session",
     "prepare_black",
@@ -159,6 +160,11 @@ async def execute_claimed_job(
                     raise Top52810TransportError(
                         f"frame {index} acknowledgement timed out"
                     ) from err
+                if index == 1 and observed == STATUS_BUSY:
+                    raise Top52810TransportError(
+                        "stock firmware reported tag busy at session start "
+                        "(received=30 35); no image data sent; no retry"
+                    )
                 if observed == STATUS_FAILURE:
                     raise Top52810TransportError(
                         f"stock firmware reported failure after frame {index}"

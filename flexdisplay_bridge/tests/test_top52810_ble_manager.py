@@ -58,6 +58,7 @@ def manager_module(monkeypatch):
         monkeypatch.setitem(sys.modules, name, module)
         spec.loader.exec_module(module)
     module.execute_claimed_job = AsyncMock()
+    module.async_sleep = AsyncMock()
     module.monotonic = Mock(return_value=100.0)
     return module
 
@@ -80,6 +81,7 @@ def test_discovery_does_not_require_advertised_service(manager_module):
 @pytest.mark.parametrize("fault", [
     None, "address", "name", "manufacturer_id", "manufacturer_payload",
     "no_job", "not_connectable", "mtu", "service", "write", "notify",
+    "transport", "settle_cancel",
 ])
 def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
     module = manager_module
@@ -128,6 +130,24 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
     if fault == "not_connectable":
         module.bluetooth.async_ble_device_from_address.return_value = None
     manager = module.Top52810BleManager(object(), api, "test")
+    async def settle(seconds):
+        assert seconds == 20.0
+        module.execute_claimed_job.assert_awaited_once_with(client, job)
+        client.disconnect.assert_not_awaited()
+        if fault == "settle_cancel":
+            raise asyncio.CancelledError()
+
+    module.async_sleep.side_effect = settle
+    if fault == "transport":
+        module.execute_claimed_job.side_effect = module.Top52810TransportError("tag busy")
+    if fault == "settle_cancel":
+        with pytest.raises(asyncio.CancelledError):
+            asyncio.run(manager._handle_window(job["address"], info))
+        client.disconnect.assert_awaited_once()
+        module.async_sleep.assert_awaited_once_with(20.0)
+        module.establish_connection.assert_awaited_once()
+        assert manager._active_addresses == set()
+        return
     asyncio.run(manager._handle_window(job["address"], info))
     if fault in {"address", "name", "manufacturer_id", "manufacturer_payload", "no_job"}:
         api.claim_top52810_job.assert_not_awaited()
@@ -140,6 +160,7 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
         assert module.establish_connection.call_args.kwargs["max_attempts"] == 1
         client.disconnect.assert_awaited_once()
     if fault is None:
+        module.async_sleep.assert_awaited_once_with(20.0)
         client.services.get_service.assert_called_once_with(job["service_uuid"])
         assert service.get_characteristic.call_count == 2
         module.execute_claimed_job.assert_awaited_once_with(client, job)
@@ -147,7 +168,11 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
             "refresh_started", "physically_unverified",
         ]
     else:
-        module.execute_claimed_job.assert_not_awaited()
+        module.async_sleep.assert_not_awaited()
+        if fault == "transport":
+            module.execute_claimed_job.assert_awaited_once_with(client, job)
+        else:
+            module.execute_claimed_job.assert_not_awaited()
         if api.claim_top52810_job.await_count:
             assert api.report_top52810_job.call_args.kwargs["status"] == "failed"
     assert manager._active_addresses == set()

@@ -447,6 +447,25 @@ cleanup and no retry, changed timing or relaxed acknowledgement acceptance.
 Deployment and a fresh single-device test are required to capture a new
 response; this cannot recover bytes from the earlier failed session.
 
+## Refresh-settle candidate (2026-09-11)
+
+Job `top52810-0000001b` received the exact refresh-start acknowledgement but
+the operator reported a whole-screen red cast and a faint dog image. Local
+reconstruction matched both the stored render and plan hashes, with 31,485
+white, 5,876 black and 527 red pixels; the red background was not requested.
+The subsequent white job `top52810-0000001c` stopped at session start with
+`30 35`, the stock command-03 busy response identified in the earlier firmware
+analysis. No image data was sent by that white job.
+
+The candidate retains the connection for 20 seconds after a successful
+refresh acknowledgement, matching the earlier Mac sender, before disconnecting.
+This is a fixed observation interval, not proof of panel completion. Errors
+before refresh acceptance still disconnect immediately; busy is explicitly
+reported as a failed single attempt, with no automatic retry or clearing pass.
+Cancellation still releases the connection. No firmware or image encoding
+changes are included. Immediate disconnect remains a hypothesis, not a proven
+cause; deployment and a separately authorized physical test are required.
+
 ## Admission and implementation phases
 
 1. **Architecture:** merge this ownership, identity, capability, transport,

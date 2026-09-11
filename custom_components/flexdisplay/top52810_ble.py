@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+from asyncio import sleep as async_sleep
 import logging
 from datetime import timedelta
 from time import monotonic
@@ -31,6 +32,7 @@ LOGGER = logging.getLogger(__name__)
 MANUFACTURER_ID = 0x1A28
 JOB_CHECK_INTERVAL = timedelta(seconds=5)
 MAX_ADVERTISEMENT_AGE = 10.0
+REFRESH_SETTLE_SECONDS = 20.0
 
 
 class Top52810BleManager:
@@ -156,6 +158,10 @@ class Top52810BleManager:
                     raise Top52810TransportError("notification characteristic is absent")
                 await execute_claimed_job(client, claimed)
                 refresh_ack_received = True
+                # Stock 41 acknowledges refresh start, not panel completion.
+                # Match the bounded hold used by the successful Mac sender.
+                # No writes or retries occur during this wait.
+                await async_sleep(REFRESH_SETTLE_SECONDS)
             finally:
                 try:
                     await client.disconnect()

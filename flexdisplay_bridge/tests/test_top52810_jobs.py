@@ -264,6 +264,21 @@ def test_transport_rejects_tampered_plan_before_first_write() -> None:
     assert client.writes == []
 
 
+def test_session_busy_stops_before_image_data() -> None:
+    job = _transport_job()
+
+    class BusyClient(_Client):
+        async def write_gatt_char(self, uuid, payload, *, response):
+            self.writes.append((uuid, payload, response))
+            self.callback(None, bytearray.fromhex("30 35"))
+
+    client = BusyClient(job)
+    with pytest.raises(TRANSPORT.Top52810TransportError, match="tag busy.*no image data sent; no retry"):
+        asyncio.run(TRANSPORT.execute_claimed_job(client, job))
+    assert len(client.writes) == 1
+    assert client.callback is None
+
+
 @pytest.mark.parametrize("observed", [b"", bytes.fromhex("34 31"), bytes(range(64))])
 def test_unexpected_notification_has_bounded_evidence_and_stops(observed) -> None:
     job = _transport_job()
