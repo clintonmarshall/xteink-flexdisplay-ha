@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.50.14
+
+- Include expected acknowledgement, at most eight received bytes, response
+  length and truncation status in TOP52810 unexpected-notification errors.
+- Preserve immediate failure, notification cleanup and strict acknowledgement
+  checking; no automatic retries, clearing passes or BLE timing changes.
+- Include diagnostics PR #65. This does not fix or establish the cause of
+  partial updates, red tinge or ghosting; a separately approved live capture
+  is required after deployment.
+- Software-only candidate; Android and packaged device firmware are unchanged.
+
 ## 0.50.13
 
 - Add a Home Assistant My media picker to **Send image to display** for one

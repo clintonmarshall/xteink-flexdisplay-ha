@@ -1,5 +1,11 @@
 # Compatibility matrix
 
+Platform 0.50.14 adds bounded TOP52810 unexpected-response diagnostics in the
+HA integration. Older versions retain the generic error without response
+bytes. Service schemas, image conversion, tag admission and BLE protocol
+behaviour are unchanged; components remain version-locked. This is diagnostic
+instrumentation, not a display-refresh fix or physical validation.
+
 Platform 0.50.13: `flexdisplay.send_image` adds a single PNG/JPEG My media
 picker using the Home Assistant Core 2026.9.1 selector and media-source API
 contracts. The picker requires integration 0.50.13; older integrations retain
@@ -55,7 +61,7 @@ belong in inventory or release evidence, never in this table.
 
 | Component | Current known version | Compatibility notes |
 | --- | --- | --- |
-| FlexDisplay platform | 0.50.13 | Bridge, Studio and HA integration are version-locked |
+| FlexDisplay platform | 0.50.14 | Bridge, Studio and HA integration are version-locked |
 | Echo Spot receiver | 0.5.0 | Original 2017 `rook`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Echo Show 5 receiver | 0.5.0 | 2019 `checkers`; LineageOS 18.1 / Android 11; supports push-to-talk Assist, Android fleet controls, and hardware capability telemetry |
 | Android phone companion | 0.5.0-companion (version code 6; release candidate, unpublished) | Android 7.0+; foreground-only room endpoint with local camera and Dock consent; Companion-only signing and publication contract |
