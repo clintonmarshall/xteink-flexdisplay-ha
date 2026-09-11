@@ -21,6 +21,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.event import async_track_time_interval
 
 from .api import FlexDisplayApiClient, FlexDisplayApiError
+from .top52810_timing import MAX_ADVERTISEMENT_AGE
 from .top52810_transport import (
     Top52810TransportError,
     execute_claimed_job,
@@ -31,7 +32,6 @@ from .top52810_transport import (
 LOGGER = logging.getLogger(__name__)
 MANUFACTURER_ID = 0x1A28
 JOB_CHECK_INTERVAL = timedelta(seconds=5)
-MAX_ADVERTISEMENT_AGE = 10.0
 REFRESH_SETTLE_SECONDS = 20.0
 
 
@@ -119,8 +119,8 @@ class Top52810BleManager:
             job = await self._api.pending_top52810_job(address)
             if not job:
                 return
-            # Re-read after the HTTP await: old cached data does not establish
-            # a receive window or justify consuming the job's single attempt.
+            # Recheck the bounded observation age after HTTP. A cached sighting
+            # permits one attempt; it does not prove the tag is still awake.
             service_info = self._recent_info(address)
             if self._stopped or service_info is None:
                 return
@@ -128,6 +128,9 @@ class Top52810BleManager:
             claimed = await self._api.claim_top52810_job(
                 str(job["job_id"]), self._executor_id
             )
+            service_info = self._recent_info(address)
+            if self._stopped or service_info is None:
+                raise Top52810TransportError("observation expired or integration stopped after claim")
             validate_advertisement(claimed, service_info)
             ble_device = bluetooth.async_ble_device_from_address(
                 self._hass, address, connectable=True

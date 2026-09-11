@@ -5,6 +5,7 @@ Never feed these records into generic receiver/firmware entity factories.
 
 from datetime import timedelta
 import logging
+from math import isfinite
 from time import monotonic
 
 from homeassistant.components import bluetooth
@@ -19,6 +20,7 @@ from homeassistant.util.dt import parse_datetime, utcnow
 
 from .api import FlexDisplayApiError
 from .const import DOMAIN
+from .top52810_timing import observation_state
 
 LOGGER = logging.getLogger(__name__)
 ADDRESS = "DF:84:6B:DE:F6:ED"
@@ -57,15 +59,15 @@ class Top52810Coordinator(DataUpdateCoordinator):
         if record is None:
             return {}
         info = bluetooth.async_last_service_info(self.hass, ADDRESS, connectable=True)
-        fresh = False
+        connection = "waiting_for_window"
         if (info is not None and info.address == ADDRESS and info.name == NAME
                 and info.manufacturer_data.get(MANUFACTURER_ID) == bytes.fromhex(MANUFACTURER_PAYLOAD)):
             age = monotonic() - info.time
-            fresh = 0 <= age <= 10
-            if age >= 0 and info.time != self._observation_time:
+            connection = observation_state(age)
+            if isfinite(age) and age >= 0 and info.time != self._observation_time:
                 self._observation_time = info.time
                 self._last_seen = utcnow() - timedelta(seconds=age)
-        record["connection"] = "advertising" if fresh else "waiting_for_window"
+        record["connection"] = connection
         record["last_seen"] = self._last_seen
         return record
 

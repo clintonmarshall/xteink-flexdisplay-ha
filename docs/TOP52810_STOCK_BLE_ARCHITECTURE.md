@@ -188,11 +188,11 @@ unexpected, missing or out-of-order responses, a changed locator, disconnect,
 or insufficient write size fail the attempt without trying a different nearby
 tag.
 
-The stock device normally exposes an unconnected receive window for roughly
-24-30 seconds every 5.5 minutes. The queue should coalesce superseded images so
-only the newest authorized image remains pending. A normal delivery may take
-up to the next receive window plus approximately 6-8 seconds for transfer and
-additional panel settling time.
+The owner reports a five-minute receive window after battery connection
+(2026-09-11). Earlier notes inferred 24-30 seconds every 5.5 minutes; that
+periodic schedule is not established and must not be used as a delivery promise.
+HA observation timestamps do not identify battery connection or firmware boot.
+Transfer and panel settling also take time; queue expiry is a separate limit.
 
 ### Home Assistant device page (Platform 0.50.8)
 
@@ -206,8 +206,10 @@ HA creates **TOP52810 F6ED (experimental)** only for the admitted address
 are scoped to config entry and address, separate from generic receiver and
 firmware entity factories. The page contains:
 
-- Bluetooth window: `advertising` for matching connectable observations less
-  than ten seconds old; otherwise `waiting_for_window`, not offline.
+- Bluetooth window: `advertising` for matching connectable observations up to
+  ten seconds old. The observation-age candidate below adds `recently_seen`
+  for older eligible cached sightings; neither state proves a live connection.
+  Outside the eligibility limit, `waiting_for_window` is not offline.
 - Last seen: last matching observation available to the current HA run.
 - Delivery status: durable job status, including `physically_unverified`.
 - Last refresh acknowledgement: latest acknowledged refresh across jobs,
@@ -232,22 +234,45 @@ the [Bluetooth API documentation](https://developers.home-assistant.io/docs/core
 The HA manager therefore checks its connectable discovery cache every five
 seconds as well as handling discovery callbacks. It reads the latest observation
 for each matching manufacturer, and only checks pending jobs when that
-observation is at most ten seconds old. It checks freshness again after the
-pending-job HTTP request, before claiming the job. This uses HA's existing
+observation is within the eligibility limit (ten seconds in released 0.50.15;
+five minutes in the candidate below). It rechecks after the pending-job HTTP
+request and, in the candidate, again after claim before connecting. This uses HA's existing
 scanners; it neither clears shared advertisement history nor starts a scanner.
 
 Timer and discovery events share the same per-address in-flight guard. The
 Bridge's atomic claim, expiry, exact identity and plan validation, GATT and MTU
 checks, and single connection attempt remain unchanged. Unloading unregisters
 the timer and callback and prevents unclaimed work from starting; an already
-claimed transfer is allowed to finish. Simulated tests cover late queueing
+connected transfer is allowed to finish. Simulated tests cover late queueing
 without another callback, overlapping triggers, stale/missing observations,
 expiry, claim rejection and unload. These are not physical delivery evidence.
 
-The fixed three-minute canary job can expire before the next approximately
-5.5-minute receive window. An expired job with zero attempts is not proof that
+The fixed three-minute canary job can expire independently of the reported
+five-minute power-on window. An expired job with zero attempts is not proof that
 the radio or firmware failed. This change does not extend an authorized job's
 expiry or automatically requeue it.
+
+### Observation-age candidate (2026-09-11, not deployed)
+
+The exact F6ED tag was visible through Blue BT Proxy at about -42 dBm with
+cached observation ages of 37-43 seconds, while queued jobs expired with zero
+attempts. The ten-second filter can reject those sightings; this is evidence
+of an eligibility mismatch, not proof of the sole cause of failed delivery.
+
+The candidate permits one existing authorized job attempt from a matching HA
+connectable-cache observation aged 0-300 seconds. Older eligible observations
+are labelled `recently_seen`, not `advertising`. Last seen retains the original
+observation timestamp, including across repeated polls. Future, non-finite,
+missing and over-limit observations are ineligible. Age and identity are
+checked again after both HTTP awaits; expiration or unload after claim reports
+failure without opening BLE or retrying.
+
+This is a bounded cache-age heuristic, **not** a measured five-minute countdown
+from battery connection: a sighting late in the real window can remain eligible
+after the tag sleeps and consume the job's single attempt. It does not change
+stock firmware, wake the tag, add retries, extend job expiry, or prove a clean
+physical refresh. Deployment and a separately authorized power-on canary test
+remain required. Other API/proxy failures remain possible contributors.
 
 Use these externally visible states:
 

@@ -51,7 +51,7 @@ def manager_module(monkeypatch):
     }.items():
         monkeypatch.setitem(sys.modules, name, module)
     # Load both modules explicitly so monkeypatch also cleans up the relative import.
-    for filename in ("top52810_transport", "top52810_ble"):
+    for filename in ("top52810_timing", "top52810_transport", "top52810_ble"):
         name = f"{package.__name__}.{filename}"
         spec = importlib.util.spec_from_file_location(name, root / f"{filename}.py")
         module = importlib.util.module_from_spec(spec)
@@ -178,7 +178,7 @@ def test_no_uuid_advertisement_preserves_prewrite_guards(manager_module, fault):
     assert manager._active_addresses == set()
 
 
-@pytest.mark.parametrize("fault", [None, "stale", "missing", "future", "stopped", "expired", "failed_claim"])
+@pytest.mark.parametrize("fault", [None, "cached", "boundary", "stale", "missing", "future", "nan", "stopped", "expired", "failed_claim", "expired_after_claim", "stopped_after_claim"])
 def test_job_queued_after_discovery_without_new_callback(manager_module, fault):
     """HA suppresses duplicate callbacks; its latest observation still updates."""
     module = manager_module
@@ -217,7 +217,13 @@ def test_job_queued_after_discovery_without_new_callback(manager_module, fault):
         tasks.clear()
         api.pending_top52810_job.return_value = None if fault == "expired" else job
         if fault == "stale":
-            info.time = 89.0
+            info.time = -201.0
+        elif fault == "cached":
+            info.time = 57.0
+        elif fault == "boundary":
+            info.time = -200.0
+        elif fault == "nan":
+            info.time = float("nan")
         elif fault == "future":
             info.time = 101.0
         elif fault == "missing":
@@ -226,12 +232,20 @@ def test_job_queued_after_discovery_without_new_callback(manager_module, fault):
             manager.stop()
         elif fault == "failed_claim":
             api.claim_top52810_job.side_effect = RuntimeError("already claimed or expired")
+        elif fault in {"expired_after_claim", "stopped_after_claim"}:
+            async def claim(*args):
+                if fault == "stopped_after_claim":
+                    manager.stop()
+                else:
+                    module.monotonic.return_value = 401.0
+                return job
+            api.claim_top52810_job.side_effect = claim
         # Timer checks without any new Bluetooth callback; overlap coalesces.
         manager._check_known_tags(None)
         manager._check_known_tags(None)
         manager._advertisement(info, None)
         await asyncio.gather(*tasks)
-        if fault is None:
+        if fault in {None, "cached", "boundary"}:
             module.execute_claimed_job.assert_awaited_once_with(client, job)
             api.claim_top52810_job.assert_awaited_once()
             # Terminal jobs disappear from the pending endpoint. No retry.
@@ -242,7 +256,10 @@ def test_job_queued_after_discovery_without_new_callback(manager_module, fault):
         else:
             module.establish_connection.assert_not_awaited()
             module.execute_claimed_job.assert_not_awaited()
-            if fault != "failed_claim":
+            if fault in {"expired_after_claim", "stopped_after_claim"}:
+                api.claim_top52810_job.assert_awaited_once()
+                assert api.report_top52810_job.call_args.kwargs["status"] == "failed"
+            elif fault != "failed_claim":
                 api.claim_top52810_job.assert_not_awaited()
         manager.stop()
         assert not manager._active_addresses
@@ -261,7 +278,7 @@ def test_window_stales_or_unloads_while_pending_request_in_flight(manager_module
         if stop:
             manager.stop()
         else:
-            info.time = 80.0
+            info.time = -201.0
         return {"job_id": "top52810-00000002"}
 
     api.pending_top52810_job.side_effect = pending

@@ -59,7 +59,7 @@ def module(monkeypatch):
         mod = ModuleType(name)
         mod.__dict__.update(attrs)
         monkeypatch.setitem(sys.modules, name, mod)
-    for filename in ("api", "top52810_entity"):
+    for filename in ("api", "top52810_timing", "top52810_entity"):
         name = f"stock_entity_test.{filename}"
         spec = importlib.util.spec_from_file_location(name, root / f"{filename}.py")
         mod = importlib.util.module_from_spec(spec)
@@ -89,6 +89,10 @@ def test_identity_sleep_freshness_and_api_failure(module):
         assert sensor.native_value == "advertising"
         seen = coordinator.data["last_seen"]
         module.monotonic.return_value = 120
+        coordinator.data = await coordinator._async_update_data()
+        assert sensor.native_value == "recently_seen"
+        assert coordinator.data["last_seen"] == seen
+        module.monotonic.return_value = 396
         coordinator.data = await coordinator._async_update_data()
         assert sensor.native_value == "waiting_for_window"
         assert coordinator.data["last_seen"] == seen
@@ -151,7 +155,7 @@ def test_api_preview_hash_and_duplicate_guards(module):
     asyncio.run(run())
 
 
-@pytest.mark.parametrize("fault", ["address", "name", "payload", "future"])
+@pytest.mark.parametrize("fault", ["address", "name", "payload", "future", "nan", "infinite"])
 def test_untrusted_advertisement_does_not_report_online(module, fault):
     async def run():
         api = SimpleNamespace(top52810_devices=AsyncMock(return_value=[record(module)]))
@@ -162,6 +166,10 @@ def test_untrusted_advertisement_does_not_report_online(module, fault):
             info.manufacturer_data = {}
         elif fault == "future":
             info.time = 101
+        elif fault == "nan":
+            info.time = float("nan")
+        elif fault == "infinite":
+            info.time = -float("inf")
         else:
             setattr(info, fault, "wrong")
         module.bluetooth.async_last_service_info.return_value = info
@@ -169,3 +177,19 @@ def test_untrusted_advertisement_does_not_report_online(module, fault):
         assert data["connection"] == "waiting_for_window"
         assert data["last_seen"] is None
     asyncio.run(run())
+
+
+@pytest.mark.parametrize("age,expected", [
+    (0, "advertising"), (10, "advertising"), (10.1, "recently_seen"),
+    (43, "recently_seen"), (300, "recently_seen"),
+    (300.1, "waiting_for_window"), (-1, "waiting_for_window"),
+])
+def test_observation_age_boundaries(module, age, expected):
+    api = SimpleNamespace(top52810_devices=AsyncMock(return_value=[record(module)]))
+    coordinator = module.Top52810Coordinator(object(), api, "entry")
+    module.bluetooth.async_last_service_info.return_value = SimpleNamespace(
+        address=module.ADDRESS, name=module.NAME, time=100-age,
+        manufacturer_data={module.MANUFACTURER_ID: bytes.fromhex(module.MANUFACTURER_PAYLOAD)},
+    )
+    data = asyncio.run(coordinator._async_update_data())
+    assert data["connection"] == expected
