@@ -35,12 +35,12 @@ Android installation, firmware rollout, device check-in, or physical render.
 
 | Artifact | Version | Bytes | SHA-256 | Provenance |
 | --- | --- | ---: | --- | --- |
-| X3/X4 packaged firmware | `1.5.0-flexdisplay.0.39.0` | 5976336 | `eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7` | `partial` |
+| X3/X4 packaged firmware | `1.5.0-flexdisplay.0.39.0` | 5976336 | `eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7` | `verified` |
 | Note 4 packaged firmware | `1.2.2-voice-remote` | 2730112 | `1619c9788c050038d28e0f927b19d830ce7de18694ae1b407a639bcbd013ef18` | `partial` |
 
 ### Known provenance gaps
 
-- **X3/X4 packaged firmware:** artifact-to-source build record; durable recovery artifact reference; durable recovery artifact SHA-256; USB canary evidence reference.
+- **X3/X4 packaged firmware:** fully verified in this manifest.
 - **Note 4 packaged firmware:** source revision; artifact-to-source build record; durable recovery artifact reference; durable recovery artifact SHA-256; USB canary evidence reference.
 
 A `partial` record preserves the exact packaged bytes but is not sufficient

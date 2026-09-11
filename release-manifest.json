@@ -50,18 +50,13 @@
       "size": 5976336,
       "sha256": "eb9a788cdbbcd16a1c51cf19d1a42894a0975bf387976bd2a1c8d8c604820dd7",
       "provenance": {
-        "status": "partial",
+        "status": "verified",
         "source_repository": "clintonmarshall/xteink-flexdisplay",
         "source_revision": "25545971633bc5dfbe5d5699c6bf44283c9ab3b9",
-        "recovery_artifact_reference": null,
-        "recovery_artifact_sha256": null,
-        "usb_canary_evidence_reference": null,
-        "unverified_fields": [
-          "artifact-to-source build record",
-          "durable recovery artifact reference",
-          "durable recovery artifact SHA-256",
-          "USB canary evidence reference"
-        ]
+        "recovery_artifact_reference": "owner-recovery://FlexDisplay/Recovery/X3-X4-v0.39.0-2554597/X3-5DB308-pre-v0.39.0-ota-full-16MB.bin",
+        "recovery_artifact_sha256": "fd0ccff56e6c54da47f63ad5280849903346565590c4f461346eb857a0f8c0d1",
+        "usb_canary_evidence_reference": "docs/X3_X4_FIRMWARE_0.39.0_PROVENANCE.md#usb-powered-canary",
+        "unverified_fields": []
       }
     },
     {
